@@ -87,8 +87,8 @@ guarded by an API-key env check, and each is compiled by CI.
 
 All supported providers, by capability:
 
-| Capability | OpenAI | Anthropic | Google | Groq | xAI | DeepSeek | Together | Fireworks | Cerebras | Perplexity¹ | Mistral² | Cohere |
-|---|---|---|---|---|---|---|---|---|---|---|---|
+| Capability | OpenAI | Anthropic | Google | Groq | xAI | DeepSeek³ | Together | Fireworks | Cerebras | Perplexity¹ | Mistral² | Cohere |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | `GenerateText` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `StreamText` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Tool calling | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ |
@@ -100,6 +100,7 @@ All supported providers, by capability:
 - "Tool-mode" (Anthropic) uses an automatically injected, forced tool call — the same `GenerateObject[T]` call works identically either way.
 - ¹ Perplexity: no tool-calling support in the live API; `Tools` in a `Call` are serialized but may be rejected or ignored.
 - ² Mistral: `GenerateObject` uses `json_object` mode only; schema is not sent on the wire but enforced by the core-side decode step.
+- ³ DeepSeek: `GenerateObject` uses `json_object` mode only (DeepSeek rejects `json_schema`); schema is not sent on the wire but enforced by the core-side decode step.
 
 ## Provider roadmap
 
