@@ -232,6 +232,8 @@ func convertMessages(msgs []provider.Message) ([]wireMessage, error) {
 							Arguments: args,
 						},
 					})
+				default:
+					return nil, fmt.Errorf("mistral: unsupported content part %T in assistant message", part)
 				}
 			}
 			if haveText {

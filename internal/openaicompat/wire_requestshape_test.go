@@ -56,6 +56,29 @@ func TestRequestShapeToolMessageFilePartErrors(t *testing.T) {
 	}
 }
 
+func TestRequestShapeAssistantMessageFilePartErrors(t *testing.T) {
+	model, _ := newTestLanguageModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			provider.UserText("simple"),
+			{
+				Role: provider.RoleAssistant,
+				Content: []provider.ContentPart{provider.FilePart{
+					Data:      []byte("data"),
+					MediaType: "application/pdf",
+				}},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("Generate: want error for FilePart in assistant message, got nil")
+	}
+	if !strings.Contains(err.Error(), "FilePart") {
+		t.Errorf("error = %q, want it to mention FilePart", err.Error())
+	}
+}
+
 func TestRequestShapeTools(t *testing.T) {
 	model, srv := newTestLanguageModel(t)
 

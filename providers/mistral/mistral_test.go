@@ -377,6 +377,30 @@ func TestRequestShapeToolMessageFilePartErrors(t *testing.T) {
 	}
 }
 
+func TestRequestShapeAssistantMessageFilePartErrors(t *testing.T) {
+	srv, _ := newFixtureServer(t)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("mistral-test")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			provider.UserText("simple"),
+			{
+				Role: provider.RoleAssistant,
+				Content: []provider.ContentPart{provider.FilePart{
+					Data:      []byte("data"),
+					MediaType: "application/pdf",
+				}},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("Generate: want error for FilePart in assistant message, got nil")
+	}
+	if !strings.Contains(err.Error(), "FilePart") {
+		t.Errorf("error = %q, want it to mention FilePart", err.Error())
+	}
+}
+
 func TestRequestShapeToolResultOneMessagePerPart(t *testing.T) {
 	srv, fs := newFixtureServer(t)
 	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("mistral-test")
