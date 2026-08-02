@@ -8,18 +8,23 @@ import (
 
 // GenerateTextOpts configures a GenerateText call.
 type GenerateTextOpts struct {
-	Model           provider.LanguageModel // required
-	System          string                 // optional; prepended as system message
-	Prompt          string                 // exactly one of Prompt/Messages
-	Messages        []provider.Message
-	Tools           []Tool
-	ToolChoice      *provider.ToolChoice
-	MaxSteps        int  // default 1
-	MaxRetries      *int // default 2
-	MaxTokens       *int
-	Temperature     *float64
-	TopP            *float64
-	StopSequences   []string
+	Model         provider.LanguageModel // required
+	System        string                 // optional; prepended as system message
+	Prompt        string                 // exactly one of Prompt/Messages
+	Messages      []provider.Message
+	Tools         []Tool
+	ToolChoice    *provider.ToolChoice
+	MaxSteps      int  // default 1
+	MaxRetries    *int // default 2
+	MaxTokens     *int
+	Temperature   *float64
+	TopP          *float64
+	StopSequences []string
+
+	// ProviderOptions is reserved for provider-specific escape-hatch
+	// parameters. It is threaded through to provider.Call.ProviderOptions,
+	// but as of v0.1 none of the built-in providers (OpenAI, Anthropic,
+	// Google) read it — setting it is currently a silent no-op.
 	ProviderOptions map[string]any
 }
 

@@ -12,6 +12,9 @@ generics) rather than mirrored line-for-line.
 expect rough edges, and expect the API to move before a 1.0. See the
 [design spec](docs/superpowers/specs/2026-08-02-go-ai-sdk-design.md) for
 the full rationale and roadmap.
+`GenerateTextOpts.ProviderOptions` / `provider.Call.ProviderOptions` exist
+as a reserved escape hatch but are not yet read by any built-in provider
+in v0.1 — setting them is currently a silent no-op.
 
 ## Install
 
