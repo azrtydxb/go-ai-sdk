@@ -11,6 +11,7 @@ package openaicompat
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/openaicompat/compattest"
@@ -150,5 +151,114 @@ func TestRequestShapeUnsupportedResponseFormatType(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("Generate: want error for unsupported ResponseFormat.Type, got nil")
+	}
+}
+
+// TestRequestShapeMaxTokensParam asserts that Config.MaxTokensParam selects
+// the wire field name used to send call.MaxTokens: empty defaults to
+// "max_completion_tokens" (OpenAI's current name), while providers that
+// still document "max_tokens" (Perplexity, Fireworks, Together, DeepSeek)
+// set it explicitly.
+func TestRequestShapeMaxTokensParam(t *testing.T) {
+	cases := []struct {
+		name           string
+		maxTokensParam string
+		wantField      string
+	}{
+		{"default (unset)", "", "max_completion_tokens"},
+		{"explicit max_completion_tokens", "max_completion_tokens", "max_completion_tokens"},
+		{"explicit max_tokens", "max_tokens", "max_tokens"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := compattest.NewFixtureServer(t, "test")
+			defer srv.Close()
+			model := NewLanguageModel(Config{
+				Name:           "test",
+				APIKey:         "k",
+				BaseURL:        srv.URL,
+				MaxTokensParam: tc.maxTokensParam,
+			}, "test-model")
+
+			maxTokens := 7
+			_, err := model.Generate(context.Background(), provider.Call{
+				Messages:  []provider.Message{provider.UserText("simple")},
+				MaxTokens: &maxTokens,
+			})
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+
+			var raw map[string]json.RawMessage
+			if err := json.Unmarshal(lastRawBody(srv), &raw); err != nil {
+				t.Fatalf("decode raw request: %v", err)
+			}
+
+			got, ok := raw[tc.wantField]
+			if !ok {
+				t.Fatalf("request missing %q field: %s", tc.wantField, lastRawBody(srv))
+			}
+			var n int
+			if err := json.Unmarshal(got, &n); err != nil || n != 7 {
+				t.Errorf("%s = %s, want 7", tc.wantField, got)
+			}
+
+			// The non-selected field name must not appear at all.
+			otherField := "max_tokens"
+			if tc.wantField == "max_tokens" {
+				otherField = "max_completion_tokens"
+			}
+			if _, ok := raw[otherField]; ok {
+				t.Errorf("request unexpectedly contains %q: %s", otherField, lastRawBody(srv))
+			}
+		})
+	}
+}
+
+// TestRequestShapeJSONObjectOnly asserts that Config.JSONObjectOnly forces
+// response_format to {"type":"json_object"} even when a Schema is supplied,
+// dropping json_schema/schema entirely (DeepSeek rejects json_schema).
+func TestRequestShapeJSONObjectOnly(t *testing.T) {
+	srv := compattest.NewFixtureServer(t, "test")
+	defer srv.Close()
+	model := NewLanguageModel(Config{
+		Name:           "test",
+		APIKey:         "k",
+		BaseURL:        srv.URL,
+		JSONObjectOnly: true,
+	}, "test-model")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{provider.UserText("simple")},
+		ResponseFormat: &provider.ResponseFormat{
+			Type:   "json",
+			Name:   "weather_schema",
+			Schema: json.RawMessage(`{"type":"object"}`),
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(lastRawBody(srv), &raw); err != nil {
+		t.Fatalf("decode raw request: %v", err)
+	}
+
+	rfRaw, ok := raw["response_format"]
+	if !ok {
+		t.Fatalf("request missing response_format field: %s", lastRawBody(srv))
+	}
+	if strings.Contains(string(rfRaw), "json_schema") || strings.Contains(string(rfRaw), "schema") {
+		t.Errorf("response_format = %s, want no json_schema/schema keys", rfRaw)
+	}
+
+	var rf map[string]string
+	if err := json.Unmarshal(rfRaw, &rf); err != nil {
+		t.Fatalf("decode response_format: %v", err)
+	}
+	if rf["type"] != "json_object" {
+		t.Errorf("response_format.type = %q, want json_object", rf["type"])
 	}
 }

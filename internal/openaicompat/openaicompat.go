@@ -14,6 +14,20 @@ type Config struct {
 	HTTPClient *http.Client // nil -> http.DefaultClient
 	NativeJSON bool         // Capabilities().NativeJSON
 	EmbedBatch int          // EmbeddingModel.MaxBatchSize(); callers only construct embedding models when > 0
+
+	// MaxTokensParam is the wire field name used to send provider.Call's
+	// MaxTokens. Empty defaults to "max_completion_tokens" (OpenAI's current
+	// field name). Some OpenAI-compatible servers (Perplexity, Fireworks,
+	// Together, DeepSeek) still document the older "max_tokens" name and
+	// silently ignore "max_completion_tokens", so those presets set this to
+	// "max_tokens".
+	MaxTokensParam string
+
+	// JSONObjectOnly restricts ResponseFormat{Type:"json"} to the wire's
+	// {"type":"json_object"} shape, dropping any Schema even when one is
+	// provided. Set this for providers whose response_format only accepts
+	// json_object (not json_schema) — e.g. DeepSeek.
+	JSONObjectOnly bool
 }
 
 // client returns the configured *http.Client, falling back to

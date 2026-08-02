@@ -73,18 +73,55 @@ type streamOptions struct {
 	IncludeUsage bool `json:"include_usage"`
 }
 
+// defaultMaxTokensParam is the wire field name used to send MaxTokens when
+// Config.MaxTokensParam is unset — OpenAI's current field name.
+const defaultMaxTokensParam = "max_completion_tokens"
+
 type chatRequest struct {
-	Model               string         `json:"model"`
-	Messages            []wireMessage  `json:"messages"`
-	Tools               []wireTool     `json:"tools,omitempty"`
-	ToolChoice          any            `json:"tool_choice,omitempty"`
-	ResponseFormat      any            `json:"response_format,omitempty"`
-	MaxCompletionTokens *int           `json:"max_completion_tokens,omitempty"`
-	Temperature         *float64       `json:"temperature,omitempty"`
-	TopP                *float64       `json:"top_p,omitempty"`
-	Stop                []string       `json:"stop,omitempty"`
-	Stream              bool           `json:"stream,omitempty"`
-	StreamOptions       *streamOptions `json:"stream_options,omitempty"`
+	Model          string        `json:"model"`
+	Messages       []wireMessage `json:"messages"`
+	Tools          []wireTool    `json:"tools,omitempty"`
+	ToolChoice     any           `json:"tool_choice,omitempty"`
+	ResponseFormat any           `json:"response_format,omitempty"`
+	// MaxTokens is marshaled by MarshalJSON below under maxTokensParam (or
+	// defaultMaxTokensParam if unset), not under a static json tag — the
+	// wire field name varies per provider (see Config.MaxTokensParam).
+	MaxTokens      *int `json:"-"`
+	maxTokensParam string
+	Temperature    *float64       `json:"temperature,omitempty"`
+	TopP           *float64       `json:"top_p,omitempty"`
+	Stop           []string       `json:"stop,omitempty"`
+	Stream         bool           `json:"stream,omitempty"`
+	StreamOptions  *streamOptions `json:"stream_options,omitempty"`
+}
+
+// MarshalJSON marshals chatRequest normally, then adds the max-tokens value
+// (if any) under the provider-specific field name in r.maxTokensParam
+// (falling back to defaultMaxTokensParam when empty).
+func (r chatRequest) MarshalJSON() ([]byte, error) {
+	type alias chatRequest
+	b, err := json.Marshal(alias(r))
+	if err != nil {
+		return nil, err
+	}
+	if r.MaxTokens == nil {
+		return b, nil
+	}
+
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil, err
+	}
+	paramName := r.maxTokensParam
+	if paramName == "" {
+		paramName = defaultMaxTokensParam
+	}
+	mt, err := json.Marshal(*r.MaxTokens)
+	if err != nil {
+		return nil, err
+	}
+	m[paramName] = mt
+	return json.Marshal(m)
 }
 
 // ---- Response wire types (non-streaming) ----
@@ -154,22 +191,20 @@ func errorMessage(body []byte) string {
 
 // ---- Request building ----
 
-func buildChatRequest(modelID string, call provider.Call, stream bool) (chatRequest, error) {
+func buildChatRequest(cfg Config, modelID string, call provider.Call, stream bool) (chatRequest, error) {
 	messages, err := convertMessages(call.Messages)
 	if err != nil {
 		return chatRequest{}, err
 	}
 
 	req := chatRequest{
-		Model:       modelID,
-		Messages:    messages,
-		Temperature: call.Temperature,
-		TopP:        call.TopP,
-		Stop:        call.StopSequences,
-	}
-
-	if call.MaxTokens != nil {
-		req.MaxCompletionTokens = call.MaxTokens
+		Model:          modelID,
+		Messages:       messages,
+		Temperature:    call.Temperature,
+		TopP:           call.TopP,
+		Stop:           call.StopSequences,
+		MaxTokens:      call.MaxTokens,
+		maxTokensParam: cfg.MaxTokensParam,
 	}
 
 	if len(call.Tools) > 0 {
@@ -181,7 +216,7 @@ func buildChatRequest(modelID string, call provider.Call, stream bool) (chatRequ
 	}
 
 	if call.ResponseFormat != nil {
-		rf, err := convertResponseFormat(*call.ResponseFormat)
+		rf, err := convertResponseFormat(*call.ResponseFormat, cfg.JSONObjectOnly)
 		if err != nil {
 			return chatRequest{}, err
 		}
@@ -352,10 +387,15 @@ func convertToolChoice(tc provider.ToolChoice) any {
 	}
 }
 
-func convertResponseFormat(rf provider.ResponseFormat) (any, error) {
+// convertResponseFormat maps provider.ResponseFormat onto the wire's
+// response_format field. When jsonObjectOnly is true (e.g. DeepSeek, which
+// rejects json_schema), it always sends {"type":"json_object"} and drops
+// any Schema — schema conformance for those providers is enforced by the ai
+// core's decode step, not by the wire request.
+func convertResponseFormat(rf provider.ResponseFormat, jsonObjectOnly bool) (any, error) {
 	switch rf.Type {
 	case "json":
-		if len(rf.Schema) > 0 {
+		if len(rf.Schema) > 0 && !jsonObjectOnly {
 			return wireJSONSchemaFormat{
 				Type: "json_schema",
 				JSONSchema: &wireJSONSchema{

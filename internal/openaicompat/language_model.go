@@ -55,7 +55,7 @@ func apiError(resp *http.Response, body []byte) error {
 }
 
 func (m *languageModel) Generate(ctx context.Context, call provider.Call) (*provider.Response, error) {
-	req, err := buildChatRequest(m.modelID, call, false)
+	req, err := buildChatRequest(m.cfg, m.modelID, call, false)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +84,7 @@ func (m *languageModel) Generate(ctx context.Context, call provider.Call) (*prov
 }
 
 func (m *languageModel) Stream(ctx context.Context, call provider.Call) (provider.StreamResponse, error) {
-	req, err := buildChatRequest(m.modelID, call, true)
+	req, err := buildChatRequest(m.cfg, m.modelID, call, true)
 	if err != nil {
 		return nil, err
 	}

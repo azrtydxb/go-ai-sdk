@@ -54,6 +54,32 @@ func TestAuthHeaderAndModelSent(t *testing.T) {
 	}
 }
 
+func TestMaxTokensUsesMaxTokensField(t *testing.T) {
+	srv := compattest.NewFixtureServer(t, "fireworks")
+	defer srv.Close()
+	m := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("test-model")
+
+	maxTokens := 42
+	if _, err := m.Generate(t.Context(), provider.Call{
+		Messages:  []provider.Message{provider.UserText("simple")},
+		MaxTokens: &maxTokens,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(srv.Requests()[0], &raw); err != nil {
+		t.Fatalf("decode raw request: %v", err)
+	}
+	var n int
+	if err := json.Unmarshal(raw["max_tokens"], &n); err != nil || n != 42 {
+		t.Errorf("max_tokens = %s, want 42", raw["max_tokens"])
+	}
+	if _, ok := raw["max_completion_tokens"]; ok {
+		t.Errorf("request unexpectedly contains max_completion_tokens: %s", srv.Requests()[0])
+	}
+}
+
 func TestEmbeddings(t *testing.T) {
 	srv := compattest.NewFixtureServer(t, "fireworks")
 	defer srv.Close()
