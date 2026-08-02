@@ -48,6 +48,8 @@ func StreamText(ctx context.Context, opts GenerateTextOpts) (*TextStream, error)
 	maxSteps := 1
 	if opts.MaxSteps > 0 {
 		maxSteps = opts.MaxSteps
+	} else if opts.StopWhen != nil {
+		maxSteps = defaultMaxStepsWithStopWhen
 	}
 
 	messages := append([]provider.Message(nil), call.Messages...)
@@ -60,7 +62,14 @@ func StreamText(ctx context.Context, opts GenerateTextOpts) (*TextStream, error)
 		messages:   messages,
 	}
 
-	stream, err := startStream(ctx, opts.Model, call, messages, maxRetries)
+	call.Messages = messages
+	if opts.PrepareStep != nil {
+		if modified, ok := opts.PrepareStep(0, call); ok {
+			call = modified
+		}
+	}
+
+	stream, err := startStream(ctx, opts.Model, call, call.Messages, maxRetries)
 	if err != nil {
 		return nil, err
 	}
@@ -253,7 +262,19 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 
 			s.steps = append(s.steps, step)
 
-			if !hasToolCalls || len(s.steps) >= s.maxSteps {
+			if s.opts.OnStepFinish != nil {
+				s.opts.OnStepFinish(step)
+			}
+
+			if !hasToolCalls {
+				s.current = nil
+				return
+			}
+			if len(s.steps) >= s.maxSteps {
+				s.current = nil
+				return
+			}
+			if s.opts.StopWhen != nil && s.opts.StopWhen(s.steps) {
 				s.current = nil
 				return
 			}
@@ -264,7 +285,13 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 				s.current = nil
 				return
 			}
-			next, err := startStream(s.ctx, s.opts.Model, call, s.messages, s.maxRetries)
+			call.Messages = s.messages
+			if s.opts.PrepareStep != nil {
+				if modified, ok := s.opts.PrepareStep(len(s.steps), call); ok {
+					call = modified
+				}
+			}
+			next, err := startStream(s.ctx, s.opts.Model, call, call.Messages, s.maxRetries)
 			if err != nil {
 				s.err = err
 				s.current = nil

@@ -249,6 +249,52 @@ func TestStreamTextToolLoop(t *testing.T) {
 	}
 }
 
+func TestStreamTextOnStepFinishInvokedOncePerStep(t *testing.T) {
+	m := &aitest.MockModel{Streams: [][]provider.StreamPart{
+		{
+			provider.ToolCallDelta{ID: "c1", Name: "t", ArgsDelta: `{"city":`},
+			provider.ToolCallDelta{ID: "c1", ArgsDelta: `"Ghent"}`},
+			provider.ToolCallEnd{Call: provider.ToolCallPart{ID: "c1", Name: "t", Args: []byte(`{"city":"Ghent"}`)}},
+			provider.FinishPart{Reason: provider.FinishToolCalls},
+		},
+		{
+			provider.TextDelta{Text: "sunny"},
+			provider.FinishPart{Reason: provider.FinishStop, Usage: provider.Usage{TotalTokens: 3}},
+		},
+	}}
+	tool := NewTool("t", "", func(_ context.Context, a weatherArgs) (any, error) { return "sunny", nil })
+	var finished []Step
+	s, err := StreamText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "x", Tools: []Tool{tool}, MaxSteps: 2,
+		OnStepFinish: func(step Step) {
+			finished = append(finished, step)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+	}
+	if s.Err() != nil {
+		t.Fatal(s.Err())
+	}
+	if len(finished) != 2 {
+		t.Fatalf("OnStepFinish calls = %d, want 2 (one per step, incl. final)", len(finished))
+	}
+	if finished[0].ToolCalls[0].Name != "t" {
+		t.Fatalf("step 0 ToolCalls = %+v", finished[0].ToolCalls)
+	}
+	if finished[1].Text != "sunny" {
+		t.Fatalf("step 1 (final) Text = %q, want %q", finished[1].Text, "sunny")
+	}
+	if finished[1].FinishReason != provider.FinishStop {
+		t.Fatalf("step 1 FinishReason = %v", finished[1].FinishReason)
+	}
+	if len(finished) != len(s.Steps()) {
+		t.Fatalf("OnStepFinish count %d != len(Steps()) %d", len(finished), len(s.Steps()))
+	}
+}
+
 func TestStreamTextEarlyBreakCloses(t *testing.T) {
 	m := &aitest.MockModel{Streams: [][]provider.StreamPart{{
 		provider.TextDelta{Text: "a"}, provider.TextDelta{Text: "b"},

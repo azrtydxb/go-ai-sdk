@@ -12,6 +12,10 @@ import (
 // defaultMaxRetries is used when GenerateTextOpts.MaxRetries is nil.
 const defaultMaxRetries = 2
 
+// defaultMaxStepsWithStopWhen is the hard cap on steps used when MaxSteps is
+// unset (0) but StopWhen is set. See GenerateTextOpts.MaxSteps.
+const defaultMaxStepsWithStopWhen = 16
+
 // ToolCallRecord records a tool call made by the model during a step.
 type ToolCallRecord struct {
 	ID   string
@@ -74,6 +78,8 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 	maxSteps := 1
 	if opts.MaxSteps > 0 {
 		maxSteps = opts.MaxSteps
+	} else if opts.StopWhen != nil {
+		maxSteps = defaultMaxStepsWithStopWhen
 	}
 
 	messages := append([]provider.Message(nil), call.Messages...)
@@ -82,10 +88,17 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 	var totalUsage provider.Usage
 
 	for {
-		call.Messages = messages
+		stepIndex := len(steps)
+		stepCall := call
+		stepCall.Messages = messages
+		if opts.PrepareStep != nil {
+			if modified, ok := opts.PrepareStep(stepIndex, stepCall); ok {
+				stepCall = modified
+			}
+		}
 
 		resp, err := retry.Do(ctx, maxRetries, func() (*provider.Response, error) {
-			return opts.Model.Generate(ctx, call)
+			return opts.Model.Generate(ctx, stepCall)
 		})
 		if err != nil {
 			var exhausted *retry.ExhaustedError
@@ -128,7 +141,17 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 
 		steps = append(steps, step)
 
-		if !hasToolCalls || len(steps) >= maxSteps {
+		if opts.OnStepFinish != nil {
+			opts.OnStepFinish(step)
+		}
+
+		if !hasToolCalls {
+			break
+		}
+		if len(steps) >= maxSteps {
+			break
+		}
+		if opts.StopWhen != nil && opts.StopWhen(steps) {
 			break
 		}
 	}
