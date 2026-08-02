@@ -1,12 +1,114 @@
 package ai
 
 import (
+	"context"
 	"errors"
+	"iter"
 	"testing"
 
 	"github.com/azrtydxb/go-ai-sdk/ai/aitest"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
+
+// closeRecordingObjModel wraps a provider.LanguageModel, returning
+// StreamResponses whose Close() calls are counted, so tests can assert a
+// stream's underlying connection was actually released.
+type closeRecordingObjModel struct {
+	inner       provider.LanguageModel
+	closeCounts []*int
+}
+
+func (m *closeRecordingObjModel) ModelID() string                     { return m.inner.ModelID() }
+func (m *closeRecordingObjModel) ProviderName() string                { return m.inner.ProviderName() }
+func (m *closeRecordingObjModel) Capabilities() provider.Capabilities { return m.inner.Capabilities() }
+func (m *closeRecordingObjModel) Generate(ctx context.Context, call provider.Call) (*provider.Response, error) {
+	return m.inner.Generate(ctx, call)
+}
+
+func (m *closeRecordingObjModel) Stream(ctx context.Context, call provider.Call) (provider.StreamResponse, error) {
+	inner, err := m.inner.Stream(ctx, call)
+	if err != nil {
+		return nil, err
+	}
+	count := new(int)
+	m.closeCounts = append(m.closeCounts, count)
+	return &closeRecordingObjStream{inner: inner, count: count}, nil
+}
+
+type closeRecordingObjStream struct {
+	inner provider.StreamResponse
+	count *int
+}
+
+func (s *closeRecordingObjStream) Parts() iter.Seq[provider.StreamPart] { return s.inner.Parts() }
+func (s *closeRecordingObjStream) Err() error                           { return s.inner.Err() }
+func (s *closeRecordingObjStream) Close() error {
+	*s.count++
+	return s.inner.Close()
+}
+
+// TestObjectStreamCloseNeverIterated verifies that calling Close() on an
+// ObjectStream whose Partials() was never ranged over still releases the
+// underlying provider.StreamResponse.
+func TestObjectStreamCloseNeverIterated(t *testing.T) {
+	m := &aitest.MockModel{
+		Caps: provider.Capabilities{NativeJSON: true},
+		Streams: [][]provider.StreamPart{{
+			provider.TextDelta{Text: `{"city":"Ghent","temp":21}`},
+			provider.FinishPart{Reason: provider.FinishStop},
+		}},
+	}
+	rm := &closeRecordingObjModel{inner: m}
+	s, err := StreamObject[forecast](t.Context(), GenerateObjectOpts{Model: rm, Prompt: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rm.closeCounts) != 1 || *rm.closeCounts[0] != 0 {
+		t.Fatalf("underlying stream closed before Close(): %v", rm.closeCounts)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if *rm.closeCounts[0] != 1 {
+		t.Fatalf("underlying stream close count = %d, want 1", *rm.closeCounts[0])
+	}
+	// Idempotent: calling Close() again must not double-close.
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if *rm.closeCounts[0] != 1 {
+		t.Fatalf("underlying stream close count after second Close() = %d, want 1", *rm.closeCounts[0])
+	}
+}
+
+// TestObjectStreamCloseAfterFullIterationIsNoop verifies that Close() after
+// Partials() has been fully iterated (which already closes the underlying
+// stream internally) does not double-close it.
+func TestObjectStreamCloseAfterFullIterationIsNoop(t *testing.T) {
+	m := &aitest.MockModel{
+		Caps: provider.Capabilities{NativeJSON: true},
+		Streams: [][]provider.StreamPart{{
+			provider.TextDelta{Text: `{"city":"Ghent","temp":21}`},
+			provider.FinishPart{Reason: provider.FinishStop},
+		}},
+	}
+	rm := &closeRecordingObjModel{inner: m}
+	s, err := StreamObject[forecast](t.Context(), GenerateObjectOpts{Model: rm, Prompt: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Partials() {
+	}
+	if *rm.closeCounts[0] != 1 {
+		t.Fatalf("close count after full iteration = %d, want 1", *rm.closeCounts[0])
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if *rm.closeCounts[0] != 1 {
+		t.Fatalf("close count after Close() following full iteration = %d, want 1 (no double-close)", *rm.closeCounts[0])
+	}
+}
 
 func TestStreamObjectPartials(t *testing.T) {
 	m := &aitest.MockModel{

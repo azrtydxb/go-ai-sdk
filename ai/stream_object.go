@@ -21,6 +21,7 @@ type ObjectStream[T any] struct {
 	toolMode bool
 
 	started bool
+	closed  bool
 	err     error
 
 	usage    provider.Usage
@@ -163,3 +164,22 @@ func (s *ObjectStream[T]) Final() (T, error) {
 
 // Usage returns the usage reported by the stream's FinishPart.
 func (s *ObjectStream[T]) Usage() provider.Usage { return s.usage }
+
+// Close releases the underlying provider stream, if one is still open. It
+// is idempotent and safe to call at any point: before Partials() has ever
+// been ranged over (the caller decided not to consume the stream, so the
+// HTTP body would otherwise leak), after Partials() has been fully iterated
+// or abandoned (Partials() already closes the stream itself in both cases,
+// so Close() is then a no-op), or mid-iteration.
+func (s *ObjectStream[T]) Close() error {
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+	if s.stream == nil {
+		return nil
+	}
+	err := s.stream.Close()
+	s.stream = nil
+	return err
+}

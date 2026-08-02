@@ -22,6 +22,7 @@ type TextStream struct {
 	current provider.StreamResponse // the active provider stream
 
 	started bool
+	closed  bool
 	err     error
 
 	steps      []Step
@@ -269,3 +270,29 @@ func (s *TextStream) Usage() provider.Usage { return s.totalUsage }
 
 // FinishReason returns the last step's finish reason.
 func (s *TextStream) FinishReason() provider.FinishReason { return s.lastFinish }
+
+// Messages returns the full final conversation so far, including any
+// assistant and tool messages appended by completed steps of the tool loop
+// — the same semantics as GenerateTextResult.Messages. Valid after Parts()
+// has been iterated (fully or partially); before that it is just the
+// initial request messages.
+func (s *TextStream) Messages() []provider.Message { return s.messages }
+
+// Close releases the underlying provider stream, if one is still open. It
+// is idempotent and safe to call at any point: before Parts() has ever been
+// ranged over (the caller decided not to consume the stream, so the HTTP
+// body would otherwise leak), after Parts() has been fully iterated or
+// abandoned (Parts() already closes the stream itself in both cases, so
+// Close() is then a no-op), or mid-iteration.
+func (s *TextStream) Close() error {
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+	if s.current == nil {
+		return nil
+	}
+	err := s.current.Close()
+	s.current = nil
+	return err
+}
