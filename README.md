@@ -2,10 +2,11 @@
 
 An idiomatic Go port of the [Vercel AI SDK](https://sdk.vercel.ai): a single,
 provider-agnostic API for generating text, streaming text, generating
-structured objects, calling tools, and computing embeddings against
-OpenAI, Anthropic, and Google (Gemini) — with the same concepts and naming
-as the TypeScript original, expressed in native Go (context, iterators,
-generics) rather than mirrored line-for-line.
+structured objects, calling tools, and computing embeddings across OpenAI,
+Anthropic, Google, Groq, xAI, DeepSeek, Together, Fireworks, Cerebras,
+Perplexity, Mistral, and Cohere — with the same concepts and naming as the
+TypeScript original, expressed in native Go (context, iterators, generics)
+rather than mirrored line-for-line.
 
 **Status: v0.1.** The public API is implemented and tested end-to-end
 (unit tests plus a shared provider-conformance suite), but it is young:
@@ -102,13 +103,13 @@ All supported providers, by capability:
 
 ## Provider roadmap
 
-Wave 1 ships in v0.1; Wave 2 shipped in v0.2. Later waves are tracked but not yet implemented:
+Wave 1 ships in v0.1; Wave 2 is now shipped. Later waves are tracked but not yet implemented:
 
 | Wave | Providers | Status |
 |---|---|---|
-| 1 (v0.1) | OpenAI, Anthropic, Google (Gemini) | Shipped — three distinct wire formats prove the abstraction |
-| 2 (v0.2, shipped) | Groq, xAI, DeepSeek, Together, Fireworks, Cerebras, Perplexity | Thin presets over the OpenAI-compatible base |
-| 2 (v0.2, shipped) | Mistral, Cohere | Own APIs, full provider implementations |
+| 1 | OpenAI, Anthropic, Google (Gemini) | Shipped — three distinct wire formats prove the abstraction |
+| 2 (shipped) | Groq, xAI, DeepSeek, Together, Fireworks, Cerebras, Perplexity | Thin presets over the OpenAI-compatible base |
+| 2 (shipped) | Mistral, Cohere | Own APIs, full provider implementations |
 | 3 | Azure OpenAI, Vertex AI, Amazon Bedrock | Planned — platform auth; candidates for nested submodules |
 | later | Image/speech/transcription providers | Out of scope for v1 — requires new model capability interfaces |
 

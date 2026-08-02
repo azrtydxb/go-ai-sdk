@@ -130,9 +130,9 @@ Shared SSE parser in `internal/sse` (handles `data:` framing, `[DONE]`, comment 
 
 | Wave | Providers | Status |
 |---|---|---|
-| 1 (v0.1) | OpenAI, Anthropic, Google (Gemini) | Shipped — three genuinely different wire formats prove the abstraction |
-| 2 (v0.2) (shipped) | Groq, xAI, DeepSeek, Together, Fireworks, Cerebras, Perplexity | Thin presets over the OpenAI-compatible base |
-| 2 (v0.2) (shipped) | Mistral, Cohere | Own APIs, full provider implementations |
+| 1 | OpenAI, Anthropic, Google (Gemini) | Shipped — three genuinely different wire formats prove the abstraction |
+| 2 (shipped) | Groq, xAI, DeepSeek, Together, Fireworks, Cerebras, Perplexity | Thin presets over the OpenAI-compatible base |
+| 2 (shipped) | Mistral, Cohere | Own APIs, full provider implementations |
 | 3 | Azure OpenAI, Vertex AI, Amazon Bedrock | Planned — platform auth; candidates for nested submodules |
 | later | Image/speech/transcription providers | Out of scope for v1 — requires new model capability interfaces |
 
