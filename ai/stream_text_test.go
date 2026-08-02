@@ -194,6 +194,50 @@ func TestStreamTextReasoningEndCarriesSignature(t *testing.T) {
 	}
 }
 
+// TestStreamTextReasoningUncoveredTail covers a stream with two reasoning
+// spans where only the first is properly closed with a ReasoningEnd: after
+// [ReasoningDelta "a", ReasoningEnd({"a"})], a second span starts
+// ([ReasoningDelta "b"]) but is never closed before FinishPart. The
+// resulting step must contain both the "a" ReasoningPart (from
+// ReasoningEnd) and a synthesized "b" ReasoningPart for the uncovered
+// trailing delta — neither is silently dropped — and ReasoningText() must
+// concatenate them as "ab".
+func TestStreamTextReasoningUncoveredTail(t *testing.T) {
+	m := &aitest.MockModel{Streams: [][]provider.StreamPart{{
+		provider.ReasoningDelta{Text: "a"},
+		provider.ReasoningEnd{Part: provider.ReasoningPart{Text: "a"}},
+		provider.ReasoningDelta{Text: "b"},
+		provider.FinishPart{Reason: provider.FinishStop},
+	}}}
+	s, err := StreamText(t.Context(), GenerateTextOpts{Model: m, Prompt: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+	}
+	if s.Err() != nil {
+		t.Fatal(s.Err())
+	}
+
+	if s.ReasoningText() != "ab" {
+		t.Fatalf("ReasoningText() = %q, want %q", s.ReasoningText(), "ab")
+	}
+
+	steps := s.Steps()
+	if len(steps) != 1 || steps[0].Response == nil {
+		t.Fatalf("Steps = %#v", steps)
+	}
+	var reasoningTexts []string
+	for _, part := range steps[0].Response.Content {
+		if rp, ok := part.(provider.ReasoningPart); ok {
+			reasoningTexts = append(reasoningTexts, rp.Text)
+		}
+	}
+	if len(reasoningTexts) != 2 || reasoningTexts[0] != "a" || reasoningTexts[1] != "b" {
+		t.Fatalf("reasoning parts = %#v, want [\"a\", \"b\"]", reasoningTexts)
+	}
+}
+
 // TestStreamTextReasoningTextSkipsRedacted covers a stream that emits a
 // visible ReasoningEnd part alongside a Redacted one (Anthropic
 // redacted_thinking, whole opaque payload delivered via ReasoningEnd with no
@@ -254,6 +298,62 @@ func TestStreamTextReasoningTextSkipsRedacted(t *testing.T) {
 	}
 	if !haveRedactedInMsg {
 		t.Fatal("redacted ReasoningPart missing from appended assistant message")
+	}
+}
+
+// TestStreamTextPrepareStepSwapsModelAndPersists covers StepPlan.Model in
+// the StreamText loop: PrepareStep swaps to model B on step 1 (leaving
+// Model unset on step 0 and step 2), and the swap must persist — model B,
+// not the original model A, must also stream step 2, even though
+// PrepareStep didn't set Model again on that step.
+func TestStreamTextPrepareStepSwapsModelAndPersists(t *testing.T) {
+	modelA := &aitest.MockModel{Streams: [][]provider.StreamPart{{
+		provider.ToolCallEnd{Call: provider.ToolCallPart{ID: "c1", Name: "t", Args: []byte(`{"city":"a"}`)}},
+		provider.FinishPart{Reason: provider.FinishToolCalls},
+	}}}
+	modelB := &aitest.MockModel{Streams: [][]provider.StreamPart{
+		{
+			provider.ToolCallEnd{Call: provider.ToolCallPart{ID: "c2", Name: "t", Args: []byte(`{"city":"b"}`)}},
+			provider.FinishPart{Reason: provider.FinishToolCalls},
+		},
+		{
+			provider.TextDelta{Text: "done"},
+			provider.FinishPart{Reason: provider.FinishStop},
+		},
+	}}
+	tool := NewTool("t", "", func(_ context.Context, a weatherArgs) (any, error) { return "r", nil })
+
+	var sawModelOnStep1 provider.LanguageModel
+	s, err := StreamText(t.Context(), GenerateTextOpts{
+		Model: modelA, Prompt: "x", Tools: []Tool{tool}, MaxSteps: 3,
+		PrepareStep: func(stepIndex int, plan StepPlan) (StepPlan, bool) {
+			if stepIndex == 1 {
+				sawModelOnStep1 = plan.Model
+				plan.Model = modelB
+				return plan, true
+			}
+			return StepPlan{}, false
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+	}
+	if s.Err() != nil {
+		t.Fatal(s.Err())
+	}
+	if sawModelOnStep1 != modelA {
+		t.Fatalf("plan.Model seen at step 1 = %v, want modelA (the model active before the swap)", sawModelOnStep1)
+	}
+	if len(modelA.Calls) != 1 {
+		t.Fatalf("modelA.Calls = %d, want 1 (only step 0)", len(modelA.Calls))
+	}
+	if len(modelB.Calls) != 2 {
+		t.Fatalf("modelB.Calls = %d, want 2 (steps 1 and 2 — the swap must persist)", len(modelB.Calls))
+	}
+	if s.Text() != "done" {
+		t.Fatalf("Text() = %q, want %q", s.Text(), "done")
 	}
 }
 

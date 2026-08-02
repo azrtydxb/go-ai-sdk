@@ -18,6 +18,7 @@ type TextStream struct {
 	maxRetries int
 	maxSteps   int
 	messages   []provider.Message
+	model      provider.LanguageModel // current model; swappable via PrepareStep
 
 	current provider.StreamResponse // the active provider stream
 
@@ -61,16 +62,20 @@ func StreamText(ctx context.Context, opts GenerateTextOpts) (*TextStream, error)
 		maxRetries: maxRetries,
 		maxSteps:   maxSteps,
 		messages:   messages,
+		model:      opts.Model,
 	}
 
 	call.Messages = messages
 	if opts.PrepareStep != nil {
-		if modified, ok := opts.PrepareStep(0, call); ok {
-			call = modified
+		if plan, ok := opts.PrepareStep(0, StepPlan{Call: call, Model: s.model}); ok {
+			call = plan.Call
+			if plan.Model != nil {
+				s.model = plan.Model
+			}
 		}
 	}
 
-	stream, err := startStream(ctx, opts.Model, call, call.Messages, maxRetries)
+	stream, err := startStream(ctx, s.model, call, call.Messages, maxRetries)
 	if err != nil {
 		return nil, err
 	}
@@ -116,6 +121,16 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 
 			var text string
 			var reasoningText string
+			// reasoningTail accumulates ReasoningDelta text received since
+			// the last ReasoningEnd (or since the start of the step, if no
+			// ReasoningEnd has occurred yet), and is reset to empty at every
+			// ReasoningEnd. This lets step assembly below tell a second,
+			// still-open reasoning span (deltas that arrived after the last
+			// ReasoningEnd, with no closing ReasoningEnd of their own before
+			// the step's FinishPart) apart from the already-closed spans
+			// captured in reasoningParts, so its text isn't silently
+			// dropped from the assembled step.
+			var reasoningTail string
 			var reasoningParts []provider.ReasoningPart
 			var sources []provider.SourcePart
 			var toolCalls []provider.ToolCallPart
@@ -134,8 +149,10 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 					text += part.Text
 				case provider.ReasoningDelta:
 					reasoningText += part.Text
+					reasoningTail += part.Text
 				case provider.ReasoningEnd:
 					reasoningParts = append(reasoningParts, part.Part)
+					reasoningTail = ""
 				case provider.SourceEvent:
 					sources = append(sources, part.Source)
 				case provider.ToolCallDelta:
@@ -193,12 +210,21 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 			// providers that emit a fully assembled ReasoningEnd (e.g.
 			// Anthropic, carrying a signature) supply reasoningParts
 			// directly; providers that only ever emit ReasoningDelta text
-			// (e.g. openaicompat reasoning_content) get a single
-			// synthesized ReasoningPart from the accumulated text.
+			// (e.g. openaicompat reasoning_content), with no ReasoningEnd at
+			// all, get a single synthesized ReasoningPart from the
+			// accumulated text. When ReasoningEnd(s) DID occur but more
+			// ReasoningDelta text arrived afterward (a second, still-open
+			// span with no closing ReasoningEnd before the step ended),
+			// reasoningTail holds that uncovered trailing text — append it
+			// as an additional synthesized ReasoningPart so it isn't
+			// silently dropped from the assembled step.
 			var respContent []provider.ContentPart
 			if len(reasoningParts) > 0 {
 				for _, rp := range reasoningParts {
 					respContent = append(respContent, rp)
+				}
+				if reasoningTail != "" {
+					respContent = append(respContent, provider.ReasoningPart{Text: reasoningTail})
 				}
 			} else if reasoningText != "" {
 				respContent = append(respContent, provider.ReasoningPart{Text: reasoningText})
@@ -296,11 +322,14 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 			}
 			call.Messages = s.messages
 			if s.opts.PrepareStep != nil {
-				if modified, ok := s.opts.PrepareStep(len(s.steps), call); ok {
-					call = modified
+				if plan, ok := s.opts.PrepareStep(len(s.steps), StepPlan{Call: call, Model: s.model}); ok {
+					call = plan.Call
+					if plan.Model != nil {
+						s.model = plan.Model
+					}
 				}
 			}
-			next, err := startStream(s.ctx, s.opts.Model, call, call.Messages, s.maxRetries)
+			next, err := startStream(s.ctx, s.model, call, call.Messages, s.maxRetries)
 			if err != nil {
 				s.err = err
 				s.current = nil
