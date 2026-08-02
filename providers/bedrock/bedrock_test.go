@@ -2,6 +2,7 @@ package bedrock
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -653,6 +654,109 @@ func TestRequestShape_ToolResultErrorStatus(t *testing.T) {
 	}
 	if found.ToolUseID != "tu_1" {
 		t.Errorf("toolResult.ToolUseID = %q, want tu_1", found.ToolUseID)
+	}
+}
+
+// TestRequestShapeUserMessageFilePartPDF verifies a PDF FilePart becomes a
+// Converse "document" content block with format "pdf", Name derived from
+// Filename (sans extension), and the base64 bytes carried the same way an
+// image source is (wireImageSource's {"bytes": ...} shape).
+func TestRequestShapeUserMessageFilePartPDF(t *testing.T) {
+	model, fs := newTestModel(t)
+
+	pdfData := []byte("%PDF-1.4 fake pdf bytes")
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			{
+				Role: provider.RoleUser,
+				Content: []provider.ContentPart{
+					provider.TextPart{Text: "simple"},
+					provider.FilePart{Data: pdfData, MediaType: "application/pdf", Filename: "report.pdf"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	req, _, _ := fs.snapshot()
+	if len(req.Messages) != 1 || len(req.Messages[0].Content) != 2 {
+		t.Fatalf("Messages = %+v, want 1 message with 2 content blocks", req.Messages)
+	}
+	doc := req.Messages[0].Content[1].Document
+	if doc == nil {
+		t.Fatalf("Content[1].Document = nil, want set")
+	}
+	if doc.Format != "pdf" {
+		t.Errorf("Document.Format = %q, want pdf", doc.Format)
+	}
+	if doc.Name != "report" {
+		t.Errorf("Document.Name = %q, want report (extension stripped)", doc.Name)
+	}
+	wantBytes := base64.StdEncoding.EncodeToString(pdfData)
+	if doc.Source.Bytes != wantBytes {
+		t.Errorf("Document.Source.Bytes = %q, want %q", doc.Source.Bytes, wantBytes)
+	}
+}
+
+// TestRequestShapeUserMessageFilePartCSVDefaultName verifies a non-PDF
+// supported document type (CSV) maps to format "csv", and that an empty
+// Filename falls back to the "document" default name Converse requires.
+func TestRequestShapeUserMessageFilePartCSVDefaultName(t *testing.T) {
+	model, fs := newTestModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			{
+				Role: provider.RoleUser,
+				Content: []provider.ContentPart{
+					provider.TextPart{Text: "simple"},
+					provider.FilePart{Data: []byte("a,b,c\n1,2,3\n"), MediaType: "text/csv"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	req, _, _ := fs.snapshot()
+	doc := req.Messages[0].Content[1].Document
+	if doc == nil {
+		t.Fatalf("Content[1].Document = nil, want set")
+	}
+	if doc.Format != "csv" {
+		t.Errorf("Document.Format = %q, want csv", doc.Format)
+	}
+	if doc.Name != "document" {
+		t.Errorf("Document.Name = %q, want the default %q", doc.Name, "document")
+	}
+}
+
+// TestRequestShapeUserMessageFilePartUnsupportedTypeErrors verifies a
+// FilePart with a MediaType outside Converse's fixed document-format set
+// (e.g. audio) is rejected with a descriptive error rather than silently
+// defaulting to some format, unlike imageFormat's PNG fallback.
+func TestRequestShapeUserMessageFilePartUnsupportedTypeErrors(t *testing.T) {
+	model, _ := newTestModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			{
+				Role: provider.RoleUser,
+				Content: []provider.ContentPart{
+					provider.TextPart{Text: "simple"},
+					provider.FilePart{Data: []byte("data"), MediaType: "audio/mpeg"},
+				},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("Generate: want error for unsupported FilePart media type, got nil")
+	}
+	if !strings.Contains(err.Error(), "audio/mpeg") {
+		t.Errorf("error = %q, want it to mention the unsupported media type", err.Error())
 	}
 }
 

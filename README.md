@@ -315,7 +315,8 @@ authoritative source):
 | anthropic | `application/pdf` only |
 | google, vertex | any `MediaType` |
 | openai + OpenAI-compatible presets (azure, cerebras, deepseek, fireworks, groq, perplexity, together, xai) | `application/pdf` only |
-| cohere, mistral, bedrock | unsupported — returns an error |
+| bedrock | a fixed set of document types recognized from `MediaType` (PDF, CSV, HTML, plain text, Markdown, Word, Excel) |
+| cohere, mistral | unsupported — returns an error |
 
 ### ProviderMetadata
 

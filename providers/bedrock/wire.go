@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -30,6 +32,7 @@ type wireMessage struct {
 type wireContentBlock struct {
 	Text             *string               `json:"text,omitempty"`
 	Image            *wireImage            `json:"image,omitempty"`
+	Document         *wireDocument         `json:"document,omitempty"`
 	ToolUse          *wireToolUse          `json:"toolUse,omitempty"`
 	ToolResult       *wireToolResult       `json:"toolResult,omitempty"`
 	ReasoningContent *wireReasoningContent `json:"reasoningContent,omitempty"`
@@ -57,6 +60,17 @@ type wireImage struct {
 
 type wireImageSource struct {
 	Bytes string `json:"bytes"` // base64
+}
+
+// wireDocument is the Converse API's document content block: Name is
+// required by Converse (there's no anonymous-document option), so it always
+// carries something, even when the FilePart had no Filename to derive it
+// from. Source reuses wireImageSource's {"bytes": base64} shape, which
+// Converse uses for both image and document sources.
+type wireDocument struct {
+	Format string          `json:"format"`
+	Name   string          `json:"name"`
+	Source wireImageSource `json:"source"`
 }
 
 type wireToolUse struct {
@@ -429,6 +443,19 @@ func convertUserContent(parts []provider.ContentPart) ([]wireContentBlock, error
 				Format: format,
 				Source: wireImageSource{Bytes: base64.StdEncoding.EncodeToString(p.Data)},
 			}})
+		case provider.FilePart:
+			if len(p.Data) == 0 {
+				return nil, fmt.Errorf("bedrock: file parts require inline Data")
+			}
+			format, err := documentFormat(p.MediaType)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, wireContentBlock{Document: &wireDocument{
+				Format: format,
+				Name:   documentName(p.Filename),
+				Source: wireImageSource{Bytes: base64.StdEncoding.EncodeToString(p.Data)},
+			}})
 		default:
 			return nil, fmt.Errorf("bedrock: unsupported content part %T in user message", part)
 		}
@@ -449,6 +476,51 @@ func imageFormat(mediaType string) string {
 	default:
 		return "png"
 	}
+}
+
+// documentFormat maps a FilePart's MediaType to one of Converse's document
+// format codes, returning a descriptive error for anything not in that
+// fixed set (unlike imageFormat, which falls back to a default rather than
+// erroring — Converse's document formats are a much smaller, closed set
+// with no reasonable default to fall back to).
+func documentFormat(mediaType string) (string, error) {
+	switch mediaType {
+	case "application/pdf":
+		return "pdf", nil
+	case "text/csv":
+		return "csv", nil
+	case "text/html":
+		return "html", nil
+	case "text/plain":
+		return "txt", nil
+	case "text/markdown":
+		return "md", nil
+	case "application/msword":
+		return "doc", nil
+	case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+		return "docx", nil
+	case "application/vnd.ms-excel":
+		return "xls", nil
+	case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+		return "xlsx", nil
+	default:
+		return "", fmt.Errorf("bedrock: unsupported content part provider.FilePart with media type %q in user message", mediaType)
+	}
+}
+
+// documentName derives Converse's required document Name from a FilePart's
+// Filename: the filename without its extension (Converse names are used for
+// display/reference, not roundtripped as a real filename), or "document"
+// when Filename is empty — Converse requires a non-empty name and there's
+// nothing else to derive one from.
+func documentName(filename string) string {
+	if filename == "" {
+		return "document"
+	}
+	if ext := filepath.Ext(filename); ext != "" {
+		return strings.TrimSuffix(filename, ext)
+	}
+	return filename
 }
 
 func convertTools(tools []provider.ToolDef) []wireTool {
