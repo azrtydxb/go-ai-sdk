@@ -13,9 +13,15 @@ import (
 type MockModel struct {
 	Responses []*provider.Response    // returned in order by Generate
 	Streams   [][]provider.StreamPart // returned in order by Stream
-	Err       error                   // if set, every call fails with it
-	Calls     []provider.Call         // records every Generate/Stream call
-	Caps      provider.Capabilities
+	// StreamErrs, if set, is consulted in parallel with Streams: after the
+	// stream at Streams[i] finishes replaying its parts, the returned
+	// StreamResponse's Err() reports StreamErrs[i] (if non-nil and index in
+	// range) instead of nil, simulating a mid-stream failure — e.g. the
+	// connection dropping after some deltas arrived but before a FinishPart.
+	StreamErrs []error
+	Err        error           // if set, every call fails with it
+	Calls      []provider.Call // records every Generate/Stream call
+	Caps       provider.Capabilities
 }
 
 // ModelID implements provider.LanguageModel.
@@ -54,11 +60,16 @@ func (m *MockModel) Stream(ctx context.Context, call provider.Call) (provider.St
 	if idx >= len(m.Streams) {
 		panic("aitest.MockModel: Streams exhausted")
 	}
-	return &mockStreamResponse{parts: m.Streams[idx]}, nil
+	var streamErr error
+	if idx < len(m.StreamErrs) {
+		streamErr = m.StreamErrs[idx]
+	}
+	return &mockStreamResponse{parts: m.Streams[idx], err: streamErr}, nil
 }
 
 // mockStreamResponse implements provider.StreamResponse by replaying a
-// fixed slice of StreamPart values.
+// fixed slice of StreamPart values, then reporting err (if any, scripted via
+// MockModel.StreamErrs) from Err() to simulate a mid-stream failure.
 type mockStreamResponse struct {
 	parts  []provider.StreamPart
 	err    error
