@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"iter"
@@ -217,6 +218,24 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 				}
 			}
 		}
+
+		// The SSE stream ended (server closed the connection) without a
+		// "data: [DONE]" event. Rule: if a finish_reason chunk WAS seen,
+		// treat this as a well-formed-enough stream and emit the single
+		// FinishPart with whatever usage is known (possibly zero) — some
+		// proxies/load balancers drop the trailing [DONE] sentinel after
+		// forwarding the real finish_reason chunk. If no finish_reason was
+		// ever received, the stream was truncated mid-response: no
+		// FinishPart is emitted and Err() reports it instead, per the
+		// "exactly ONE FinishPart" contract (zero is preferable to a
+		// fabricated one here).
+		if haveFinish {
+			if !yield(provider.FinishPart{Reason: finishReason, Usage: usage}) {
+				return
+			}
+			return
+		}
+		s.err = errors.New("openai: stream ended unexpectedly without [DONE]")
 	}
 }
 

@@ -181,7 +181,11 @@ func buildChatRequest(modelID string, call provider.Call, stream bool) (chatRequ
 	}
 
 	if call.ResponseFormat != nil {
-		req.ResponseFormat = convertResponseFormat(*call.ResponseFormat)
+		rf, err := convertResponseFormat(*call.ResponseFormat)
+		if err != nil {
+			return chatRequest{}, err
+		}
+		req.ResponseFormat = rf
 	}
 
 	if stream {
@@ -248,6 +252,10 @@ func convertMessages(msgs []provider.Message) ([]wireMessage, error) {
 				if err != nil {
 					return nil, fmt.Errorf("openai: marshal tool result: %w", err)
 				}
+				// trp.IsError is intentionally not encoded: OpenAI's "tool"
+				// message wire format has no dedicated error slot — the
+				// content is always plain text/JSON regardless of whether
+				// the tool call succeeded or failed.
 				content, _ := json.Marshal(string(resultJSON))
 				out = append(out, wireMessage{
 					Role:       "tool",
@@ -344,7 +352,7 @@ func convertToolChoice(tc provider.ToolChoice) any {
 	}
 }
 
-func convertResponseFormat(rf provider.ResponseFormat) any {
+func convertResponseFormat(rf provider.ResponseFormat) (any, error) {
 	switch rf.Type {
 	case "json":
 		if len(rf.Schema) > 0 {
@@ -355,11 +363,15 @@ func convertResponseFormat(rf provider.ResponseFormat) any {
 					Schema: rf.Schema,
 					Strict: true,
 				},
-			}
+			}, nil
 		}
-		return wireJSONSchemaFormat{Type: "json_object"}
+		return wireJSONSchemaFormat{Type: "json_object"}, nil
+	case "text", "":
+		// "text" (or unset) is OpenAI's default; omit response_format
+		// entirely rather than sending an explicit value for it.
+		return nil, nil
 	default:
-		return nil
+		return nil, fmt.Errorf("openai: unsupported ResponseFormat.Type %q", rf.Type)
 	}
 }
 

@@ -316,3 +316,116 @@ func TestRequestShapeJSONObjectResponseFormat(t *testing.T) {
 		t.Errorf("response_format.type = %q, want json_object", rf["type"])
 	}
 }
+
+func TestRequestShapeUnsupportedResponseFormatType(t *testing.T) {
+	srv, _ := newFixtureServer(t)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("gpt-test")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages:       []provider.Message{provider.UserText("simple")},
+		ResponseFormat: &provider.ResponseFormat{Type: "xml"},
+	})
+	if err == nil {
+		t.Fatal("Generate: want error for unsupported ResponseFormat.Type, got nil")
+	}
+}
+
+// streamSSEServer starts an httptest server that writes exactly the given
+// raw SSE chunks (JSON-encoded) as "data: ..." events and then closes the
+// response without a trailing "data: [DONE]" — simulating a proxy/load
+// balancer that truncates the stream after forwarding real chunks.
+func streamSSEServer(t *testing.T, chunks ...chatStreamChunk) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatalf("fixture: ResponseWriter does not support flushing")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		for _, c := range chunks {
+			writeSSE(w, flusher, c)
+		}
+		// Deliberately no "data: [DONE]" — the handler returns here,
+		// closing the response body from the client's point of view.
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestStreamEndsWithoutDoneButHasFinishReason covers the case where the
+// server sends a finish_reason chunk (and usage) but the connection closes
+// before a "data: [DONE]" sentinel arrives. Per the documented rule in
+// streamResponse.Parts, this must still yield exactly one FinishPart with
+// Err() == nil.
+func TestStreamEndsWithoutDoneButHasFinishReason(t *testing.T) {
+	stop := "stop"
+	srv := streamSSEServer(t,
+		chatStreamChunk{Choices: []chatStreamChoice{{Delta: chatStreamDelta{Content: "Hel"}}}},
+		chatStreamChunk{Choices: []chatStreamChoice{{Delta: chatStreamDelta{Content: "lo!"}}}},
+		chatStreamChunk{Choices: []chatStreamChoice{{FinishReason: &stop}}},
+		chatStreamChunk{Usage: &wireUsage{PromptTokens: 5, CompletionTokens: 2, TotalTokens: 7}},
+	)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("gpt-test")
+
+	sr, err := model.Stream(context.Background(), provider.Call{
+		Messages: []provider.Message{provider.UserText("anything")},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	defer sr.Close()
+
+	var finishes []provider.FinishPart
+	for part := range sr.Parts() {
+		if fp, ok := part.(provider.FinishPart); ok {
+			finishes = append(finishes, fp)
+		}
+	}
+
+	if err := sr.Err(); err != nil {
+		t.Fatalf("Err() = %v, want nil (finish_reason was received before truncation)", err)
+	}
+	if len(finishes) != 1 {
+		t.Fatalf("got %d FinishPart(s), want exactly 1: %+v", len(finishes), finishes)
+	}
+	if finishes[0].Reason != provider.FinishStop {
+		t.Errorf("FinishPart.Reason = %q, want %q", finishes[0].Reason, provider.FinishStop)
+	}
+	if finishes[0].Usage.TotalTokens != 7 {
+		t.Errorf("FinishPart.Usage.TotalTokens = %d, want 7", finishes[0].Usage.TotalTokens)
+	}
+}
+
+// TestStreamTruncatedBeforeFinishReason covers the case where the
+// connection closes before any finish_reason chunk arrives at all — a true
+// mid-response truncation. This must yield zero FinishParts and a non-nil
+// Err().
+func TestStreamTruncatedBeforeFinishReason(t *testing.T) {
+	srv := streamSSEServer(t,
+		chatStreamChunk{Choices: []chatStreamChoice{{Delta: chatStreamDelta{Content: "Hel"}}}},
+	)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("gpt-test")
+
+	sr, err := model.Stream(context.Background(), provider.Call{
+		Messages: []provider.Message{provider.UserText("anything")},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	defer sr.Close()
+
+	var finishes []provider.FinishPart
+	for part := range sr.Parts() {
+		if fp, ok := part.(provider.FinishPart); ok {
+			finishes = append(finishes, fp)
+		}
+	}
+
+	if err := sr.Err(); err == nil {
+		t.Fatal("Err() = nil, want non-nil (stream truncated before finish_reason)")
+	}
+	if len(finishes) != 0 {
+		t.Errorf("got %d FinishPart(s), want 0: %+v", len(finishes), finishes)
+	}
+}
