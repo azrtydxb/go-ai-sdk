@@ -84,6 +84,26 @@ func TestToolLoopUnknownTool(t *testing.T) {
 	}
 }
 
+func TestRunToolCallsValidatesBeforeExecuting(t *testing.T) {
+	invoked := false
+	known := NewTool("known", "", func(_ context.Context, a weatherArgs) (any, error) {
+		invoked = true
+		return "should not run", nil
+	})
+	calls := []provider.ToolCallPart{
+		{ID: "c1", Name: "known", Args: []byte(`{"city":"x"}`)},
+		{ID: "c2", Name: "unknown", Args: []byte(`{}`)},
+	}
+	_, err := runToolCalls(t.Context(), []Tool{known}, calls)
+	var nst *NoSuchToolError
+	if !errors.As(err, &nst) || nst.ToolName != "unknown" {
+		t.Fatalf("err = %v", err)
+	}
+	if invoked {
+		t.Fatal("known tool's fn was invoked despite unknown tool later in the batch")
+	}
+}
+
 func TestToolLoopRecordsToolErrorAndContinues(t *testing.T) {
 	m := &aitest.MockModel{Responses: []*provider.Response{
 		toolCallResponse("t", "c1", `{"city":"x"}`),

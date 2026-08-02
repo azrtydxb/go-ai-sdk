@@ -151,9 +151,12 @@ func toolResultValue(r ToolResultRecord) any {
 	return r.Result
 }
 
-// runToolCalls executes calls sequentially in order against tools. It
-// returns a *NoSuchToolError if any call references an unknown tool;
-// InvalidToolArgumentsError/ToolExecutionError from a tool's Execute are
+// runToolCalls executes calls sequentially in order against tools. It first
+// validates that every call references a known tool, returning a
+// *NoSuchToolError without executing anything if not (so earlier calls in
+// the batch never run with real side effects just because a later one is
+// unknown). Once validated, all calls are executed; an
+// InvalidToolArgumentsError/ToolExecutionError from a tool's Execute is
 // recorded on the corresponding ToolResultRecord.Err rather than aborting.
 func runToolCalls(ctx context.Context, tools []Tool, calls []provider.ToolCallPart) ([]ToolResultRecord, error) {
 	byName := make(map[string]Tool, len(tools))
@@ -161,12 +164,15 @@ func runToolCalls(ctx context.Context, tools []Tool, calls []provider.ToolCallPa
 		byName[t.Name()] = t
 	}
 
-	results := make([]ToolResultRecord, 0, len(calls))
 	for _, c := range calls {
-		t, ok := byName[c.Name]
-		if !ok {
+		if _, ok := byName[c.Name]; !ok {
 			return nil, &NoSuchToolError{ToolName: c.Name}
 		}
+	}
+
+	results := make([]ToolResultRecord, 0, len(calls))
+	for _, c := range calls {
+		t := byName[c.Name]
 		res, err := t.Execute(ctx, c.Args)
 		results = append(results, ToolResultRecord{
 			ToolCallID: c.ID,
