@@ -49,6 +49,22 @@ func TestFramedTransportSend(t *testing.T) {
 	}
 }
 
+func TestFramedTransportSendRejectsEmbeddedNewline(t *testing.T) {
+	var buf bytes.Buffer
+	wc := &nopWriteCloser{Writer: &buf}
+	tr := newFramedTransport(strings.NewReader(""), wc, nil)
+	defer tr.Close()
+
+	ctx := context.Background()
+	err := tr.Send(ctx, json.RawMessage("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\",\n\"params\":1}"))
+	if err == nil {
+		t.Fatal("Send: want error for message with an embedded newline, got nil")
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("Send wrote %q despite rejecting the message", buf.String())
+	}
+}
+
 func TestFramedTransportReceive(t *testing.T) {
 	r, w := io.Pipe()
 	tr := newFramedTransport(r, &nopWriteCloser{Writer: io.Discard}, nil)

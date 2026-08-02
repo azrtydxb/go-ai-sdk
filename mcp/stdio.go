@@ -2,9 +2,11 @@ package mcp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -52,7 +54,12 @@ type framedTransport struct {
 // newFramedTransport builds a Transport that reads newline-delimited JSON
 // from r and writes newline-delimited JSON to w. closeFn is invoked exactly
 // once by Close, after w has been closed, to release any additional
-// resources (e.g. terminate a child process).
+// resources (e.g. terminate a child process). closeFn must, directly or
+// indirectly, cause r to unblock with EOF or an error (e.g. by killing the
+// process that owns the other end of the pipe) — otherwise readLoop's
+// goroutine has nothing to make it return and leaks for the life of the
+// program.
+
 func newFramedTransport(r io.Reader, w io.WriteCloser, closeFn func() error) *framedTransport {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), maxLineSize)
@@ -102,10 +109,15 @@ func (t *framedTransport) readLoop() {
 // Send writes msg as one line. Peers are expected to enforce the same
 // (or a more generous) per-line size limit as Receive's maxLineSize; a
 // peer with a tighter line buffer may reject or truncate very large
-// messages.
+// messages. Per the MCP stdio transport spec, messages must not contain
+// embedded newlines; Send rejects any msg that does rather than silently
+// corrupting the framing.
 func (t *framedTransport) Send(ctx context.Context, msg json.RawMessage) error {
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if bytes.ContainsRune(msg, '\n') {
+		return fmt.Errorf("mcp: message contains an embedded newline, which the stdio transport's line framing forbids")
 	}
 	line := make([]byte, 0, len(msg)+1)
 	line = append(line, msg...)
