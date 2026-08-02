@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -315,6 +316,56 @@ func TestServiceAccountTokenSource_DefaultTokenURL(t *testing.T) {
 	}
 	if got := ts.tokenURL; got != "https://oauth2.googleapis.com/token" {
 		t.Errorf("default tokenURL = %q, want %q", got, "https://oauth2.googleapis.com/token")
+	}
+}
+
+// TestServiceAccountTokenSource_SingleFlight verifies that N concurrent
+// Token() calls on a cold cache mint exactly one token: the mutex is held
+// across the whole refresh, so only the first caller to acquire it performs
+// the JWT-bearer round trip, and every other caller blocks on the lock and
+// then observes the freshly cached, still-valid token instead of making its
+// own request.
+func TestServiceAccountTokenSource_SingleFlight(t *testing.T) {
+	priv, pemStr := generateTestKey(t)
+	ts, err := NewServiceAccountTokenSource(serviceAccountJSON(t, "sa@example.com", pemStr, ""))
+	if err != nil {
+		t.Fatalf("NewServiceAccountTokenSource: %v", err)
+	}
+
+	var reqCount int32
+	srv := newTokenServer(t, &priv.PublicKey, "single-flight-token", 3600, &reqCount, nil)
+	defer srv.Close()
+	ts.SetTokenURL(srv.URL)
+
+	const n = 10
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	toks := make([]string, n)
+	var start sync.WaitGroup
+	start.Add(1)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			start.Wait()
+			tok, err := ts.Token(context.Background())
+			toks[i] = tok
+			errs[i] = err
+		}(i)
+	}
+	start.Done()
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("goroutine %d: Token: %v", i, err)
+		}
+		if toks[i] != "single-flight-token" {
+			t.Errorf("goroutine %d: Token() = %q, want %q", i, toks[i], "single-flight-token")
+		}
+	}
+	if got := atomic.LoadInt32(&reqCount); got != 1 {
+		t.Fatalf("token endpoint request count = %d, want exactly 1 (single-flight)", got)
 	}
 }
 

@@ -192,15 +192,22 @@ type tokenEndpointResponse struct {
 // Token returns a cached access token if one is still valid, otherwise
 // mints a new one via the JWT bearer grant and caches it until
 // expiry-60s.
+//
+// The mutex is held across the entire refresh (JWT build + token-endpoint
+// round trip), not just the cache check, so concurrent callers on a cold or
+// expired cache single-flight onto one refresh: only the first caller to
+// acquire the lock actually mints a token; every other caller blocks on the
+// lock and then finds a freshly populated, still-valid cache entry once it
+// acquires the lock (the "double-check" below), returning that instead of
+// making its own request.
 func (s *ServiceAccountTokenSource) Token(ctx context.Context) (string, error) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if s.cachedToken != "" && time.Now().Before(s.expiry) {
-		tok := s.cachedToken
-		s.mu.Unlock()
-		return tok, nil
+		return s.cachedToken, nil
 	}
 	tokenURL := s.tokenURL
-	s.mu.Unlock()
 
 	now := time.Now()
 	assertion, err := s.buildJWT(now, tokenURL)
@@ -241,10 +248,8 @@ func (s *ServiceAccountTokenSource) Token(ctx context.Context) (string, error) {
 		return "", errors.New("gauth: token response missing access_token")
 	}
 
-	s.mu.Lock()
 	s.cachedToken = tr.AccessToken
 	s.expiry = now.Add(time.Duration(tr.ExpiresIn)*time.Second - expiryLeeway)
-	s.mu.Unlock()
 
 	return tr.AccessToken, nil
 }
