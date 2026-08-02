@@ -43,16 +43,19 @@ func (t *mcpTool) Description() string { return t.def.Description }
 func (t *mcpTool) Schema() json.RawMessage { return t.def.InputSchema }
 
 // Execute implements ai.Tool. args passes through as raw JSON, unmodified;
-// it is not unmarshaled here since the server owns the schema. A ToolResult
-// with IsError=true is turned into a Go error carrying its text, so the ai
-// tool loop records the call as a failed tool call rather than a success.
+// it is not unmarshaled here since the server owns the schema. Both
+// transport failures and a ToolResult with IsError=true are turned into an
+// *ai.ToolExecutionError (ToolName set to the MCP tool's name, Cause
+// carrying the underlying error or the result's text), so the ai tool loop
+// records the call as a failed tool call rather than a success and callers
+// can recover the structured error via errors.As.
 func (t *mcpTool) Execute(ctx context.Context, args json.RawMessage) (any, error) {
 	res, err := t.client.CallTool(ctx, t.def.Name, args)
 	if err != nil {
-		return nil, err
+		return nil, &ai.ToolExecutionError{ToolName: t.def.Name, Cause: err}
 	}
 	if res.IsError {
-		return nil, fmt.Errorf("mcp: tool %q: %s", t.def.Name, res.Text)
+		return nil, &ai.ToolExecutionError{ToolName: t.def.Name, Cause: fmt.Errorf("%s", res.Text)}
 	}
 	return res.Text, nil
 }

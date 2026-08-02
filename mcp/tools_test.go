@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -162,6 +163,16 @@ func TestToolsExecuteIsErrorBecomesGoError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "it broke") {
 		t.Fatalf("err = %v, want it to contain the tool's error text", err)
+	}
+	var toolErr *ai.ToolExecutionError
+	if !errors.As(err, &toolErr) {
+		t.Fatalf("err = %v, want *ai.ToolExecutionError", err)
+	}
+	if toolErr.ToolName != "boom" {
+		t.Fatalf("ToolName = %q, want %q", toolErr.ToolName, "boom")
+	}
+	if !strings.Contains(toolErr.Cause.Error(), "it broke") {
+		t.Fatalf("Cause = %v, want it to contain the tool's error text", toolErr.Cause)
 	}
 }
 
