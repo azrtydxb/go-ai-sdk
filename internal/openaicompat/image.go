@@ -110,6 +110,10 @@ func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall
 	if err != nil {
 		return nil, fmt.Errorf("openaicompat: marshal image request: %w", err)
 	}
+	reqBody, err = applyProviderOptions(reqBody, call.ProviderOptions, m.cfg.Name)
+	if err != nil {
+		return nil, fmt.Errorf("openaicompat: apply provider options: %w", err)
+	}
 
 	url := m.cfg.BaseURL + "/images/generations"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))

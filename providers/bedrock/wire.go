@@ -193,6 +193,28 @@ type eventException struct {
 	Message string `json:"message"`
 }
 
+// applyProviderOptions merges providerOptions["bedrock"] (when it is a
+// non-empty map[string]any) into the already-marshaled JSON object
+// reqBytes, entries from the option map winning over whatever the SDK
+// built — e.g. {"bedrock": {"additionalModelRequestFields": {...}}} sets
+// the Converse API's additionalModelRequestFields wholesale. Returns
+// reqBytes unchanged (no unmarshal/marshal round trip) when there's
+// nothing to merge, which is the common case.
+func applyProviderOptions(reqBytes []byte, providerOptions map[string]any) ([]byte, error) {
+	opts, _ := providerOptions["bedrock"].(map[string]any)
+	if len(opts) == 0 {
+		return reqBytes, nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(reqBytes, &m); err != nil {
+		return nil, fmt.Errorf("bedrock: unmarshal request for provider options merge: %w", err)
+	}
+	for k, v := range opts {
+		m[k] = v
+	}
+	return json.Marshal(m)
+}
+
 // ---- Request building ----
 
 func buildConverseRequest(call provider.Call) (converseRequest, error) {

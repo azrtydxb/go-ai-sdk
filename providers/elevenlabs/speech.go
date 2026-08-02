@@ -78,6 +78,10 @@ func (m *speechModel) GenerateSpeech(ctx context.Context, call provider.SpeechCa
 	if err != nil {
 		return nil, fmt.Errorf("elevenlabs: marshal speech request: %w", err)
 	}
+	reqBody, err = applyProviderOptions(reqBody, call.ProviderOptions)
+	if err != nil {
+		return nil, fmt.Errorf("elevenlabs: apply provider options: %w", err)
+	}
 
 	reqURL := m.provider.baseURL + "/v1/text-to-speech/" + url.PathEscape(voice) +
 		"?output_format=" + url.QueryEscape(wireFormat)

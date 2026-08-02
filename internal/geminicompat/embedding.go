@@ -28,6 +28,12 @@ func (m *embeddingModel) ProviderName() string { return m.cfg.Name }
 func (m *embeddingModel) MaxBatchSize() int    { return m.cfg.EmbedBatch }
 
 func (m *embeddingModel) Embed(ctx context.Context, values []string) (*provider.EmbeddingResponse, error) {
+	return m.EmbedCall(ctx, provider.EmbeddingCall{Values: values})
+}
+
+// EmbedCall implements provider.EmbeddingModelV2.
+func (m *embeddingModel) EmbedCall(ctx context.Context, call provider.EmbeddingCall) (*provider.EmbeddingResponse, error) {
+	values := call.Values
 	reqs := make([]embedContentRequest, len(values))
 	for i, v := range values {
 		reqs[i] = embedContentRequest{
@@ -39,6 +45,10 @@ func (m *embeddingModel) Embed(ctx context.Context, values []string) (*provider.
 	reqBody, err := json.Marshal(batchEmbedRequest{Requests: reqs})
 	if err != nil {
 		return nil, fmt.Errorf("%s: marshal embedding request: %w", m.cfg.Name, err)
+	}
+	reqBody, err = applyProviderOptions(reqBody, call.ProviderOptions, m.cfg.Name)
+	if err != nil {
+		return nil, fmt.Errorf("%s: apply provider options: %w", m.cfg.Name, err)
 	}
 
 	url := m.cfg.EndpointFor(m.modelID, "batchEmbedContents")

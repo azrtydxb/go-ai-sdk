@@ -21,10 +21,9 @@ type GenerateTextOpts struct {
 	TopP          *float64
 	StopSequences []string
 
-	// ProviderOptions is reserved for provider-specific escape-hatch
-	// parameters. It is threaded through to provider.Call.ProviderOptions,
-	// but as of v0.1 none of the built-in providers (OpenAI, Anthropic,
-	// Google) read it — setting it is currently a silent no-op.
+	// ProviderOptions carries provider-specific escape-hatch parameters. It
+	// is threaded through to provider.Call.ProviderOptions unchanged — see
+	// that field's doc for the keying and merge semantics.
 	ProviderOptions map[string]any
 }
 

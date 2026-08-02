@@ -73,6 +73,10 @@ func (m *speechModel) GenerateSpeech(ctx context.Context, call provider.SpeechCa
 	if err != nil {
 		return nil, fmt.Errorf("openaicompat: marshal speech request: %w", err)
 	}
+	reqBody, err = applyProviderOptions(reqBody, call.ProviderOptions, m.cfg.Name)
+	if err != nil {
+		return nil, fmt.Errorf("openaicompat: apply provider options: %w", err)
+	}
 
 	url := m.cfg.BaseURL + "/audio/speech"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))

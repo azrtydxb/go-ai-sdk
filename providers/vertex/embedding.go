@@ -56,6 +56,26 @@ func errorMessage(body []byte) string {
 	return string(body)
 }
 
+// applyProviderOptions merges providerOptions["vertex"] (when it is a
+// non-empty map[string]any) into the already-marshaled JSON object
+// reqBytes, entries from the option map winning over whatever the SDK
+// built. Returns reqBytes unchanged (no unmarshal/marshal round trip) when
+// there's nothing to merge, which is the common case.
+func applyProviderOptions(reqBytes []byte, providerOptions map[string]any) ([]byte, error) {
+	opts, _ := providerOptions["vertex"].(map[string]any)
+	if len(opts) == 0 {
+		return reqBytes, nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(reqBytes, &m); err != nil {
+		return nil, fmt.Errorf("vertex: unmarshal request for provider options merge: %w", err)
+	}
+	for k, v := range opts {
+		m[k] = v
+	}
+	return json.Marshal(m)
+}
+
 type embeddingModel struct {
 	p       *Provider
 	modelID string
@@ -73,6 +93,14 @@ func (m *embeddingModel) MaxBatchSize() int    { return embeddingMaxBatchSize }
 // value, returning the embedding values for each and the summed
 // token-count statistics as Usage.
 func (m *embeddingModel) Embed(ctx context.Context, values []string) (*provider.EmbeddingResponse, error) {
+	return m.EmbedCall(ctx, provider.EmbeddingCall{Values: values})
+}
+
+// EmbedCall implements provider.EmbeddingModelV2. ProviderOptions are
+// merged under the "vertex" key (see provider.Call.ProviderOptions for the
+// merge semantics).
+func (m *embeddingModel) EmbedCall(ctx context.Context, call provider.EmbeddingCall) (*provider.EmbeddingResponse, error) {
+	values := call.Values
 	instances := make([]wireInstance, len(values))
 	for i, v := range values {
 		instances[i] = wireInstance{Content: v}
@@ -81,6 +109,10 @@ func (m *embeddingModel) Embed(ctx context.Context, values []string) (*provider.
 	reqBody, err := json.Marshal(predictRequest{Instances: instances})
 	if err != nil {
 		return nil, fmt.Errorf("vertex: marshal embedding request: %w", err)
+	}
+	reqBody, err = applyProviderOptions(reqBody, call.ProviderOptions)
+	if err != nil {
+		return nil, fmt.Errorf("vertex: apply provider options: %w", err)
 	}
 
 	url := m.p.endpointFor(m.modelID, "predict")

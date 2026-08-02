@@ -58,6 +58,10 @@ func (m *languageModel) Generate(ctx context.Context, call provider.Call) (*prov
 	if err != nil {
 		return nil, fmt.Errorf("%s: marshal request: %w", m.cfg.Name, err)
 	}
+	body, err = applyProviderOptions(body, call.ProviderOptions, m.cfg.Name)
+	if err != nil {
+		return nil, fmt.Errorf("%s: apply provider options: %w", m.cfg.Name, err)
+	}
 
 	url := m.cfg.EndpointFor(m.modelID, "generateContent")
 	resp, err := m.doRequest(ctx, url, body)
@@ -91,6 +95,10 @@ func (m *languageModel) Stream(ctx context.Context, call provider.Call) (provide
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("%s: marshal request: %w", m.cfg.Name, err)
+	}
+	body, err = applyProviderOptions(body, call.ProviderOptions, m.cfg.Name)
+	if err != nil {
+		return nil, fmt.Errorf("%s: apply provider options: %w", m.cfg.Name, err)
 	}
 
 	// EndpointFor is called without query parameters; ?alt=sse is appended

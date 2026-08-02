@@ -104,6 +104,10 @@ func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall
 	if err != nil {
 		return nil, fmt.Errorf("%s: marshal image request: %w", m.cfg.Name, err)
 	}
+	reqBody, err = applyProviderOptions(reqBody, call.ProviderOptions, m.cfg.Name)
+	if err != nil {
+		return nil, fmt.Errorf("%s: apply provider options: %w", m.cfg.Name, err)
+	}
 
 	url := m.cfg.EndpointFor(m.modelID, "predict")
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))

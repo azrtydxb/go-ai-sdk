@@ -145,6 +145,26 @@ func errorMessage(body []byte) string {
 	return string(body)
 }
 
+// applyProviderOptions merges providerOptions["anthropic"] (when it is a
+// non-empty map[string]any) into the already-marshaled JSON object
+// reqBytes, entries from the option map winning over whatever the SDK
+// built. Returns reqBytes unchanged (no unmarshal/marshal round trip) when
+// there's nothing to merge, which is the common case.
+func applyProviderOptions(reqBytes []byte, providerOptions map[string]any) ([]byte, error) {
+	opts, _ := providerOptions["anthropic"].(map[string]any)
+	if len(opts) == 0 {
+		return reqBytes, nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(reqBytes, &m); err != nil {
+		return nil, fmt.Errorf("anthropic: unmarshal request for provider options merge: %w", err)
+	}
+	for k, v := range opts {
+		m[k] = v
+	}
+	return json.Marshal(m)
+}
+
 // ---- Request building ----
 
 func buildMessagesRequest(modelID string, call provider.Call, stream bool) (messagesRequest, error) {

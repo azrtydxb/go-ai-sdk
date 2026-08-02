@@ -134,6 +134,26 @@ type embeddingValues struct {
 	Values []float64 `json:"values"`
 }
 
+// applyProviderOptions merges providerOptions[name] (when it is a non-empty
+// map[string]any) into the already-marshaled JSON object reqBytes, entries
+// from the option map winning over whatever the SDK built. Returns reqBytes
+// unchanged (no unmarshal/marshal round trip) when there's nothing to
+// merge, which is the common case.
+func applyProviderOptions(reqBytes []byte, providerOptions map[string]any, name string) ([]byte, error) {
+	opts, _ := providerOptions[name].(map[string]any)
+	if len(opts) == 0 {
+		return reqBytes, nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(reqBytes, &m); err != nil {
+		return nil, fmt.Errorf("geminicompat: unmarshal request for provider options merge: %w", err)
+	}
+	for k, v := range opts {
+		m[k] = v
+	}
+	return json.Marshal(m)
+}
+
 // ---- Request building ----
 
 func buildGenerateContentRequest(modelID string, call provider.Call) (generateContentRequest, error) {

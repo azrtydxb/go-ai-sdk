@@ -28,6 +28,12 @@ func (m *embeddingModel) ProviderName() string { return m.cfg.Name }
 func (m *embeddingModel) MaxBatchSize() int    { return m.cfg.EmbedBatch }
 
 func (m *embeddingModel) Embed(ctx context.Context, values []string) (*provider.EmbeddingResponse, error) {
+	return m.EmbedCall(ctx, provider.EmbeddingCall{Values: values})
+}
+
+// EmbedCall implements provider.EmbeddingModelV2.
+func (m *embeddingModel) EmbedCall(ctx context.Context, call provider.EmbeddingCall) (*provider.EmbeddingResponse, error) {
+	values := call.Values
 	if m.cfg.BaseURL == "" {
 		return nil, fmt.Errorf("%s: base URL not configured", m.cfg.Name)
 	}
@@ -35,6 +41,10 @@ func (m *embeddingModel) Embed(ctx context.Context, values []string) (*provider.
 	reqBody, err := json.Marshal(embeddingRequest{Model: m.modelID, Input: values})
 	if err != nil {
 		return nil, fmt.Errorf("openaicompat: marshal embedding request: %w", err)
+	}
+	reqBody, err = applyProviderOptions(reqBody, call.ProviderOptions, m.cfg.Name)
+	if err != nil {
+		return nil, fmt.Errorf("openaicompat: apply provider options: %w", err)
 	}
 
 	url := m.cfg.BaseURL + "/embeddings"

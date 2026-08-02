@@ -33,7 +33,7 @@ func (m *languageModel) Capabilities() provider.Capabilities {
 	return provider.Capabilities{NativeJSON: m.cfg.NativeJSON}
 }
 
-func (m *languageModel) doRequest(ctx context.Context, req chatRequest) (*http.Response, error) {
+func (m *languageModel) doRequest(ctx context.Context, req chatRequest, providerOptions map[string]any) (*http.Response, error) {
 	if m.cfg.BaseURL == "" {
 		return nil, fmt.Errorf("%s: base URL not configured", m.cfg.Name)
 	}
@@ -41,6 +41,10 @@ func (m *languageModel) doRequest(ctx context.Context, req chatRequest) (*http.R
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("openaicompat: marshal request: %w", err)
+	}
+	body, err = applyProviderOptions(body, providerOptions, m.cfg.Name)
+	if err != nil {
+		return nil, fmt.Errorf("openaicompat: apply provider options: %w", err)
 	}
 
 	url := m.cfg.BaseURL + "/chat/completions"
@@ -64,7 +68,7 @@ func (m *languageModel) Generate(ctx context.Context, call provider.Call) (*prov
 		return nil, err
 	}
 
-	resp, err := m.doRequest(ctx, req)
+	resp, err := m.doRequest(ctx, req, call.ProviderOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +97,7 @@ func (m *languageModel) Stream(ctx context.Context, call provider.Call) (provide
 		return nil, err
 	}
 
-	resp, err := m.doRequest(ctx, req)
+	resp, err := m.doRequest(ctx, req, call.ProviderOptions)
 	if err != nil {
 		return nil, err
 	}

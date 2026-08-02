@@ -102,6 +102,10 @@ func (m *languageModel) Generate(ctx context.Context, call provider.Call) (*prov
 	if err != nil {
 		return nil, fmt.Errorf("bedrock: marshal request: %w", err)
 	}
+	body, err = applyProviderOptions(body, call.ProviderOptions)
+	if err != nil {
+		return nil, fmt.Errorf("bedrock: apply provider options: %w", err)
+	}
 
 	resp, err := m.doRequest(ctx, m.modelPath("/converse"), body)
 	if err != nil {
@@ -134,6 +138,10 @@ func (m *languageModel) Stream(ctx context.Context, call provider.Call) (provide
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("bedrock: marshal request: %w", err)
+	}
+	body, err = applyProviderOptions(body, call.ProviderOptions)
+	if err != nil {
+		return nil, fmt.Errorf("bedrock: apply provider options: %w", err)
 	}
 
 	resp, err := m.doRequest(ctx, m.modelPath("/converse-stream"), body)

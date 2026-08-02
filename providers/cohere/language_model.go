@@ -27,10 +27,14 @@ func (m *languageModel) Capabilities() provider.Capabilities {
 	return provider.Capabilities{NativeJSON: true}
 }
 
-func (m *languageModel) doRequest(ctx context.Context, req chatRequest) (*http.Response, error) {
+func (m *languageModel) doRequest(ctx context.Context, req chatRequest, providerOptions map[string]any) (*http.Response, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("cohere: marshal request: %w", err)
+	}
+	body, err = applyProviderOptions(body, providerOptions)
+	if err != nil {
+		return nil, fmt.Errorf("cohere: apply provider options: %w", err)
 	}
 
 	url := m.provider.baseURL + "/chat"
@@ -54,7 +58,7 @@ func (m *languageModel) Generate(ctx context.Context, call provider.Call) (*prov
 		return nil, err
 	}
 
-	resp, err := m.doRequest(ctx, req)
+	resp, err := m.doRequest(ctx, req, call.ProviderOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +87,7 @@ func (m *languageModel) Stream(ctx context.Context, call provider.Call) (provide
 		return nil, err
 	}
 
-	resp, err := m.doRequest(ctx, req)
+	resp, err := m.doRequest(ctx, req, call.ProviderOptions)
 	if err != nil {
 		return nil, err
 	}

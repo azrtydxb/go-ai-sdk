@@ -63,6 +63,10 @@ func (m *transcriptionModel) Transcribe(ctx context.Context, call provider.Trans
 		}
 	}
 
+	if err := applyProviderOptionsForm(mw, call.ProviderOptions); err != nil {
+		return nil, fmt.Errorf("elevenlabs: apply provider options: %w", err)
+	}
+
 	if err := mw.Close(); err != nil {
 		return nil, fmt.Errorf("elevenlabs: close multipart writer: %w", err)
 	}

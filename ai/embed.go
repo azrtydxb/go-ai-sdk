@@ -17,6 +17,11 @@ type EmbedOpts struct {
 	Model      provider.EmbeddingModel
 	Value      string
 	MaxRetries *int
+
+	// ProviderOptions follows provider.Call.ProviderOptions' merge
+	// semantics. It only has an effect when Model implements
+	// provider.EmbeddingModelV2; it is silently ignored otherwise.
+	ProviderOptions map[string]any
 }
 
 // EmbedResult is the outcome of an Embed call.
@@ -38,7 +43,7 @@ func Embed(ctx context.Context, opts EmbedOpts) (*EmbedResult, error) {
 	}
 
 	resp, err := retry.Do(ctx, maxRetries, func() (*provider.EmbeddingResponse, error) {
-		return opts.Model.Embed(ctx, []string{opts.Value})
+		return embedCall(ctx, opts.Model, []string{opts.Value}, opts.ProviderOptions)
 	})
 	if err != nil {
 		var exhausted *retry.ExhaustedError
@@ -63,6 +68,23 @@ type EmbedManyOpts struct {
 	Model      provider.EmbeddingModel
 	Values     []string
 	MaxRetries *int
+
+	// ProviderOptions follows provider.Call.ProviderOptions' merge
+	// semantics. It only has an effect when Model implements
+	// provider.EmbeddingModelV2; it is silently ignored otherwise.
+	ProviderOptions map[string]any
+}
+
+// embedCall calls model.Embed, or model.EmbedCall (with providerOptions)
+// when model implements provider.EmbeddingModelV2 and providerOptions is
+// non-empty.
+func embedCall(ctx context.Context, model provider.EmbeddingModel, values []string, providerOptions map[string]any) (*provider.EmbeddingResponse, error) {
+	if len(providerOptions) > 0 {
+		if m2, ok := model.(provider.EmbeddingModelV2); ok {
+			return m2.EmbedCall(ctx, provider.EmbeddingCall{Values: values, ProviderOptions: providerOptions})
+		}
+	}
+	return model.Embed(ctx, values)
 }
 
 // EmbedManyResult is the outcome of an EmbedMany call.
@@ -110,7 +132,7 @@ func EmbedMany(ctx context.Context, opts EmbedManyOpts) (*EmbedManyResult, error
 		batch := opts.Values[i:end]
 
 		resp, err := retry.Do(ctx, maxRetries, func() (*provider.EmbeddingResponse, error) {
-			return opts.Model.Embed(ctx, batch)
+			return embedCall(ctx, opts.Model, batch, opts.ProviderOptions)
 		})
 		if err != nil {
 			var exhausted *retry.ExhaustedError

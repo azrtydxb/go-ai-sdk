@@ -6,6 +6,8 @@ package elevenlabs
 
 import (
 	"encoding/json"
+	"fmt"
+	"mime/multipart"
 	"net/http"
 	"os"
 
@@ -110,4 +112,41 @@ func errorMessage(body []byte) string {
 
 func apiError(resp *http.Response, body []byte) error {
 	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), errorMessage(body))
+}
+
+// ---- provider options ----
+
+// applyProviderOptions merges providerOptions["elevenlabs"] (when it is a
+// non-empty map[string]any) into the already-marshaled JSON object
+// reqBytes, entries from the option map winning over whatever the SDK
+// built — e.g. {"elevenlabs": {"voice_settings": {...}}} overrides the TTS
+// voice_settings wholesale. Returns reqBytes unchanged (no unmarshal/marshal
+// round trip) when there's nothing to merge, which is the common case.
+func applyProviderOptions(reqBytes []byte, providerOptions map[string]any) ([]byte, error) {
+	opts, _ := providerOptions["elevenlabs"].(map[string]any)
+	if len(opts) == 0 {
+		return reqBytes, nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(reqBytes, &m); err != nil {
+		return nil, fmt.Errorf("elevenlabs: unmarshal request for provider options merge: %w", err)
+	}
+	for k, v := range opts {
+		m[k] = v
+	}
+	return json.Marshal(m)
+}
+
+// applyProviderOptionsForm writes providerOptions["elevenlabs"] (when it is
+// a non-empty map[string]any) as extra multipart form fields, each value
+// stringified with fmt.Sprint. Used for multipart-body requests
+// (transcription), where there's no single JSON object to merge into.
+func applyProviderOptionsForm(mw *multipart.Writer, providerOptions map[string]any) error {
+	opts, _ := providerOptions["elevenlabs"].(map[string]any)
+	for k, v := range opts {
+		if err := mw.WriteField(k, fmt.Sprint(v)); err != nil {
+			return err
+		}
+	}
+	return nil
 }

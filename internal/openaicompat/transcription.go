@@ -111,6 +111,10 @@ func (m *transcriptionModel) Transcribe(ctx context.Context, call provider.Trans
 		return nil, fmt.Errorf("openaicompat: write response_format field: %w", err)
 	}
 
+	if err := applyProviderOptionsForm(mw, call.ProviderOptions, m.cfg.Name); err != nil {
+		return nil, fmt.Errorf("openaicompat: apply provider options: %w", err)
+	}
+
 	if err := mw.Close(); err != nil {
 		return nil, fmt.Errorf("openaicompat: close multipart writer: %w", err)
 	}
