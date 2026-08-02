@@ -48,10 +48,16 @@ type GenerateTextResult struct {
 	Messages     []provider.Message // full final conversation incl. tool msgs
 }
 
-// GenerateText calls opts.Model once (through retry) and builds the result.
+// GenerateText calls opts.Model (through retry), running a multi-step
+// tool-calling loop when the model requests tool calls.
 //
-// This is the single-step implementation: it does not run the multi-step
-// tool-calling loop (see Task 7).
+// After a response whose FinishReason is tool-calls (or that contains
+// ToolCallParts), if an unknown tool is requested, GenerateText returns a
+// *NoSuchToolError. Otherwise it executes all tool calls sequentially in
+// response order, appends the assistant message and a single RoleTool
+// message with all tool results, and calls the model again. This repeats
+// while tool calls occur and len(Steps) < MaxSteps (default 1). Usage is
+// summed across steps.
 func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResult, error) {
 	call, err := buildCall(opts)
 	if err != nil {
@@ -63,32 +69,113 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 		maxRetries = *opts.MaxRetries
 	}
 
-	resp, err := retry.Do(ctx, maxRetries, func() (*provider.Response, error) {
-		return opts.Model.Generate(ctx, call)
-	})
-	if err != nil {
-		var exhausted *retry.ExhaustedError
-		if errors.As(err, &exhausted) {
-			return nil, &RetryError{Attempts: exhausted.Attempts, LastErr: exhausted.LastErr}
-		}
-		return nil, err
+	maxSteps := 1
+	if opts.MaxSteps > 0 {
+		maxSteps = opts.MaxSteps
 	}
 
-	step := buildStep(resp)
+	messages := append([]provider.Message(nil), call.Messages...)
 
-	messages := make([]provider.Message, 0, len(call.Messages)+1)
-	messages = append(messages, call.Messages...)
-	messages = append(messages, provider.Message{Role: provider.RoleAssistant, Content: resp.Content})
+	var steps []Step
+	var totalUsage provider.Usage
+
+	for {
+		call.Messages = messages
+
+		resp, err := retry.Do(ctx, maxRetries, func() (*provider.Response, error) {
+			return opts.Model.Generate(ctx, call)
+		})
+		if err != nil {
+			var exhausted *retry.ExhaustedError
+			if errors.As(err, &exhausted) {
+				return nil, &RetryError{Attempts: exhausted.Attempts, LastErr: exhausted.LastErr}
+			}
+			return nil, err
+		}
+
+		step := buildStep(resp)
+		totalUsage.InputTokens += resp.Usage.InputTokens
+		totalUsage.OutputTokens += resp.Usage.OutputTokens
+		totalUsage.TotalTokens += resp.Usage.TotalTokens
+
+		messages = append(messages, provider.Message{Role: provider.RoleAssistant, Content: resp.Content})
+
+		toolCalls := resp.ToolCalls()
+		hasToolCalls := len(toolCalls) > 0
+
+		if hasToolCalls {
+			results, err := runToolCalls(ctx, opts.Tools, toolCalls)
+			if err != nil {
+				return nil, err
+			}
+			step.ToolResults = results
+
+			resultParts := make([]provider.ContentPart, 0, len(results))
+			for _, r := range results {
+				resultParts = append(resultParts, provider.ToolResultPart{
+					ToolCallID: r.ToolCallID,
+					Name:       r.Name,
+					Result:     toolResultValue(r),
+					IsError:    r.Err != nil,
+				})
+			}
+			messages = append(messages, provider.Message{Role: provider.RoleTool, Content: resultParts})
+		}
+
+		steps = append(steps, step)
+
+		if !hasToolCalls || len(steps) >= maxSteps {
+			break
+		}
+	}
+
+	last := steps[len(steps)-1]
 
 	return &GenerateTextResult{
-		Text:         step.Text,
-		Steps:        []Step{step},
-		ToolCalls:    step.ToolCalls,
-		ToolResults:  step.ToolResults,
-		FinishReason: step.FinishReason,
-		Usage:        step.Usage,
+		Text:         last.Text,
+		Steps:        steps,
+		ToolCalls:    last.ToolCalls,
+		ToolResults:  last.ToolResults,
+		FinishReason: last.FinishReason,
+		Usage:        totalUsage,
 		Messages:     messages,
 	}, nil
+}
+
+// toolResultValue returns the value to send to the model for a tool result:
+// the error string when the tool call failed, otherwise the tool's result.
+func toolResultValue(r ToolResultRecord) any {
+	if r.Err != nil {
+		return r.Err.Error()
+	}
+	return r.Result
+}
+
+// runToolCalls executes calls sequentially in order against tools. It
+// returns a *NoSuchToolError if any call references an unknown tool;
+// InvalidToolArgumentsError/ToolExecutionError from a tool's Execute are
+// recorded on the corresponding ToolResultRecord.Err rather than aborting.
+func runToolCalls(ctx context.Context, tools []Tool, calls []provider.ToolCallPart) ([]ToolResultRecord, error) {
+	byName := make(map[string]Tool, len(tools))
+	for _, t := range tools {
+		byName[t.Name()] = t
+	}
+
+	results := make([]ToolResultRecord, 0, len(calls))
+	for _, c := range calls {
+		t, ok := byName[c.Name]
+		if !ok {
+			return nil, &NoSuchToolError{ToolName: c.Name}
+		}
+		res, err := t.Execute(ctx, c.Args)
+		results = append(results, ToolResultRecord{
+			ToolCallID: c.ID,
+			Name:       c.Name,
+			Result:     res,
+			Err:        err,
+		})
+	}
+	return results, nil
 }
 
 // buildStep converts a provider.Response into a Step.
