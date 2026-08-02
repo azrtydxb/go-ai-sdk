@@ -28,7 +28,8 @@ type Provider struct {
 // Option configures a Provider.
 type Option func(*Provider)
 
-// WithRegion sets the AWS region (default env AWS_REGION, else "us-east-1").
+// WithRegion sets the AWS region (default env AWS_REGION, else
+// AWS_DEFAULT_REGION, else "us-east-1").
 func WithRegion(region string) Option {
 	return func(p *Provider) { p.region = region }
 }
@@ -59,6 +60,9 @@ func WithHTTPClient(c *http.Client) Option {
 // New creates a new Amazon Bedrock Provider.
 func New(opts ...Option) *Provider {
 	region := os.Getenv("AWS_REGION")
+	if region == "" {
+		region = os.Getenv("AWS_DEFAULT_REGION")
+	}
 	if region == "" {
 		region = defaultRegion
 	}

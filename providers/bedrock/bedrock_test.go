@@ -565,6 +565,39 @@ func TestModelPath_URLEscapesModelID(t *testing.T) {
 	}
 }
 
+// TestNew_RegionEnvFallback covers the AWS_REGION / AWS_DEFAULT_REGION
+// precedence used when no WithRegion option is given: AWS_REGION wins when
+// both are set, AWS_DEFAULT_REGION is honored when only it is set, and the
+// hard-coded default applies when neither is set.
+func TestNew_RegionEnvFallback(t *testing.T) {
+	t.Run("AWS_REGION wins over AWS_DEFAULT_REGION", func(t *testing.T) {
+		t.Setenv("AWS_REGION", "eu-west-1")
+		t.Setenv("AWS_DEFAULT_REGION", "ap-southeast-2")
+		p := New()
+		if p.region != "eu-west-1" {
+			t.Errorf("region = %q, want %q", p.region, "eu-west-1")
+		}
+	})
+
+	t.Run("AWS_DEFAULT_REGION used when AWS_REGION unset", func(t *testing.T) {
+		t.Setenv("AWS_REGION", "")
+		t.Setenv("AWS_DEFAULT_REGION", "ap-southeast-2")
+		p := New()
+		if p.region != "ap-southeast-2" {
+			t.Errorf("region = %q, want %q", p.region, "ap-southeast-2")
+		}
+	})
+
+	t.Run("hard-coded default when neither is set", func(t *testing.T) {
+		t.Setenv("AWS_REGION", "")
+		t.Setenv("AWS_DEFAULT_REGION", "")
+		p := New()
+		if p.region != defaultRegion {
+			t.Errorf("region = %q, want %q", p.region, defaultRegion)
+		}
+	})
+}
+
 // TestConvertResponse_EmptyTextBlockNotDropped covers a bug where
 // convertResponse discriminated content blocks with `block.Text != ""`: a
 // text block whose text happens to be the empty string is a legitimate,
