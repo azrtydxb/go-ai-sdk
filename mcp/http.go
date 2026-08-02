@@ -38,9 +38,14 @@ type httpTransport struct {
 	headers map[string]string
 	client  *http.Client
 
+	// mu guards sessionID, openBodies, and closedFlag together: trackBody
+	// must check closedFlag and register the body (plus drainWG.Add) as one
+	// atomic step, so Close's body sweep can never miss a body whose Send
+	// raced it (see trackBody's doc for why).
 	mu         sync.Mutex
 	sessionID  string
 	openBodies map[io.Closer]struct{}
+	closedFlag bool
 
 	recvCh chan json.RawMessage
 
@@ -147,8 +152,15 @@ func (t *httpTransport) Send(ctx context.Context, msg json.RawMessage) error {
 	case "text/event-stream":
 		// Drain asynchronously: see the doc comment on
 		// NewStreamableHTTPTransport for why Send must not block here.
-		t.trackBody(resp.Body)
-		t.drainWG.Add(1)
+		// trackBody is the authoritative closed-check (the select at the
+		// top of Send is only a fast path): if Close raced this request
+		// and already ran, trackBody reports that atomically and the body
+		// is closed here instead of being handed to a goroutine that would
+		// never see it swept.
+		if !t.trackBody(resp.Body) {
+			resp.Body.Close()
+			return errors.New("mcp: transport closed")
+		}
 		go t.drainSSE(resp.Body)
 		return nil
 	default:
@@ -192,10 +204,32 @@ func (t *httpTransport) drainSSE(body io.ReadCloser) {
 // Receive/Close forever.
 func (t *httpTransport) drainCtx() context.Context { return context.Background() }
 
-func (t *httpTransport) trackBody(b io.Closer) {
+// trackBody registers b as an open SSE response body and reserves a
+// drainWG slot for the goroutine about to drain it, unless the transport is
+// already closed, in which case it does neither and returns false.
+//
+// This must be one atomic step under mu: Close also takes mu to flip
+// closedFlag and snapshot openBodies for its sweep, so whichever of
+// trackBody/Close acquires mu first determines the outcome consistently —
+// either trackBody sees closedFlag and backs off (the caller closes b
+// itself), or it registers b (and calls drainWG.Add) before Close can
+// possibly snapshot openBodies, so Close's sweep is guaranteed to include
+// b. Without this, a body whose Send raced a concurrent Close — Send read
+// closedFlag as false and proceeded, but Close's sweep already ran before
+// Send got here — would be tracked by nobody: it would never be closed
+// (leaking the connection) and drainWG.Wait would return before the
+// eventual drain goroutine even started (since Add would race Wait too),
+// so Close could return while a drain goroutine was about to start and
+// block forever reading an unclosed body.
+func (t *httpTransport) trackBody(b io.Closer) bool {
 	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.closedFlag {
+		return false
+	}
 	t.openBodies[b] = struct{}{}
-	t.mu.Unlock()
+	t.drainWG.Add(1)
+	return true
 }
 
 func (t *httpTransport) untrackBody(b io.Closer) {
@@ -232,15 +266,21 @@ func (t *httpTransport) Receive(ctx context.Context) (json.RawMessage, error) {
 // pending Receive), closes any SSE response bodies still being drained
 // (unblocking their drain goroutines' reads), and waits for those
 // goroutines to finish before returning.
+//
+// closedFlag is flipped and openBodies snapshotted under mu, the same lock
+// trackBody uses to check closedFlag and register a body — see trackBody's
+// doc for why that atomicity is what makes this sweep exhaustive even
+// against a Send racing this call.
 func (t *httpTransport) Close() error {
 	t.closeOnce.Do(func() {
-		close(t.closed)
 		t.mu.Lock()
+		t.closedFlag = true
 		bodies := make([]io.Closer, 0, len(t.openBodies))
 		for b := range t.openBodies {
 			bodies = append(bodies, b)
 		}
 		t.mu.Unlock()
+		close(t.closed)
 		for _, b := range bodies {
 			_ = b.Close()
 		}

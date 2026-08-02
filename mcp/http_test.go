@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -267,6 +269,145 @@ func TestHTTPTransportSSEBodyStaysOpen(t *testing.T) {
 		t.Fatal("Close did not return while a drain goroutine was blocked")
 	}
 	close(bodyReleased)
+}
+
+// recordingBody wraps an io.ReadCloser, counting Close calls in *closed —
+// used to detect whether a response body was actually released or leaked.
+type recordingBody struct {
+	io.ReadCloser
+	closed *int32
+}
+
+func (b *recordingBody) Close() error {
+	atomic.AddInt32(b.closed, 1)
+	return b.ReadCloser.Close()
+}
+
+// recordingRoundTripper wraps every response body it sees in a
+// recordingBody, so a test can observe whether Send (or anything else)
+// ever closed it.
+type recordingRoundTripper struct {
+	rt     http.RoundTripper
+	closed *int32
+}
+
+func (rt *recordingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := rt.rt.RoundTrip(req)
+	if err != nil {
+		return resp, err
+	}
+	resp.Body = &recordingBody{ReadCloser: resp.Body, closed: rt.closed}
+	return resp, nil
+}
+
+// TestHTTPTransportSendClosedRaceDoesNotLeakBody exercises the race the
+// reviewer flagged: Close() runs while a Send's request is still in
+// flight, i.e. before that Send has had a chance to register its response
+// body with trackBody. The fixture delays the response until after Close()
+// has completed its sweep, so if trackBody/Close weren't synchronized
+// under one mutex, Send would go on to track and drain a body that Close's
+// sweep already missed — and since the server never closes the stream
+// (kept open on a channel the test never releases within the test), that
+// drain goroutine would block forever reading it: a leaked goroutine and a
+// leaked connection that's also never closed.
+//
+// With the fix, trackBody sees the transport is already closed (the same
+// mutex Close used to flip closedFlag and snapshot openBodies) and Send
+// closes the body itself instead of hand it to a goroutine.
+func TestHTTPTransportSendClosedRaceDoesNotLeakBody(t *testing.T) {
+	proceed := make(chan struct{})
+	hang := make(chan struct{})
+	var hangOnce sync.Once
+	releaseHang := func() { hangOnce.Do(func() { close(hang) }) }
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-proceed // block until the test has closed the transport
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fl := w.(http.Flusher)
+		fmt.Fprintf(w, "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n\n")
+		fl.Flush()
+		<-hang // never close the stream on the server side either
+	}))
+	// t.Cleanup runs LIFO, like defer: registering releaseHang after
+	// srv.Close means releaseHang runs first, unblocking the handler so
+	// srv.Close (which waits for outstanding handlers) doesn't hang —
+	// including on an early t.Fatal, where releaseHang is never reached
+	// as ordinary statement.
+	t.Cleanup(srv.Close)
+	t.Cleanup(releaseHang)
+
+	var closedBodies int32
+	tr := &httpTransport{
+		url:        srv.URL,
+		client:     &http.Client{Transport: &recordingRoundTripper{rt: http.DefaultTransport, closed: &closedBodies}},
+		recvCh:     make(chan json.RawMessage, recvQueueSize),
+		openBodies: make(map[io.Closer]struct{}),
+		closed:     make(chan struct{}),
+	}
+
+	sendErrCh := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
+		sendErrCh <- tr.Send(ctx, json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"tools/call"}`))
+	}()
+
+	// Give Send time to get past its initial (non-authoritative) closed
+	// check and into the in-flight HTTP request, so Close genuinely races
+	// it rather than being observed by that fast path.
+	time.Sleep(20 * time.Millisecond)
+
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- tr.Close() }()
+
+	// Let Close's sweep run (it will find zero tracked bodies — the
+	// response hasn't arrived yet) before releasing the handler's
+	// response, so the race window the fix must close is actually hit.
+	time.Sleep(20 * time.Millisecond)
+	close(proceed)
+
+	select {
+	case err := <-sendErrCh:
+		if err == nil {
+			t.Fatal("Send: want an error for a request that lost the race with Close, got nil")
+		}
+	case <-time.After(testTimeout):
+		t.Fatal("Send did not return — want it to observe the transport closed and return promptly")
+	}
+
+	select {
+	case err := <-closeDone:
+		if err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+	case <-time.After(testTimeout):
+		t.Fatal("Close did not return")
+	}
+
+	// The body must have been closed by Send itself (since the server
+	// never closes its side): a leaked, never-closed body is exactly the
+	// bug this test guards against.
+	deadline := time.After(testTimeout)
+	for {
+		if atomic.LoadInt32(&closedBodies) == 1 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("closed bodies = %d, want exactly 1 (body leaked)", atomic.LoadInt32(&closedBodies))
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+
+	tr.mu.Lock()
+	openCount := len(tr.openBodies)
+	tr.mu.Unlock()
+	if openCount != 0 {
+		t.Errorf("openBodies = %d, want 0 (no body should remain tracked)", openCount)
+	}
+
+	releaseHang() // done: let the handler return so cleanup is quick
 }
 
 // TestHTTPTransportIntegrationWithClient exercises the transport through a
