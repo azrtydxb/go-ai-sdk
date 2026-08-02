@@ -84,3 +84,56 @@ func (s *mockStreamResponse) Close() error {
 	s.closed = true
 	return nil
 }
+
+// MockEmbedder is a provider.EmbeddingModel test double that returns
+// deterministic vectors or fails every call with Err if set.
+type MockEmbedder struct {
+	BatchSize int        // MaxBatchSize(); default 2 if zero
+	Batches   [][]string // records each Embed call's values
+	Dim       int        // embedding size; default 3
+	Err       error      // if set, every call fails with it
+}
+
+// Embed implements provider.EmbeddingModel. It records the values in Batches,
+// then returns Err if set, otherwise deterministic vectors where each
+// component of vector i equals float64(len(values[i])). Usage.TotalTokens
+// equals len(values).
+func (m *MockEmbedder) Embed(ctx context.Context, values []string) (*provider.EmbeddingResponse, error) {
+	m.Batches = append(m.Batches, values)
+	if m.Err != nil {
+		return nil, m.Err
+	}
+
+	dim := m.Dim
+	if dim == 0 {
+		dim = 3
+	}
+
+	embeddings := make([][]float64, len(values))
+	for i, val := range values {
+		emb := make([]float64, dim)
+		for j := range emb {
+			emb[j] = float64(len(val))
+		}
+		embeddings[i] = emb
+	}
+
+	return &provider.EmbeddingResponse{
+		Embeddings: embeddings,
+		Usage:      provider.Usage{TotalTokens: len(values)},
+	}, nil
+}
+
+// MaxBatchSize implements provider.EmbeddingModel.
+func (m *MockEmbedder) MaxBatchSize() int {
+	if m.BatchSize == 0 {
+		return 2
+	}
+	return m.BatchSize
+}
+
+// ModelID implements provider.EmbeddingModel.
+func (m *MockEmbedder) ModelID() string { return "mock-embedder" }
+
+// ProviderName implements provider.EmbeddingModel.
+func (m *MockEmbedder) ProviderName() string { return "aitest" }
