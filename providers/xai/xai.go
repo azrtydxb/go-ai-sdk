@@ -13,26 +13,36 @@ import (
 
 const defaultBaseURL = "https://api.x.ai/v1"
 
+// Provider is an X.AI-backed provider.LanguageModel factory.
 type Provider struct {
 	apiKey     string
 	baseURL    string
 	httpClient *http.Client
 }
 
+// Option configures a Provider.
 type Option func(*Provider)
 
-func WithAPIKey(k string) Option           { return func(p *Provider) { p.apiKey = k } }
-func WithBaseURL(u string) Option          { return func(p *Provider) { p.baseURL = u } }
+// WithAPIKey sets the API key used for Authorization headers. Defaults to
+// os.Getenv("XAI_API_KEY").
+func WithAPIKey(k string) Option { return func(p *Provider) { p.apiKey = k } }
+
+// WithBaseURL overrides the API base URL (default "https://api.x.ai/v1").
+func WithBaseURL(u string) Option { return func(p *Provider) { p.baseURL = u } }
+
+// WithHTTPClient overrides the *http.Client used for requests.
 func WithHTTPClient(c *http.Client) Option { return func(p *Provider) { p.httpClient = c } }
 
+// New creates a new X.AI Provider.
 func New(opts ...Option) *Provider {
-	p := &Provider{apiKey: os.Getenv("XAI_API_KEY"), baseURL: defaultBaseURL}
+	p := &Provider{apiKey: os.Getenv("XAI_API_KEY"), baseURL: defaultBaseURL, httpClient: http.DefaultClient}
 	for _, o := range opts {
 		o(p)
 	}
 	return p
 }
 
+// Model returns a provider.LanguageModel for the given X.AI model ID.
 func (p *Provider) Model(id string) provider.LanguageModel {
 	return openaicompat.NewLanguageModel(openaicompat.Config{
 		Name:       "xai",
