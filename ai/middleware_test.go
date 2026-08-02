@@ -530,6 +530,67 @@ func TestDefaultSettingsMiddleware_PerCallWins(t *testing.T) {
 	}
 }
 
+// TestMergeProviderOptions_DefensiveCopy covers that mergeProviderOptions
+// never hands back a map aliasing the caller's defaults or override maps:
+// mutating the merged result (both the top-level map and a namespace map
+// within it) must not be observable through either input afterward.
+func TestMergeProviderOptions_DefensiveCopy(t *testing.T) {
+	defaults := map[string]any{
+		"openai": map[string]any{"seed": 42},
+	}
+	override := map[string]any{
+		"anthropic": map[string]any{"top_k": 5},
+	}
+
+	merged := mergeProviderOptions(defaults, override)
+
+	// Mutate the merged top-level map: add a namespace and overwrite an
+	// existing one.
+	merged["new_provider"] = map[string]any{"x": 1}
+	merged["anthropic"] = "clobbered"
+
+	// Mutate a namespace map reached through the merged result.
+	openaiOpts := merged["openai"].(map[string]any)
+	openaiOpts["seed"] = 999
+	openaiOpts["extra"] = "added"
+
+	if _, ok := defaults["new_provider"]; ok {
+		t.Error("mutating merged added a key visible in defaults")
+	}
+	if _, ok := override["new_provider"]; ok {
+		t.Error("mutating merged added a key visible in override")
+	}
+	if _, ok := override["anthropic"].(map[string]any); !ok {
+		t.Error("mutating merged[\"anthropic\"] clobbered override's anthropic map")
+	}
+	defOpenai := defaults["openai"].(map[string]any)
+	if defOpenai["seed"] != 42 {
+		t.Errorf("defaults[openai][seed] = %v, want 42 (unaffected by mutating merged result)", defOpenai["seed"])
+	}
+	if _, ok := defOpenai["extra"]; ok {
+		t.Error("defaults[openai] gained a key added to the merged result's namespace map")
+	}
+}
+
+// TestMergeProviderOptions_DefensiveCopy_DefaultsOnly covers the fast path
+// where override is empty: the returned map must still be a fresh copy of
+// defaults, not defaults itself.
+func TestMergeProviderOptions_DefensiveCopy_DefaultsOnly(t *testing.T) {
+	defaults := map[string]any{
+		"openai": map[string]any{"seed": 42},
+	}
+	merged := mergeProviderOptions(defaults, nil)
+	merged["openai"].(map[string]any)["seed"] = 999
+	merged["new_provider"] = "x"
+
+	if defaults["openai"].(map[string]any)["seed"] != 42 {
+		t.Error("mutating merged (defaults-only path) affected defaults' namespace map")
+	}
+	if _, ok := defaults["new_provider"]; ok {
+		t.Error("mutating merged (defaults-only path) added a key visible in defaults")
+	}
+}
+
 func TestDefaultSettingsMiddleware_Stream(t *testing.T) {
 	mock := &aitest.MockModel{Streams: [][]provider.StreamPart{{provider.FinishPart{Reason: provider.FinishStop}}}}
 	defTemp := 0.5

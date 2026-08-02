@@ -452,30 +452,33 @@ func (m *defaultSettingsModel) applyDefaults(call provider.Call) provider.Call {
 // mergeProviderOptions shallow-merges per-call provider options over
 // defaults, per provider-name namespace: within a namespace, per-call
 // entries win over the matching default entries; namespaces present only
-// in defaults are carried through unchanged.
+// in defaults are carried through unchanged. The returned map (and any
+// namespace map within it) is always a fresh copy — the caller's defaults
+// and override maps are never aliased, so mutating the result afterward
+// cannot affect either input.
 func mergeProviderOptions(defaults, override map[string]any) map[string]any {
 	if len(defaults) == 0 {
-		return override
+		return copyOptionsMap(override)
 	}
 	if len(override) == 0 {
-		return defaults
+		return copyOptionsMap(defaults)
 	}
 
 	merged := make(map[string]any, len(defaults)+len(override))
-	for k, v := range defaults {
-		merged[k] = v
+	for ns, v := range defaults {
+		merged[ns] = copyNamespaceValue(v)
 	}
 	for ns, ov := range override {
 		dv, ok := merged[ns]
 		if !ok {
-			merged[ns] = ov
+			merged[ns] = copyNamespaceValue(ov)
 			continue
 		}
 		dm, dOk := dv.(map[string]any)
 		om, oOk := ov.(map[string]any)
 		if !dOk || !oOk {
 			// Not both maps: per-call value wins outright.
-			merged[ns] = ov
+			merged[ns] = copyNamespaceValue(ov)
 			continue
 		}
 		nsMerged := make(map[string]any, len(dm)+len(om))
@@ -488,4 +491,33 @@ func mergeProviderOptions(defaults, override map[string]any) map[string]any {
 		merged[ns] = nsMerged
 	}
 	return merged
+}
+
+// copyOptionsMap returns a copy of m (nil stays nil) with both the
+// top-level map and every namespace map[string]any value within it freshly
+// allocated, so the result never aliases m or any map nested in it.
+func copyOptionsMap(m map[string]any) map[string]any {
+	if m == nil {
+		return nil
+	}
+	cp := make(map[string]any, len(m))
+	for k, v := range m {
+		cp[k] = copyNamespaceValue(v)
+	}
+	return cp
+}
+
+// copyNamespaceValue returns a shallow copy of v when it is a
+// map[string]any (the common shape of a provider-options namespace value),
+// otherwise v unchanged.
+func copyNamespaceValue(v any) any {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return v
+	}
+	cp := make(map[string]any, len(m))
+	for k, vv := range m {
+		cp[k] = vv
+	}
+	return cp
 }
