@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -68,6 +69,9 @@ func structSchema(t reflect.Type, visiting map[reflect.Type]bool) (map[string]an
 			required = append(required, name)
 		}
 	}
+	// Map iteration order is randomized; sort so the marshaled schema bytes
+	// are deterministic across runs (needed for caching/golden comparisons).
+	sort.Strings(required)
 
 	return map[string]any{
 		"type":                 "object",

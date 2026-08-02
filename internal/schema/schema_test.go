@@ -328,3 +328,52 @@ func TestForType_NonStructError(t *testing.T) {
 		t.Fatalf("error should mention struct requirement: %v", err)
 	}
 }
+
+// manyRequired has enough required fields that, prior to sorting "required",
+// Go's randomized map iteration order would make repeated For[] calls
+// produce different JSON bytes.
+type manyRequired struct {
+	Zebra   string `json:"zebra"`
+	Alpha   string `json:"alpha"`
+	Mike    string `json:"mike"`
+	Golf    string `json:"golf"`
+	Delta   string `json:"delta"`
+	Charlie string `json:"charlie"`
+	Kilo    string `json:"kilo"`
+	Bravo   string `json:"bravo"`
+}
+
+// TestForType_RequiredOrderIsDeterministic asserts that (a) generating the
+// schema for the same struct twice produces byte-identical output, and (b)
+// the "required" array is in a specific, exact (sorted) order rather than
+// whatever order the underlying map happened to iterate in.
+func TestForType_RequiredOrderIsDeterministic(t *testing.T) {
+	raw1, err := For[manyRequired]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 20; i++ {
+		raw2, err := For[manyRequired]()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(raw1) != string(raw2) {
+			t.Fatalf("schema bytes differ across runs:\n run 0: %s\n run %d: %s", raw1, i+1, raw2)
+		}
+	}
+
+	var s map[string]any
+	if err := json.Unmarshal(raw1, &s); err != nil {
+		t.Fatal(err)
+	}
+	req := s["required"].([]any)
+	want := []string{"alpha", "bravo", "charlie", "delta", "golf", "kilo", "mike", "zebra"}
+	if len(req) != len(want) {
+		t.Fatalf("required = %v, want %v", req, want)
+	}
+	for i, w := range want {
+		if req[i] != w {
+			t.Fatalf("required[%d] = %v, want %q (required = %v)", i, req[i], w, req)
+		}
+	}
+}
