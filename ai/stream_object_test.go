@@ -120,3 +120,33 @@ func TestStreamObjectFinalNeverValid(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// TestStreamObjectFinalAbandoned verifies that if the caller abandons
+// Partials() early (breaks out of the range before the stream finishes),
+// Final() reports an error rather than silently returning a zero-value T
+// with a nil error — which would look like a successful decode of an empty
+// object.
+func TestStreamObjectFinalAbandoned(t *testing.T) {
+	m := &aitest.MockModel{
+		Caps: provider.Capabilities{NativeJSON: true},
+		Streams: [][]provider.StreamPart{{
+			provider.TextDelta{Text: `{"city":"Gh`},
+			provider.TextDelta{Text: `ent","temp"`},
+			provider.TextDelta{Text: `:21}`},
+			provider.FinishPart{Reason: provider.FinishStop},
+		}},
+	}
+	s, err := StreamObject[forecast](t.Context(), GenerateObjectOpts{Model: m, Prompt: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Partials() {
+		break // abandon after the first partial
+	}
+
+	final, err := s.Final()
+	var noge *NoObjectGeneratedError
+	if !errors.As(err, &noge) {
+		t.Fatalf("want *NoObjectGeneratedError, got final=%+v err=%v", final, err)
+	}
+}
