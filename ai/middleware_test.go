@@ -35,7 +35,7 @@ func TestExtractReasoningMiddleware_Generate(t *testing.T) {
 			},
 		},
 	}
-	wrapped := ExtractReasoningMiddleware(mock, "think")
+	wrapped := ExtractReasoningMiddleware(mock, ExtractReasoningOpts{TagName: "think"})
 
 	resp, err := wrapped.Generate(context.Background(), provider.Call{})
 	if err != nil {
@@ -63,7 +63,7 @@ func TestExtractReasoningMiddleware_Generate_NoTag(t *testing.T) {
 			{Content: []provider.ContentPart{provider.TextPart{Text: "just plain text"}}},
 		},
 	}
-	wrapped := ExtractReasoningMiddleware(mock, "think")
+	wrapped := ExtractReasoningMiddleware(mock, ExtractReasoningOpts{TagName: "think"})
 
 	resp, err := wrapped.Generate(context.Background(), provider.Call{})
 	if err != nil {
@@ -78,6 +78,33 @@ func TestExtractReasoningMiddleware_Generate_NoTag(t *testing.T) {
 	}
 }
 
+// TestExtractReasoningMiddleware_Generate_OrphanCloseTagIsInert verifies
+// that with the default StartWithReasoning=false, a closing tag with no
+// matching opener is inert: it passes through as ordinary text rather
+// than being reclassified as reasoning.
+func TestExtractReasoningMiddleware_Generate_OrphanCloseTagIsInert(t *testing.T) {
+	mock := &aitest.MockModel{
+		Responses: []*provider.Response{
+			{Content: []provider.ContentPart{
+				provider.TextPart{Text: "no opener here</think> the answer"},
+			}},
+		},
+	}
+	wrapped := ExtractReasoningMiddleware(mock, ExtractReasoningOpts{TagName: "think"})
+
+	resp, err := wrapped.Generate(context.Background(), provider.Call{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Content) != 1 {
+		t.Fatalf("Content = %#v", resp.Content)
+	}
+	tp, ok := resp.Content[0].(provider.TextPart)
+	if !ok || tp.Text != "no opener here</think> the answer" {
+		t.Errorf("Content[0] = %#v, want unmodified TextPart", resp.Content[0])
+	}
+}
+
 func TestExtractReasoningMiddleware_Generate_StartWithReasoning(t *testing.T) {
 	mock := &aitest.MockModel{
 		Responses: []*provider.Response{
@@ -86,7 +113,7 @@ func TestExtractReasoningMiddleware_Generate_StartWithReasoning(t *testing.T) {
 			}},
 		},
 	}
-	wrapped := ExtractReasoningMiddleware(mock, "think")
+	wrapped := ExtractReasoningMiddleware(mock, ExtractReasoningOpts{TagName: "think", StartWithReasoning: true})
 
 	resp, err := wrapped.Generate(context.Background(), provider.Call{})
 	if err != nil {
@@ -116,7 +143,7 @@ func TestExtractReasoningMiddleware_Stream(t *testing.T) {
 			},
 		},
 	}
-	wrapped := ExtractReasoningMiddleware(mock, "think")
+	wrapped := ExtractReasoningMiddleware(mock, ExtractReasoningOpts{TagName: "think"})
 
 	sr, err := wrapped.Stream(context.Background(), provider.Call{})
 	if err != nil {
@@ -155,7 +182,7 @@ func TestExtractReasoningMiddleware_Stream_TagSplitAcrossDeltas(t *testing.T) {
 			},
 		},
 	}
-	wrapped := ExtractReasoningMiddleware(mock, "think")
+	wrapped := ExtractReasoningMiddleware(mock, ExtractReasoningOpts{TagName: "think"})
 
 	sr, err := wrapped.Stream(context.Background(), provider.Call{})
 	if err != nil {
@@ -179,17 +206,69 @@ func TestExtractReasoningMiddleware_Stream_TagSplitAcrossDeltas(t *testing.T) {
 	}
 }
 
-func TestExtractReasoningMiddleware_Stream_StartWithReasoning(t *testing.T) {
+// TestExtractReasoningMiddleware_Stream_OrphanCloseTagIsInert verifies
+// that, streaming, a closing tag with no matching opener passes through
+// as ordinary TextDelta content (default StartWithReasoning=false), and
+// that non-tag content around it is still delivered incrementally rather
+// than buffered up.
+func TestExtractReasoningMiddleware_Stream_OrphanCloseTagIsInert(t *testing.T) {
 	mock := &aitest.MockModel{
 		Streams: [][]provider.StreamPart{
 			{
-				provider.TextDelta{Text: "Thinking without tag</th"},
-				provider.TextDelta{Text: "ink> Answer"},
+				provider.TextDelta{Text: "no opener "},
+				provider.TextDelta{Text: "here</th"},
+				provider.TextDelta{Text: "ink> answer"},
 				provider.FinishPart{Reason: provider.FinishStop},
 			},
 		},
 	}
-	wrapped := ExtractReasoningMiddleware(mock, "think")
+	wrapped := ExtractReasoningMiddleware(mock, ExtractReasoningOpts{TagName: "think"})
+
+	sr, err := wrapped.Stream(context.Background(), provider.Call{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	parts := collectStreamParts(t, sr)
+
+	// Outside (not-yet-reasoning) state only ever watches for the OPENING
+	// tag, so "</th"/"ink>" never look like a candidate prefix of it —
+	// each delta is therefore flushed as its own TextDelta immediately,
+	// verbatim, with no buffering at all, proving the scanner isn't
+	// holding anything back waiting to see whether a stray close tag
+	// shows up.
+	want := []provider.StreamPart{
+		provider.TextDelta{Text: "no opener "},
+		provider.TextDelta{Text: "here</th"},
+		provider.TextDelta{Text: "ink> answer"},
+		provider.FinishPart{Reason: provider.FinishStop},
+	}
+	if len(parts) != len(want) {
+		t.Fatalf("parts = %#v, want %#v", parts, want)
+	}
+	for i := range want {
+		if parts[i] != want[i] {
+			t.Errorf("parts[%d] = %#v, want %#v", i, parts[i], want[i])
+		}
+	}
+}
+
+// TestExtractReasoningMiddleware_Stream_StartWithReasoningIncremental
+// verifies that with StartWithReasoning=true, reasoning text is streamed
+// incrementally as ReasoningDeltas (multiple deltas for multiple input
+// TextDeltas, not buffered into one), up until the closing tag, after
+// which normal text resumes.
+func TestExtractReasoningMiddleware_Stream_StartWithReasoningIncremental(t *testing.T) {
+	mock := &aitest.MockModel{
+		Streams: [][]provider.StreamPart{
+			{
+				provider.TextDelta{Text: "Thinking "},
+				provider.TextDelta{Text: "without tag"},
+				provider.TextDelta{Text: "</think> Answer"},
+				provider.FinishPart{Reason: provider.FinishStop},
+			},
+		},
+	}
+	wrapped := ExtractReasoningMiddleware(mock, ExtractReasoningOpts{TagName: "think", StartWithReasoning: true})
 
 	sr, err := wrapped.Stream(context.Background(), provider.Call{})
 	if err != nil {
@@ -198,7 +277,8 @@ func TestExtractReasoningMiddleware_Stream_StartWithReasoning(t *testing.T) {
 	parts := collectStreamParts(t, sr)
 
 	want := []provider.StreamPart{
-		provider.ReasoningDelta{Text: "Thinking without tag"},
+		provider.ReasoningDelta{Text: "Thinking "},
+		provider.ReasoningDelta{Text: "without tag"},
 		provider.ReasoningEnd{Part: provider.ReasoningPart{Text: "Thinking without tag"}},
 		provider.TextDelta{Text: " Answer"},
 		provider.FinishPart{Reason: provider.FinishStop},
@@ -210,6 +290,16 @@ func TestExtractReasoningMiddleware_Stream_StartWithReasoning(t *testing.T) {
 		if parts[i] != want[i] {
 			t.Errorf("parts[%d] = %#v, want %#v", i, parts[i], want[i])
 		}
+	}
+
+	var reasoningDeltaCount int
+	for _, p := range parts {
+		if _, ok := p.(provider.ReasoningDelta); ok {
+			reasoningDeltaCount++
+		}
+	}
+	if reasoningDeltaCount < 2 {
+		t.Errorf("got %d ReasoningDelta parts, want at least 2 (incremental streaming)", reasoningDeltaCount)
 	}
 }
 
@@ -223,7 +313,7 @@ func TestExtractReasoningMiddleware_Stream_NoTag(t *testing.T) {
 			},
 		},
 	}
-	wrapped := ExtractReasoningMiddleware(mock, "think")
+	wrapped := ExtractReasoningMiddleware(mock, ExtractReasoningOpts{TagName: "think"})
 
 	sr, err := wrapped.Stream(context.Background(), provider.Call{})
 	if err != nil {
@@ -231,11 +321,12 @@ func TestExtractReasoningMiddleware_Stream_NoTag(t *testing.T) {
 	}
 	parts := collectStreamParts(t, sr)
 
-	// No tag ever appears, so everything buffered flushes as one TextDelta
-	// once the stream ends and the ambiguity resolves in favor of "plain
-	// text", followed by the pass-through FinishPart.
+	// Neither delta contains a "<" so both flow through immediately and
+	// incrementally as separate TextDeltas — no buffering pending
+	// resolution of whether a tag might show up later.
 	want := []provider.StreamPart{
-		provider.TextDelta{Text: "hello world"},
+		provider.TextDelta{Text: "hello "},
+		provider.TextDelta{Text: "world"},
 		provider.FinishPart{Reason: provider.FinishStop},
 	}
 	if len(parts) != len(want) {
@@ -246,11 +337,21 @@ func TestExtractReasoningMiddleware_Stream_NoTag(t *testing.T) {
 			t.Errorf("parts[%d] = %#v, want %#v", i, parts[i], want[i])
 		}
 	}
+
+	var textDeltaCount int
+	for _, p := range parts {
+		if _, ok := p.(provider.TextDelta); ok {
+			textDeltaCount++
+		}
+	}
+	if textDeltaCount < 2 {
+		t.Errorf("got %d TextDelta parts, want at least 2 (incremental streaming)", textDeltaCount)
+	}
 }
 
 func TestExtractReasoningMiddleware_PassthroughFields(t *testing.T) {
 	mock := &aitest.MockModel{Caps: provider.Capabilities{NativeJSON: true}}
-	wrapped := ExtractReasoningMiddleware(mock, "think")
+	wrapped := ExtractReasoningMiddleware(mock, ExtractReasoningOpts{TagName: "think"})
 	if wrapped.ModelID() != mock.ModelID() {
 		t.Errorf("ModelID mismatch")
 	}

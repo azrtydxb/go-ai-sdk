@@ -13,6 +13,24 @@ import (
 // ExtractReasoningMiddleware
 // ---------------------------------------------------------------------
 
+// ExtractReasoningOpts configures ExtractReasoningMiddleware.
+type ExtractReasoningOpts struct {
+	// TagName is the tag name without angle brackets, e.g. "think".
+	// Required.
+	TagName string
+
+	// StartWithReasoning indicates the model omits the opening tag and
+	// begins its response already "inside" the reasoning span, relying
+	// solely on the closing tag to mark the transition to normal output
+	// (e.g. a raw "Let me work through this... </think> The answer is
+	// 4."). When true, content from the very start of the call/stream is
+	// treated as reasoning until the closing tag is seen (or, if it never
+	// arrives, for the whole response). When false (the default), an
+	// orphan closing tag with no matching opener is inert: it passes
+	// through as ordinary text verbatim.
+	StartWithReasoning bool
+}
+
 // ExtractReasoningMiddleware wraps model so that <tagName>...</tagName>
 // spans embedded in its text output are pulled out and re-emitted as
 // reasoning content (provider.ReasoningPart in Generate responses,
@@ -21,30 +39,20 @@ import (
 // tag in the text stream rather than a dedicated reasoning content type
 // (e.g. some DeepSeek-compatible endpoints using "<think>...</think>").
 //
-// tagName is the tag name without angle brackets, e.g. "think".
-//
-// Some models omit the opening tag entirely and begin their response
-// already "inside" the reasoning span, relying solely on the closing tag
-// to mark the transition to normal output (e.g. a raw
-// "Let me work through this... </think> The answer is 4."). This is
-// detected automatically: if a closing tag is encountered before any
-// opening tag has been seen, everything received so far in the call is
-// treated as reasoning text retroactively. Because this determination
-// can only be made once we know whether the response ever contains the
-// tag markers, the very first span of a call is buffered in full until
-// the ambiguity resolves (i.e. until the first tag boundary of either
-// kind is found, or the call/stream ends without one). After that first
-// resolution, scanning reverts to bounded buffering: only the longest
-// unresolved prefix of the tag currently being watched for is held back,
-// so tag markers split across stream deltas are still recognized without
-// buffering unrelated content.
-func ExtractReasoningMiddleware(model provider.LanguageModel, tagName string) provider.LanguageModel {
-	return &extractReasoningModel{model: model, tagName: tagName}
+// The stream path is fully incremental: it never buffers more than the
+// longest unresolved prefix of the tag currently being watched for (open
+// tag while outside reasoning, close tag while inside), so text/reasoning
+// content flows to the caller as it arrives rather than being held back
+// pending a later determination. Tag markers split across stream deltas
+// (e.g. "<th" then "ink>") are still recognized correctly since the
+// unresolved prefix carries over between feeds.
+func ExtractReasoningMiddleware(model provider.LanguageModel, opts ExtractReasoningOpts) provider.LanguageModel {
+	return &extractReasoningModel{model: model, opts: opts}
 }
 
 type extractReasoningModel struct {
-	model   provider.LanguageModel
-	tagName string
+	model provider.LanguageModel
+	opts  ExtractReasoningOpts
 }
 
 func (m *extractReasoningModel) ModelID() string                     { return m.model.ModelID() }
@@ -56,7 +64,7 @@ func (m *extractReasoningModel) Generate(ctx context.Context, call provider.Call
 	if err != nil {
 		return nil, err
 	}
-	return extractReasoningFromResponse(resp, m.tagName), nil
+	return extractReasoningFromResponse(resp, m.opts), nil
 }
 
 func (m *extractReasoningModel) Stream(ctx context.Context, call provider.Call) (provider.StreamResponse, error) {
@@ -64,13 +72,13 @@ func (m *extractReasoningModel) Stream(ctx context.Context, call provider.Call) 
 	if err != nil {
 		return nil, err
 	}
-	return &extractReasoningStream{inner: inner, tagName: m.tagName}, nil
+	return &extractReasoningStream{inner: inner, opts: m.opts}, nil
 }
 
 // extractReasoningFromResponse rewrites resp's TextParts, splitting out any
 // <tagName>...</tagName> spans into ReasoningParts. Other content part
 // types pass through unchanged, in their original position.
-func extractReasoningFromResponse(resp *provider.Response, tagName string) *provider.Response {
+func extractReasoningFromResponse(resp *provider.Response, opts ExtractReasoningOpts) *provider.Response {
 	var newContent []provider.ContentPart
 	for _, part := range resp.Content {
 		tp, ok := part.(provider.TextPart)
@@ -78,7 +86,7 @@ func extractReasoningFromResponse(resp *provider.Response, tagName string) *prov
 			newContent = append(newContent, part)
 			continue
 		}
-		newContent = append(newContent, extractReasoningParts(tp.Text, tagName)...)
+		newContent = append(newContent, extractReasoningParts(tp.Text, opts)...)
 	}
 	return &provider.Response{
 		Content:      newContent,
@@ -90,7 +98,7 @@ func extractReasoningFromResponse(resp *provider.Response, tagName string) *prov
 
 // extractReasoningParts scans text for tagName spans and returns an
 // ordered slice of TextPart/ReasoningPart content parts.
-func extractReasoningParts(text, tagName string) []provider.ContentPart {
+func extractReasoningParts(text string, opts ExtractReasoningOpts) []provider.ContentPart {
 	var parts []provider.ContentPart
 	var textBuf, reasonBuf strings.Builder
 
@@ -121,7 +129,7 @@ func extractReasoningParts(text, tagName string) []provider.ContentPart {
 		},
 	}
 
-	sc := newReasoningScanner(tagName, sink)
+	sc := newReasoningScanner(opts.TagName, opts.StartWithReasoning, sink)
 	sc.feed([]byte(text))
 	sc.finish()
 	flushText()
@@ -135,8 +143,8 @@ func extractReasoningParts(text, tagName string) []provider.ContentPart {
 // TextDelta/ReasoningDelta/ReasoningEnd. Non-text parts pass through
 // unchanged.
 type extractReasoningStream struct {
-	inner   provider.StreamResponse
-	tagName string
+	inner provider.StreamResponse
+	opts  ExtractReasoningOpts
 }
 
 func (s *extractReasoningStream) Parts() iter.Seq[provider.StreamPart] {
@@ -173,7 +181,7 @@ func (s *extractReasoningStream) Parts() iter.Seq[provider.StreamPart] {
 			},
 		}
 
-		sc := newReasoningScanner(s.tagName, sink)
+		sc := newReasoningScanner(s.opts.TagName, s.opts.StartWithReasoning, sink)
 
 		for p := range s.inner.Parts() {
 			if stopped {
@@ -185,9 +193,10 @@ func (s *extractReasoningStream) Parts() iter.Seq[provider.StreamPart] {
 				// A non-text part (e.g. ToolCallEnd, FinishPart) marks a
 				// boundary: flush any text/reasoning buffered so far so
 				// it's emitted in order before this part, then start a
-				// fresh scan for any further TextDeltas.
+				// fresh scan (back in the configured start state) for any
+				// further TextDeltas.
 				sc.finish()
-				sc = newReasoningScanner(s.tagName, sink)
+				sc = newReasoningScanner(s.opts.TagName, s.opts.StartWithReasoning, sink)
 				emit(p)
 			}
 			if stopped {
@@ -211,61 +220,39 @@ type reasoningSink struct {
 }
 
 // reasoningScanner incrementally splits a byte stream into plain-text and
-// <tagName>...</tagName> reasoning spans. See ExtractReasoningMiddleware's
-// doc comment for the two-phase buffering strategy (unbounded until the
-// first tag boundary resolves, then bounded to the tag's own length).
+// <tagName>...</tagName> reasoning spans, starting in the "reasoning" state
+// when startWithReasoning is true (position 0 counts as already inside an
+// open span) or the "outside" state otherwise. It never buffers more than
+// the longest unresolved prefix of the tag it is currently watching for
+// (open tag while outside, close tag while inside): content that cannot
+// possibly be part of that tag is flushed to the sink immediately, so
+// scanning is fully incremental with no unbounded buffering. In the
+// default (startWithReasoning=false) outside state, the scanner only ever
+// watches for the opening tag, so a closing tag with no matching opener is
+// never recognized as a boundary — it flows through as ordinary text, byte
+// for byte, once it's clear it can't be an opening-tag prefix.
 type reasoningScanner struct {
 	openTag  []byte
 	closeTag []byte
 
-	resolved    bool
 	inReasoning bool
 	buf         []byte
 
 	sink reasoningSink
 }
 
-func newReasoningScanner(tagName string, sink reasoningSink) *reasoningScanner {
+func newReasoningScanner(tagName string, startWithReasoning bool, sink reasoningSink) *reasoningScanner {
 	return &reasoningScanner{
-		openTag:  []byte("<" + tagName + ">"),
-		closeTag: []byte("</" + tagName + ">"),
-		sink:     sink,
+		openTag:     []byte("<" + tagName + ">"),
+		closeTag:    []byte("</" + tagName + ">"),
+		inReasoning: startWithReasoning,
+		sink:        sink,
 	}
 }
 
 func (s *reasoningScanner) feed(data []byte) {
 	s.buf = append(s.buf, data...)
 	for {
-		if !s.resolved {
-			oIdx := bytes.Index(s.buf, s.openTag)
-			cIdx := bytes.Index(s.buf, s.closeTag)
-			switch {
-			case oIdx == -1 && cIdx == -1:
-				// Ambiguous: keep buffering until we know whether this
-				// call ever mentions the tag.
-				return
-			case oIdx != -1 && (cIdx == -1 || oIdx <= cIdx):
-				if oIdx > 0 {
-					s.sink.text(string(s.buf[:oIdx]))
-				}
-				s.buf = s.buf[oIdx+len(s.openTag):]
-				s.inReasoning = true
-				s.resolved = true
-				continue
-			default:
-				// Closing tag found with no preceding opening tag: the
-				// model started the response already "inside" reasoning.
-				if cIdx > 0 {
-					s.sink.reasoningText(string(s.buf[:cIdx]))
-				}
-				s.sink.reasoningClose()
-				s.buf = s.buf[cIdx+len(s.closeTag):]
-				s.inReasoning = false
-				s.resolved = true
-				continue
-			}
-		}
-
 		watch := s.openTag
 		if s.inReasoning {
 			watch = s.closeTag
@@ -283,10 +270,8 @@ func (s *reasoningScanner) feed(data []byte) {
 			s.buf = s.buf[idx+len(watch):]
 			if s.inReasoning {
 				s.sink.reasoningClose()
-				s.inReasoning = false
-			} else {
-				s.inReasoning = true
 			}
+			s.inReasoning = !s.inReasoning
 			continue
 		}
 
@@ -304,17 +289,10 @@ func (s *reasoningScanner) feed(data []byte) {
 	}
 }
 
-// finish flushes any remaining buffered content at the end of input.
+// finish flushes any remaining buffered content (an unresolved tag-prefix
+// candidate that never completed) at the end of input, verbatim, in
+// whatever state the scanner is currently in.
 func (s *reasoningScanner) finish() {
-	if !s.resolved {
-		// The tag never appeared: treat everything buffered as ordinary
-		// text.
-		if len(s.buf) > 0 {
-			s.sink.text(string(s.buf))
-		}
-		s.buf = nil
-		return
-	}
 	if len(s.buf) > 0 {
 		if s.inReasoning {
 			s.sink.reasoningText(string(s.buf))
