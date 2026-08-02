@@ -202,3 +202,41 @@ func TestAssistantReasoningPartNotRoundTripped(t *testing.T) {
 		t.Errorf("request body contains reasoning text, want dropped: %s", lastRaw)
 	}
 }
+
+// TestAssistantSourcePartSkippedNotError covers the spec-owner ruling that
+// SDK-generated informational content parts must be replay-safe: a
+// SourcePart in an assistant message's history (e.g. from a prior grounded
+// turn) must be silently skipped when building the next request — not
+// rejected as an unsupported content part, and not present on the wire.
+func TestAssistantSourcePartSkippedNotError(t *testing.T) {
+	var lastRaw []byte
+	model := newReasoningTestModel(t, func(w http.ResponseWriter, r *http.Request) {
+		var err error
+		lastRaw, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		resp := chatResponse{Choices: []chatResponseChoice{{Message: chatResponseMessage{Content: strPtr("ok")}, FinishReason: "stop"}}}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	})
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			provider.UserText("why is the sky blue"),
+			{
+				Role: provider.RoleAssistant,
+				Content: []provider.ContentPart{
+					provider.TextPart{Text: "The sky is blue."},
+					provider.SourcePart{ID: "source_0", URL: "https://example.com/sky", Title: "Sky Facts"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if strings.Contains(string(lastRaw), "example.com/sky") || strings.Contains(string(lastRaw), "Sky Facts") {
+		t.Errorf("request body contains grounding artifacts, want dropped: %s", lastRaw)
+	}
+}

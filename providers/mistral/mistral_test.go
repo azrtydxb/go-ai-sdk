@@ -200,6 +200,60 @@ func TestCapabilities(t *testing.T) {
 	}
 }
 
+// TestAssistantSourcePartSkippedNotError and
+// TestAssistantReasoningPartSkippedNotError cover the spec-owner ruling
+// that SDK-generated informational content parts must be replay-safe: a
+// SourcePart or ReasoningPart in an assistant message's history must be
+// silently skipped when building the next request (not rejected as
+// unsupported, and not present on the wire).
+func TestAssistantSourcePartSkippedNotError(t *testing.T) {
+	srv, fs := newFixtureServer(t)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("mistral-test")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			provider.UserText("simple"),
+			{
+				Role: provider.RoleAssistant,
+				Content: []provider.ContentPart{
+					provider.TextPart{Text: "The sky is blue."},
+					provider.SourcePart{ID: "source_0", URL: "https://example.com/sky", Title: "Sky Facts"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if strings.Contains(string(fs.rawBody()), "example.com/sky") || strings.Contains(string(fs.rawBody()), "Sky Facts") {
+		t.Errorf("request body contains grounding artifacts, want dropped: %s", fs.rawBody())
+	}
+}
+
+func TestAssistantReasoningPartSkippedNotError(t *testing.T) {
+	srv, fs := newFixtureServer(t)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("mistral-test")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			provider.UserText("simple"),
+			{
+				Role: provider.RoleAssistant,
+				Content: []provider.ContentPart{
+					provider.ReasoningPart{Text: "internal reasoning"},
+					provider.TextPart{Text: "answer"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if strings.Contains(string(fs.rawBody()), "internal reasoning") {
+		t.Errorf("request body contains reasoning text, want dropped: %s", fs.rawBody())
+	}
+}
+
 func TestRequestShapeMaxTokensField(t *testing.T) {
 	srv, fs := newFixtureServer(t)
 	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("mistral-test")

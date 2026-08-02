@@ -266,6 +266,64 @@ func TestProvidertestConformance(t *testing.T) {
 	})
 }
 
+// TestAssistantSourcePartSkippedNotError and
+// TestAssistantReasoningPartSkippedNotError cover the spec-owner ruling
+// that SDK-generated informational content parts must be replay-safe: a
+// SourcePart or ReasoningPart in an assistant message's history must be
+// silently skipped when building the next request (not rejected as
+// unsupported, and not present on the wire).
+func TestAssistantSourcePartSkippedNotError(t *testing.T) {
+	model, fs := newTestModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			provider.UserText("simple"),
+			{
+				Role: provider.RoleAssistant,
+				Content: []provider.ContentPart{
+					provider.TextPart{Text: "The sky is blue."},
+					provider.SourcePart{ID: "source_0", URL: "https://example.com/sky", Title: "Sky Facts"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	req, _, _ := fs.snapshot()
+	blocks := req.Messages[1].Content
+	if len(blocks) != 1 || blocks[0].Text == nil || *blocks[0].Text != "The sky is blue." {
+		t.Fatalf("blocks = %#v, want exactly one text block (SourcePart dropped)", blocks)
+	}
+}
+
+func TestAssistantReasoningPartSkippedNotError(t *testing.T) {
+	model, fs := newTestModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			provider.UserText("simple"),
+			{
+				Role: provider.RoleAssistant,
+				Content: []provider.ContentPart{
+					provider.ReasoningPart{Text: "internal reasoning"},
+					provider.TextPart{Text: "answer"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	req, _, _ := fs.snapshot()
+	blocks := req.Messages[1].Content
+	if len(blocks) != 1 || blocks[0].Text == nil || *blocks[0].Text != "answer" {
+		t.Fatalf("blocks = %#v, want exactly one text block (ReasoningPart dropped)", blocks)
+	}
+}
+
 func TestRequestShape_ToolsAndInferenceConfig(t *testing.T) {
 	model, fs := newTestModel(t)
 

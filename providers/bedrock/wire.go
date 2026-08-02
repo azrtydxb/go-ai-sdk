@@ -313,6 +313,12 @@ func convertMessages(msgs []provider.Message) ([]wireMessage, error) {
 						Name:      p.Name,
 						Input:     args,
 					}})
+				case provider.SourcePart:
+					// informational, not replayable — skip
+				case provider.ReasoningPart:
+					// informational, not replayable — skip (bedrock's
+					// Converse wire format here has no reasoning/thinking
+					// block representation)
 				default:
 					return nil, fmt.Errorf("bedrock: unsupported content part %T in assistant message", part)
 				}

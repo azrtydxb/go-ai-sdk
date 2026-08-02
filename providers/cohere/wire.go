@@ -268,6 +268,11 @@ func convertMessages(msgs []provider.Message) ([]wireMessage, error) {
 							Arguments: args,
 						},
 					})
+				case provider.SourcePart:
+					// informational, not replayable — skip
+				case provider.ReasoningPart:
+					// informational, not replayable — skip (cohere has no
+					// wire representation for reasoning/thinking blocks)
 				default:
 					return nil, fmt.Errorf("cohere: unsupported content part %T in assistant message", part)
 				}

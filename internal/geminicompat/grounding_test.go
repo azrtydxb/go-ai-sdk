@@ -17,6 +17,68 @@ import (
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
+// TestAssistantSourcePartSkippedNotError and
+// TestAssistantReasoningPartSkippedNotError cover the spec-owner ruling
+// that SDK-generated informational content parts must be replay-safe: a
+// SourcePart or ReasoningPart in an assistant message's history (e.g. from
+// a prior grounded turn, or a step that also produced reasoning) must be
+// silently skipped when building the next request — not rejected as an
+// unsupported content part, and not present on the wire.
+func TestAssistantSourcePartSkippedNotError(t *testing.T) {
+	model, srv := newTestLanguageModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			provider.UserText("simple"),
+			{
+				Role: provider.RoleAssistant,
+				Content: []provider.ContentPart{
+					provider.TextPart{Text: "The sky is blue."},
+					provider.SourcePart{ID: "source_0", URL: "https://example.com/sky", Title: "Sky Facts"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	req := lastRequest(t, srv)
+	content := req.Contents[1]
+	if content.Role != "model" {
+		t.Errorf("assistant content Role = %q, want model", content.Role)
+	}
+	if len(content.Parts) != 1 || content.Parts[0].Text != "The sky is blue." {
+		t.Fatalf("Parts = %#v, want exactly one text part (SourcePart dropped)", content.Parts)
+	}
+}
+
+func TestAssistantReasoningPartSkippedNotError(t *testing.T) {
+	model, srv := newTestLanguageModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			provider.UserText("simple"),
+			{
+				Role: provider.RoleAssistant,
+				Content: []provider.ContentPart{
+					provider.ReasoningPart{Text: "internal reasoning"},
+					provider.TextPart{Text: "answer"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	req := lastRequest(t, srv)
+	content := req.Contents[1]
+	if len(content.Parts) != 1 || content.Parts[0].Text != "answer" {
+		t.Fatalf("Parts = %#v, want exactly one text part (ReasoningPart dropped)", content.Parts)
+	}
+}
+
 func TestGenerateGroundingChunksBecomeSourceParts(t *testing.T) {
 	wr := generateContentResponse{
 		Candidates: []wireCandidate{{

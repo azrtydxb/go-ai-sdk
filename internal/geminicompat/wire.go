@@ -306,6 +306,11 @@ func assistantParts(parts []provider.ContentPart) ([]wirePart, error) {
 				Name: p.Name,
 				Args: args,
 			}})
+		case provider.SourcePart:
+			// informational, not replayable — skip
+		case provider.ReasoningPart:
+			// informational, not replayable — skip (geminicompat has no
+			// wire representation for reasoning/thinking blocks)
 		default:
 			return nil, fmt.Errorf("geminicompat: unsupported content part %T in assistant message", part)
 		}

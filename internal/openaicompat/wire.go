@@ -307,6 +307,8 @@ func convertMessages(msgs []provider.Message) ([]wireMessage, error) {
 					// history has no reasoning_content field on request
 					// messages (DeepSeek-R1 and compatible APIs expect it
 					// dropped from prior turns).
+				case provider.SourcePart:
+					// informational, not replayable — skip
 				case provider.TextPart:
 					text += p.Text
 					haveText = true

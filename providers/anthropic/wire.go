@@ -332,6 +332,8 @@ func assistantBlocks(parts []provider.ContentPart) ([]wireContentBlock, error) {
 				Name:  p.Name,
 				Input: input,
 			})
+		case provider.SourcePart:
+			// informational, not replayable — skip
 		default:
 			return nil, fmt.Errorf("anthropic: unsupported content part %T in assistant message", part)
 		}

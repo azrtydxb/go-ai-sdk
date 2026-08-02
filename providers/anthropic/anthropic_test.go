@@ -754,6 +754,37 @@ func TestAssistantRoundTripReasoningFirst(t *testing.T) {
 	}
 }
 
+// TestAssistantSourcePartSkippedNotError covers the spec-owner ruling that
+// SDK-generated informational content parts must be replay-safe: a
+// SourcePart in an assistant message's history must be silently skipped
+// when building the next request (not rejected as unsupported, and not
+// present on the wire).
+func TestAssistantSourcePartSkippedNotError(t *testing.T) {
+	srv, fs := newFixtureServer(t)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			provider.UserText("simple"),
+			{
+				Role: provider.RoleAssistant,
+				Content: []provider.ContentPart{
+					provider.TextPart{Text: "The sky is blue."},
+					provider.SourcePart{ID: "source_0", URL: "https://example.com/sky", Title: "Sky Facts"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	blocks := fs.lastRequest.Messages[1].Content
+	if len(blocks) != 1 || blocks[0].Type != "text" {
+		t.Fatalf("blocks = %#v, want exactly one text block (SourcePart dropped)", blocks)
+	}
+}
+
 func TestAssistantRoundTripRedactedThinkingFirst(t *testing.T) {
 	srv, fs := newFixtureServer(t)
 	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
