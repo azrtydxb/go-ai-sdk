@@ -133,7 +133,7 @@ Shared SSE parser in `internal/sse` (handles `data:` framing, `[DONE]`, comment 
 | 1 | OpenAI, Anthropic, Google (Gemini) | Shipped — three genuinely different wire formats prove the abstraction |
 | 2 (shipped) | Groq, xAI, DeepSeek, Together, Fireworks, Cerebras, Perplexity | Thin presets over the OpenAI-compatible base |
 | 2 (shipped) | Mistral, Cohere | Own APIs, full provider implementations |
-| 3 | Azure OpenAI, Vertex AI, Amazon Bedrock | Planned — platform auth; candidates for nested submodules |
+| 3 (shipped) | Azure OpenAI, Vertex AI, Amazon Bedrock | Platform auth: Azure (API-key preset over the OpenAI-compatible base), Vertex AI (Google service-account/ADC auth), Bedrock (AWS SigV4 request signing); no submodule split was needed |
 | later | Image/speech/transcription providers | Out of scope for v1 — requires new model capability interfaces |
 
 ## Testing

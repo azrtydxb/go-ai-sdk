@@ -32,7 +32,14 @@ func (m *languageModel) Capabilities() provider.Capabilities {
 }
 
 func (m *languageModel) modelPath(suffix string) string {
-	return m.provider.baseURL + "/model/" + escapeModelID(m.modelID) + suffix
+	return m.provider.modelPath(m.modelID, suffix)
+}
+
+// modelPath builds the "/model/{escaped id}{suffix}" path shared by the
+// language model (/converse, /converse-stream) and the embedding model
+// (/invoke).
+func (p *Provider) modelPath(modelID, suffix string) string {
+	return p.baseURL + "/model/" + escapeModelID(modelID) + suffix
 }
 
 // escapeModelID percent-encodes a Bedrock model ID for use as a single URL
@@ -58,17 +65,24 @@ func escapeModelID(id string) string {
 }
 
 func (m *languageModel) doRequest(ctx context.Context, path string, body []byte) (*http.Response, error) {
+	return m.provider.doRequest(ctx, path, body)
+}
+
+// doRequest builds a SigV4-signed POST request against path with the given
+// body and executes it. Shared by the language model (converse /
+// converse-stream) and the embedding model (Titan /invoke).
+func (p *Provider) doRequest(ctx context.Context, path string, body []byte) (*http.Response, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, path, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("bedrock: build request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	if err := sigv4.Sign(httpReq, body, m.provider.creds, m.provider.region, defaultServiceOpt, time.Now()); err != nil {
+	if err := sigv4.Sign(httpReq, body, p.creds, p.region, defaultServiceOpt, time.Now()); err != nil {
 		return nil, fmt.Errorf("bedrock: sign request: %w", err)
 	}
 
-	resp, err := m.provider.client().Do(httpReq)
+	resp, err := p.client().Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
