@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -447,6 +448,76 @@ func TestRequestShapeToolMessageFilePartErrors(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("Generate: want error for FilePart in tool message, got nil")
+	}
+	if !strings.Contains(err.Error(), "FilePart") {
+		t.Errorf("error = %q, want it to mention FilePart", err.Error())
+	}
+}
+
+func TestRequestShapeUserMessageFilePartPDF(t *testing.T) {
+	srv, fs := newFixtureServer(t)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
+
+	pdfData := []byte("%PDF-1.4 fake pdf bytes")
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			{
+				Role: provider.RoleUser,
+				Content: []provider.ContentPart{
+					provider.TextPart{Text: "simple"},
+					provider.FilePart{Data: pdfData, MediaType: "application/pdf", Filename: "report.pdf"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	req := fs.lastRequest
+	if len(req.Messages) != 1 {
+		t.Fatalf("Messages = %d, want 1", len(req.Messages))
+	}
+	blocks := req.Messages[0].Content
+	if len(blocks) != 2 {
+		t.Fatalf("Content = %d blocks, want 2", len(blocks))
+	}
+	doc := blocks[1]
+	if doc.Type != "document" {
+		t.Errorf("block.Type = %q, want document", doc.Type)
+	}
+	if doc.Source == nil {
+		t.Fatalf("block.Source = nil, want set")
+	}
+	if doc.Source.Type != "base64" {
+		t.Errorf("Source.Type = %q, want base64", doc.Source.Type)
+	}
+	if doc.Source.MediaType != "application/pdf" {
+		t.Errorf("Source.MediaType = %q, want application/pdf", doc.Source.MediaType)
+	}
+	wantData := base64.StdEncoding.EncodeToString(pdfData)
+	if doc.Source.Data != wantData {
+		t.Errorf("Source.Data = %q, want %q", doc.Source.Data, wantData)
+	}
+}
+
+func TestRequestShapeUserMessageFilePartNonPDFErrors(t *testing.T) {
+	srv, _ := newFixtureServer(t)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			{
+				Role: provider.RoleUser,
+				Content: []provider.ContentPart{provider.FilePart{
+					Data:      []byte("data"),
+					MediaType: "audio/mpeg",
+				}},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("Generate: want error for non-PDF FilePart in user message, got nil")
 	}
 	if !strings.Contains(err.Error(), "FilePart") {
 		t.Errorf("error = %q, want it to mention FilePart", err.Error())

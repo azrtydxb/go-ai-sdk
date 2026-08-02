@@ -33,10 +33,16 @@ type wireContentPart struct {
 	Type     string        `json:"type"`
 	Text     string        `json:"text,omitempty"`
 	ImageURL *wireImageURL `json:"image_url,omitempty"`
+	File     *wireFile     `json:"file,omitempty"`
 }
 
 type wireImageURL struct {
 	URL string `json:"url"`
+}
+
+type wireFile struct {
+	Filename string `json:"filename,omitempty"`
+	FileData string `json:"file_data,omitempty"`
 }
 
 type wireTool struct {
@@ -405,6 +411,21 @@ func userContent(parts []provider.ContentPart) (json.RawMessage, error) {
 				url = fmt.Sprintf("data:%s;base64,%s", mediaType, base64.StdEncoding.EncodeToString(p.Data))
 			}
 			wireParts = append(wireParts, wireContentPart{Type: "image_url", ImageURL: &wireImageURL{URL: url}})
+		case provider.FilePart:
+			if p.MediaType != "application/pdf" {
+				return nil, fmt.Errorf("openaicompat: unsupported content part %T with media type %q in user message (only application/pdf is supported)", part, p.MediaType)
+			}
+			filename := p.Filename
+			if filename == "" {
+				filename = "file.pdf"
+			}
+			wireParts = append(wireParts, wireContentPart{
+				Type: "file",
+				File: &wireFile{
+					Filename: filename,
+					FileData: fmt.Sprintf("data:application/pdf;base64,%s", base64.StdEncoding.EncodeToString(p.Data)),
+				},
+			})
 		default:
 			return nil, fmt.Errorf("openaicompat: unsupported content part %T in user message", part)
 		}

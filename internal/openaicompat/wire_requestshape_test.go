@@ -10,6 +10,7 @@ package openaicompat
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -73,6 +74,113 @@ func TestRequestShapeAssistantMessageFilePartErrors(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("Generate: want error for FilePart in assistant message, got nil")
+	}
+	if !strings.Contains(err.Error(), "FilePart") {
+		t.Errorf("error = %q, want it to mention FilePart", err.Error())
+	}
+}
+
+func TestRequestShapeUserMessageFilePartPDF(t *testing.T) {
+	model, srv := newTestLanguageModel(t)
+
+	pdfData := []byte("%PDF-1.4 fake pdf bytes")
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			provider.UserText("simple"),
+			{
+				Role: provider.RoleUser,
+				Content: []provider.ContentPart{
+					provider.TextPart{Text: "also text"},
+					provider.FilePart{Data: pdfData, MediaType: "application/pdf", Filename: "report.pdf"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	var req chatRequest
+	if err := json.Unmarshal(lastRawBody(srv), &req); err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+	if len(req.Messages) != 2 {
+		t.Fatalf("Messages = %d, want 2", len(req.Messages))
+	}
+	var parts []wireContentPart
+	if err := json.Unmarshal(req.Messages[1].Content, &parts); err != nil {
+		t.Fatalf("decode content parts: %v", err)
+	}
+	if len(parts) != 2 {
+		t.Fatalf("parts = %d, want 2", len(parts))
+	}
+	filePart := parts[1]
+	if filePart.Type != "file" {
+		t.Errorf("parts[1].Type = %q, want file", filePart.Type)
+	}
+	if filePart.File == nil {
+		t.Fatalf("parts[1].File = nil, want set")
+	}
+	if filePart.File.Filename != "report.pdf" {
+		t.Errorf("File.Filename = %q, want report.pdf", filePart.File.Filename)
+	}
+	wantDataURL := "data:application/pdf;base64," + base64.StdEncoding.EncodeToString(pdfData)
+	if filePart.File.FileData != wantDataURL {
+		t.Errorf("File.FileData = %q, want %q", filePart.File.FileData, wantDataURL)
+	}
+}
+
+func TestRequestShapeUserMessageFilePartDefaultFilename(t *testing.T) {
+	model, srv := newTestLanguageModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			provider.UserText("simple"),
+			{
+				Role: provider.RoleUser,
+				Content: []provider.ContentPart{
+					provider.TextPart{Text: "also text"},
+					provider.FilePart{Data: []byte("pdf bytes"), MediaType: "application/pdf"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	var req chatRequest
+	if err := json.Unmarshal(lastRawBody(srv), &req); err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+	var parts []wireContentPart
+	if err := json.Unmarshal(req.Messages[1].Content, &parts); err != nil {
+		t.Fatalf("decode content parts: %v", err)
+	}
+	if len(parts) != 2 || parts[1].File == nil {
+		t.Fatalf("parts = %+v, want 2 parts with file set", parts)
+	}
+	if parts[1].File.Filename != "file.pdf" {
+		t.Errorf("File.Filename = %q, want default file.pdf", parts[1].File.Filename)
+	}
+}
+
+func TestRequestShapeUserMessageFilePartNonPDFErrors(t *testing.T) {
+	model, _ := newTestLanguageModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			{
+				Role: provider.RoleUser,
+				Content: []provider.ContentPart{provider.FilePart{
+					Data:      []byte("data"),
+					MediaType: "audio/mpeg",
+				}},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("Generate: want error for non-PDF FilePart in user message, got nil")
 	}
 	if !strings.Contains(err.Error(), "FilePart") {
 		t.Errorf("error = %q, want it to mention FilePart", err.Error())

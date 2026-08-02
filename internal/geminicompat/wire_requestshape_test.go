@@ -11,6 +11,7 @@ package geminicompat
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -330,6 +331,83 @@ func TestRequestShapeToolMessageFilePartErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "FilePart") {
 		t.Errorf("error = %q, want it to mention FilePart", err.Error())
+	}
+}
+
+func TestRequestShapeUserMessageFilePartPDF(t *testing.T) {
+	model, srv := newTestLanguageModel(t)
+
+	pdfData := []byte("%PDF-1.4 fake pdf bytes")
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			{
+				Role: provider.RoleUser,
+				Content: []provider.ContentPart{
+					provider.TextPart{Text: "simple"},
+					provider.FilePart{Data: pdfData, MediaType: "application/pdf", Filename: "report.pdf"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	req := lastRequest(t, srv)
+	if len(req.Contents) != 1 {
+		t.Fatalf("Contents = %d, want 1", len(req.Contents))
+	}
+	parts := req.Contents[0].Parts
+	if len(parts) != 2 {
+		t.Fatalf("Parts = %d, want 2", len(parts))
+	}
+	inline := parts[1].InlineData
+	if inline == nil {
+		t.Fatalf("Parts[1].InlineData = nil, want set")
+	}
+	if inline.MimeType != "application/pdf" {
+		t.Errorf("InlineData.MimeType = %q, want application/pdf", inline.MimeType)
+	}
+	wantData := base64.StdEncoding.EncodeToString(pdfData)
+	if inline.Data != wantData {
+		t.Errorf("InlineData.Data = %q, want %q", inline.Data, wantData)
+	}
+}
+
+func TestRequestShapeUserMessageFilePartAudio(t *testing.T) {
+	model, srv := newTestLanguageModel(t)
+
+	audioData := []byte("fake mp3 bytes")
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			{
+				Role: provider.RoleUser,
+				Content: []provider.ContentPart{
+					provider.TextPart{Text: "simple"},
+					provider.FilePart{Data: audioData, MediaType: "audio/mpeg"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	req := lastRequest(t, srv)
+	parts := req.Contents[0].Parts
+	if len(parts) != 2 {
+		t.Fatalf("Parts = %d, want 2", len(parts))
+	}
+	inline := parts[1].InlineData
+	if inline == nil {
+		t.Fatalf("Parts[1].InlineData = nil, want set")
+	}
+	if inline.MimeType != "audio/mpeg" {
+		t.Errorf("InlineData.MimeType = %q, want audio/mpeg", inline.MimeType)
+	}
+	wantData := base64.StdEncoding.EncodeToString(audioData)
+	if inline.Data != wantData {
+		t.Errorf("InlineData.Data = %q, want %q", inline.Data, wantData)
 	}
 }
 

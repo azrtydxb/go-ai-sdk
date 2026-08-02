@@ -284,6 +284,15 @@ func userParts(parts []provider.ContentPart) ([]wirePart, error) {
 				MimeType: mediaType,
 				Data:     base64.StdEncoding.EncodeToString(p.Data),
 			}})
+		case provider.FilePart:
+			mediaType := p.MediaType
+			if mediaType == "" {
+				mediaType = "application/octet-stream"
+			}
+			out = append(out, wirePart{InlineData: &wireInlineData{
+				MimeType: mediaType,
+				Data:     base64.StdEncoding.EncodeToString(p.Data),
+			}})
 		default:
 			return nil, fmt.Errorf("geminicompat: unsupported content part %T in user message", part)
 		}

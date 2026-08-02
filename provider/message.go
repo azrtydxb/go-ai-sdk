@@ -30,8 +30,19 @@ type ImagePart struct {
 
 func (ImagePart) isContentPart() {}
 
-// FilePart is a file/attachment content part. Note: no built-in provider
-// currently supports FilePart; providers return a descriptive error.
+// FilePart is a file/attachment content part, valid only in user messages
+// (assistant-message FilePart is rejected by every provider).
+//
+// Support matrix:
+//   - anthropic: application/pdf only, sent as a "document" content block.
+//   - google, vertex (geminicompat): any MediaType, sent inline via
+//     inlineData (Gemini accepts PDFs, audio, and video inline).
+//   - openai and OpenAI-compatible providers (openaicompat): application/pdf
+//     only, sent as a "file" content part with a data: URL. Only OpenAI
+//     itself is known to accept this; other OpenAI-compatible servers may
+//     reject it — passthrough is correct behavior.
+//   - all other providers (cohere, mistral, bedrock, ...): unsupported;
+//     return a descriptive error.
 type FilePart struct {
 	Data      []byte
 	MediaType string

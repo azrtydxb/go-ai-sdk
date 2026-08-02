@@ -297,6 +297,18 @@ func userBlocks(parts []provider.ContentPart) ([]wireContentBlock, error) {
 				}
 			}
 			out = append(out, block)
+		case provider.FilePart:
+			if p.MediaType != "application/pdf" {
+				return nil, fmt.Errorf("anthropic: unsupported content part %T with media type %q in user message (only application/pdf is supported)", part, p.MediaType)
+			}
+			out = append(out, wireContentBlock{
+				Type: "document",
+				Source: &wireImageSource{
+					Type:      "base64",
+					MediaType: "application/pdf",
+					Data:      base64.StdEncoding.EncodeToString(p.Data),
+				},
+			})
 		default:
 			return nil, fmt.Errorf("anthropic: unsupported content part %T in user message", part)
 		}
