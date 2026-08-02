@@ -16,8 +16,8 @@ the full rationale and roadmap.
 `GenerateTextOpts.ProviderOptions` / `provider.Call.ProviderOptions` are a
 provider-specific escape hatch, keyed by provider name and shallow-merged
 into the request body every built-in provider sends — see
-`provider.Call.ProviderOptions`'s doc comment for the exact semantics
-(full usage docs land in a future task).
+[Core features](#core-features) below and `provider.Call.ProviderOptions`'s
+doc comment for the exact semantics.
 
 ## Install
 
@@ -84,6 +84,119 @@ More complete, runnable examples — including tool calling
 object generation (`ai.GenerateObject[T]`), and embeddings — live in
 [`examples/`](examples/). Each one is a self-contained `package main`
 guarded by an API-key env check, and each is compiled by CI.
+
+## Core features
+
+### ProviderOptions
+
+`provider.Call.ProviderOptions` (and the matching field on `ai.GenerateTextOpts`,
+`ai.GenerateImageOpts`, `ai.GenerateSpeechOpts`, `ai.TranscribeOpts`) is a
+provider-specific escape hatch: `map[string]any` keyed by provider name (the
+value returned by the model's `ProviderName()` — e.g. `"anthropic"`,
+`"openai"`, `"groq"`). Each provider looks up its own key and ignores the
+rest; the value must itself be a `map[string]any`, shallow-merged into the
+JSON request body after the SDK builds it, so option entries win over
+SDK-set fields:
+
+```go
+result, err := ai.GenerateText(ctx, ai.GenerateTextOpts{
+	Model:  model,
+	Prompt: "Explain quantum entanglement.",
+	ProviderOptions: map[string]any{
+		"anthropic": map[string]any{"top_k": 5},
+	},
+})
+```
+
+### Reasoning / extended thinking
+
+Reasoning ("thinking") content surfaces uniformly as `provider.ReasoningPart`
+(non-streaming) or `provider.ReasoningDelta` / `provider.ReasoningEnd`
+(streaming), and `result.ReasoningText` / `stream.ReasoningText()` give the
+concatenated text. On Anthropic, extended thinking is enabled via
+`ProviderOptions`:
+
+```go
+result, err := ai.GenerateText(ctx, ai.GenerateTextOpts{
+	Model:  anthropicModel,
+	Prompt: "How many prime numbers are there below 100?",
+	ProviderOptions: map[string]any{
+		"anthropic": map[string]any{
+			"thinking": map[string]any{"type": "enabled", "budget_tokens": 2048},
+		},
+	},
+})
+fmt.Println(result.ReasoningText)
+fmt.Println(result.Text)
+```
+
+### Middlewares
+
+`ai.ExtractReasoningMiddleware`, `ai.SimulateStreamingMiddleware`, and
+`ai.DefaultSettingsMiddleware` wrap a `provider.LanguageModel` to add
+behavior without touching the underlying provider:
+
+```go
+model := ai.ExtractReasoningMiddleware(baseModel, ai.ExtractReasoningOpts{
+	TagName: "think", // splits <think>...</think> spans into reasoning content
+})
+```
+
+### Registry
+
+`ai.Registry` resolves `"provider:model"` strings into concrete models,
+looking up the registered provider and type-asserting it against the
+capability it needs:
+
+```go
+reg := ai.NewRegistry()
+reg.Register("openai", openai.New())
+reg.Register("anthropic", anthropic.New())
+
+model, err := reg.LanguageModel("anthropic:claude-sonnet-5")
+```
+
+### Loop controls
+
+`ai.GenerateTextOpts.StopWhen`, `ai.StepCountIs`, `PrepareStep`, and
+`OnStepFinish` give fine-grained control over the multi-step tool-calling
+loop shared by `GenerateText` and `StreamText`:
+
+```go
+result, err := ai.GenerateText(ctx, ai.GenerateTextOpts{
+	Model:    model,
+	Prompt:   "What's the weather in Ghent, then in Paris?",
+	Tools:    []ai.Tool{weatherTool},
+	StopWhen: ai.StepCountIs(5),
+	OnStepFinish: func(step ai.Step) {
+		fmt.Printf("step done: %d tool call(s)\n", len(step.ToolCalls))
+	},
+})
+```
+
+### SmoothStream
+
+`ai.SmoothStream` re-chunks a stream's `TextDelta`s into smaller,
+evenly-sized pieces (word or line granularity) for a steadier UI cadence:
+
+```go
+for part := range ai.SmoothStream(stream.Parts(), ai.SmoothOpts{Chunking: "word"}) {
+	// ...
+}
+```
+
+### Sources
+
+Providers that report grounding/citation sources (currently Google only,
+via `groundingMetadata`) surface them as `provider.SourcePart` content:
+`result.Sources` after `GenerateText`, `stream.Sources()` after draining a
+`StreamText` stream.
+
+### CosineSimilarity
+
+`ai.CosineSimilarity(a, b []float64) (float64, error)` computes cosine
+similarity between two embedding vectors — handy for comparing the output
+of `ai.Embed` / `ai.EmbedMany`.
 
 ## Beyond text
 

@@ -196,6 +196,136 @@ Each follows the established pattern: validates required fields, wraps the call 
 
 **Shared implementation:** OpenAI-compatible providers (groq, xai) reuse the `openaicompat` helpers introduced for text. Google-based providers (vertex) reuse the `geminicompat` base. ElevenLabs gets its own full implementation.
 
+## Core parity (wave 5, shipped)
+
+Wave 5 closes most of the remaining Vercel AI SDK core-parity gap: provider
+options as a documented first-class convention, reasoning/thinking content
+and detailed token usage, `wrapLanguageModel`-style middlewares, a provider
+registry, tool-loop stop/prepare/finish hooks, `smoothStream`, grounding
+sources, and `cosineSimilarity`.
+
+### ProviderOptions convention
+
+`provider.Call.ProviderOptions` (`map[string]any`, threaded through
+unchanged from `ai.GenerateTextOpts.ProviderOptions` and the equivalent
+image/speech/transcription opts) is keyed by provider name — the value
+returned by the model's `ProviderName()`. Each provider looks up its own
+key only; the value under a matching key must itself be a `map[string]any`,
+shallow-merged into the built request body after the SDK constructs it, so
+option entries win over SDK-set fields. Novel keys not otherwise exposed by
+the SDK pass through untouched. For multipart-body calls (openaicompat/
+ElevenLabs transcription), entries are sent as extra form fields instead.
+
+### Reasoning and detailed usage
+
+`provider.ReasoningPart` (non-streaming) and `provider.ReasoningDelta` /
+`provider.ReasoningEnd` (streaming) carry reasoning/thinking content
+uniformly across providers; `Response.ReasoningText()` /
+`TextStream.ReasoningText()` give the concatenated text.
+`ReasoningPart.Signature` and `.Redacted` are Anthropic-specific: extended
+thinking is opted into per call via
+`ProviderOptions["anthropic"]["thinking"]`
+(`map[string]any{"type": "enabled", "budget_tokens": N}`); redacted
+thinking blocks set `Redacted` true with the opaque payload in `Text`, and
+a visible block's cryptographic `Signature` is preserved so it round-trips
+back to the API on a later turn (this package automatically reorders
+`ReasoningPart`s to lead the assistant message content, as the Messages API
+requires).
+
+`provider.Usage` grew two fields beyond the input/output/total token
+counts: `CachedInputTokens` (prompt-cache hits — Anthropic
+`cache_read_input_tokens`, OpenAI-compatible
+`usage.prompt_tokens_details.cached_tokens`) and `ReasoningTokens` (tokens
+spent on reasoning), both zero when a provider doesn't report them.
+
+### Middlewares
+
+Three `provider.LanguageModel` decorators in `ai`, mirroring the TS SDK's
+`wrapLanguageModel` built-ins:
+
+- `ExtractReasoningMiddleware(model, ExtractReasoningOpts{TagName, StartWithReasoning})`
+  splits `<tag>...</tag>` spans out of text output into reasoning content,
+  for models that signal thinking with an inline tag (e.g. some
+  DeepSeek-compatible endpoints) rather than a dedicated content type. The
+  stream path is fully incremental — it never buffers more than the
+  longest unresolved tag-prefix candidate.
+- `SimulateStreamingMiddleware(model)` makes `Stream` call `Generate` and
+  replay the result as a synthetic single-shot stream, for models/providers
+  that only support non-streaming calls.
+- `DefaultSettingsMiddleware(model, defaults)` fills in zero-valued call
+  fields (`Temperature`, `TopP`, `MaxTokens`, `StopSequences`,
+  `ProviderOptions`) from `defaults`; `ProviderOptions` merges per
+  provider-name namespace with per-call entries winning.
+
+### Registry
+
+`ai.Registry` (`NewRegistry`, `Register(name string, p any)`) resolves
+`"provider:model"` strings into concrete models. `Register` accepts any
+value; each lookup method (`LanguageModel`, `EmbeddingModel`, `ImageModel`,
+`SpeechModel`, `TranscriptionModel`) type-asserts the registered provider
+against the matching capability interface (`LanguageModelProvider`,
+`EmbeddingModelProvider`, ...) at lookup time, so a provider need not
+implement every capability. The model id is split on the first `:` so
+model ids that themselves contain `:` (e.g. Bedrock's
+`anthropic.claude-3:1`) round-trip intact.
+
+### Tool-loop controls
+
+`GenerateTextOpts` gained three fields, shared by `GenerateText` and
+`StreamText`:
+
+- `StopWhen func(steps []Step) bool` — evaluated after each completed step
+  that requested tool calls (a step with no tool calls always ends the loop
+  naturally); returning true stops the loop. `ai.StepCountIs(n)` is the
+  built-in "stop once len(steps) >= n" helper. If `MaxSteps` is unset (0)
+  and `StopWhen` is non-nil, the hard step cap defaults to 16 instead of 1.
+- `PrepareStep func(stepIndex int, call provider.Call) (provider.Call, bool)`
+  — called before each model call; returning `(call, true)` substitutes the
+  returned `Call` for that step.
+- `OnStepFinish func(step Step)` — called after each step completes
+  (including the final step). In `StreamText`, this fires only once a
+  step's `Parts()` iteration has run to completion; if the consumer stops
+  ranging over `Parts()` early (e.g. breaking right after that step's
+  `FinishPart`), `OnStepFinish` does not fire for that step even though
+  `FinishPart` was already delivered.
+
+### SmoothStream
+
+`ai.SmoothStream(parts iter.Seq[provider.StreamPart], SmoothOpts{Chunking, Delay})`
+re-chunks `TextDelta`s into complete "word + trailing whitespace" (default)
+or "line + trailing newline" units, optionally sleeping `Delay` between
+emitted parts for a steadier UI cadence. Unlike the TS SDK's
+`smoothStream`, there is no implicit default delay — `Delay: 0` (the zero
+value) means no delay at all, keeping behavior deterministic. Only
+`TextDelta` is re-chunked; every other `StreamPart` (including
+`ReasoningDelta`) passes through untouched, after flushing any
+currently-buffered text first.
+
+### Sources
+
+`provider.SourcePart` (`ID`, `URL`, `Title`) is a citation/grounding
+content part, and `provider.SourceEvent` carries one mid-stream. Currently
+only `geminicompat` populates it, from Google's
+`groundingMetadata.groundingChunks`; `result.Sources` /
+`stream.Sources()` surface the accumulated set. Anthropic's citations are
+documented as future work, not covered in this wave.
+
+### CosineSimilarity
+
+`ai.CosineSimilarity(a, b []float64) (float64, error)` computes
+`dot(a, b) / (||a|| * ||b||)`, erroring on mismatched lengths or a
+zero-magnitude vector (undefined cosine similarity).
+
+### Other changes
+
+- `provider.EmbeddingModelWithOptions` (previously `EmbeddingModelV2`,
+  renamed pre-1.0 to avoid implying interface versioning) is the optional
+  `EmbeddingModel` extension for models that support per-call
+  `ProviderOptions`, via `EmbedCall(ctx, EmbeddingCall) (*EmbeddingResponse, error)`.
+- `internal/imagesniff` centralizes the magic-byte MediaType sniffer
+  previously duplicated in `internal/openaicompat` and
+  `internal/geminicompat`'s image models.
+
 ## Key decisions log
 
 1. **Vercel AI SDK, not Google Vertex** — "vertex" in the original request meant Vercel; confirmed with user.
