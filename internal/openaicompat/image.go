@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -46,6 +47,46 @@ type imageResponseData struct {
 	B64JSON string `json:"b64_json"`
 }
 
+// imageResponseFormat picks the response_format value to send: gpt-image
+// models reject the response_format field outright (HTTP 400) and always
+// return b64_json, so it's omitted for those; dall-e and other models honor
+// it and need it set explicitly to get b64_json back.
+func imageResponseFormat(modelID string) string {
+	if strings.HasPrefix(modelID, "gpt-image") {
+		return ""
+	}
+	return "b64_json"
+}
+
+// pngMagic, jpegMagic, and gifMagic are the fixed magic-byte prefixes used
+// to sniff decoded image data's MediaType. WebP is detected separately since
+// its magic bytes aren't a fixed contiguous prefix ("RIFF" + 4-byte size +
+// "WEBP").
+var (
+	pngMagic  = []byte("\x89PNG")
+	jpegMagic = []byte("\xFF\xD8\xFF")
+	gifMagic  = []byte("GIF8")
+)
+
+// sniffImageMediaType inspects decoded image bytes' magic bytes to
+// determine the MediaType, since some providers (e.g. xAI's grok-2-image)
+// return JPEG while the API otherwise defaults to PNG. Falls back to
+// "image/png" when the format can't be identified.
+func sniffImageMediaType(data []byte) string {
+	switch {
+	case bytes.HasPrefix(data, pngMagic):
+		return "image/png"
+	case bytes.HasPrefix(data, jpegMagic):
+		return "image/jpeg"
+	case len(data) >= 12 && string(data[0:4]) == "RIFF" && string(data[8:12]) == "WEBP":
+		return "image/webp"
+	case bytes.HasPrefix(data, gifMagic):
+		return "image/gif"
+	default:
+		return "image/png"
+	}
+}
+
 func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall) (*provider.ImageResponse, error) {
 	if m.cfg.BaseURL == "" {
 		return nil, fmt.Errorf("%s: base URL not configured", m.cfg.Name)
@@ -59,9 +100,10 @@ func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall
 		Prompt: call.Prompt,
 		N:      call.N,
 		Size:   call.Size,
-		// gpt-image-1 ignores response_format and always returns
-		// b64_json; dall-e models honor it. Keep sending it for both.
-		ResponseFormat: "b64_json",
+		// gpt-image models reject response_format with a 400 and always
+		// return b64_json, so it's omitted for those; dall-e and other
+		// models need it set explicitly to get b64_json back.
+		ResponseFormat: imageResponseFormat(m.modelID),
 	}
 
 	reqBody, err := json.Marshal(req)
@@ -103,7 +145,7 @@ func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall
 		if err != nil {
 			return nil, fmt.Errorf("openaicompat: decode image b64_json: %w", err)
 		}
-		images[i] = provider.GeneratedImage{Data: data, MediaType: "image/png"}
+		images[i] = provider.GeneratedImage{Data: data, MediaType: sniffImageMediaType(data)}
 	}
 
 	return &provider.ImageResponse{

@@ -227,3 +227,33 @@ func TestImageModel_APIError(t *testing.T) {
 		t.Errorf("error = %q, want it to contain %q", err.Error(), "bad request")
 	}
 }
+
+func TestImageModel_SniffsMediaTypeWhenMimeTypeAbsent(t *testing.T) {
+	const onePixelPNGBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// No mimeType field: the model must sniff the decoded bytes' magic
+		// bytes to determine the MediaType.
+		w.Write([]byte(`{"predictions":[{"bytesBase64Encoded":"` + onePixelPNGBase64 + `"}]}`))
+	}))
+	defer srv.Close()
+
+	cfg := Config{
+		Name:        "google",
+		EndpointFor: func(modelID, method string) string { return srv.URL },
+		Authorize:   func(ctx context.Context, req *http.Request) error { return nil },
+	}
+	model := NewImageModel(cfg, "imagen-3.0-generate-002")
+
+	resp, err := model.GenerateImages(context.Background(), provider.ImageCall{Prompt: "a cat"})
+	if err != nil {
+		t.Fatalf("GenerateImages: %v", err)
+	}
+	if len(resp.Images) != 1 {
+		t.Fatalf("got %d images, want 1", len(resp.Images))
+	}
+	if resp.Images[0].MediaType != "image/png" {
+		t.Errorf("MediaType = %q, want image/png (sniffed)", resp.Images[0].MediaType)
+	}
+}

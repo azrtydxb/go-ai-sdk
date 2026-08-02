@@ -53,6 +53,34 @@ type imagenResponse struct {
 	Predictions []imagenPrediction `json:"predictions"`
 }
 
+// pngMagic, jpegMagic, and gifMagic are the fixed magic-byte prefixes used
+// to sniff decoded image data's MediaType. WebP is detected separately since
+// its magic bytes aren't a fixed contiguous prefix ("RIFF" + 4-byte size +
+// "WEBP").
+var (
+	pngMagic  = []byte("\x89PNG")
+	jpegMagic = []byte("\xFF\xD8\xFF")
+	gifMagic  = []byte("GIF8")
+)
+
+// sniffImageMediaType inspects decoded image bytes' magic bytes to
+// determine the MediaType, for use when the server doesn't report a
+// mimeType. Falls back to "image/png" when the format can't be identified.
+func sniffImageMediaType(data []byte) string {
+	switch {
+	case bytes.HasPrefix(data, pngMagic):
+		return "image/png"
+	case bytes.HasPrefix(data, jpegMagic):
+		return "image/jpeg"
+	case len(data) >= 12 && string(data[0:4]) == "RIFF" && string(data[8:12]) == "WEBP":
+		return "image/webp"
+	case bytes.HasPrefix(data, gifMagic):
+		return "image/gif"
+	default:
+		return "image/png"
+	}
+}
+
 func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall) (*provider.ImageResponse, error) {
 	if call.Size != "" {
 		return nil, fmt.Errorf("%s: size is not supported; use AspectRatio", m.cfg.Name)
@@ -118,7 +146,7 @@ func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall
 		}
 		mediaType := p.MimeType
 		if mediaType == "" {
-			mediaType = "image/png"
+			mediaType = sniffImageMediaType(data)
 		}
 		images[i] = provider.GeneratedImage{Data: data, MediaType: mediaType}
 	}
