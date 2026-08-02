@@ -734,6 +734,63 @@ func TestRequestShapeUserMessageFilePartCSVDefaultName(t *testing.T) {
 	}
 }
 
+// TestDocumentName covers documentName's sanitization: Converse's
+// document.name field only allows alphanumerics, whitespace, hyphens,
+// parentheses, and brackets, so anything else (e.g. the underscores and
+// extra '.' left after extension-stripping "my_report_v2.1.pdf") must be
+// replaced by a space, with runs of whitespace collapsed and the result
+// trimmed — not passed through raw, which Converse would reject live.
+func TestDocumentName(t *testing.T) {
+	cases := []struct {
+		filename string
+		want     string
+	}{
+		{"my_report_v2.1.pdf", "my report v2 1"},
+		{"Annual Report (2024).pdf", "Annual Report (2024)"},
+		{"", "document"},
+		{"___.pdf", "document"},
+		{"safe-name[1].csv", "safe-name[1]"},
+	}
+	for _, c := range cases {
+		t.Run(c.filename, func(t *testing.T) {
+			if got := documentName(c.filename); got != c.want {
+				t.Errorf("documentName(%q) = %q, want %q", c.filename, got, c.want)
+			}
+		})
+	}
+}
+
+// TestRequestShapeUserMessageFilePartSanitizesDisallowedNameChars verifies
+// the sanitization in TestDocumentName is actually applied along the full
+// Generate path, not just at the unit level.
+func TestRequestShapeUserMessageFilePartSanitizesDisallowedNameChars(t *testing.T) {
+	model, fs := newTestModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			{
+				Role: provider.RoleUser,
+				Content: []provider.ContentPart{
+					provider.TextPart{Text: "simple"},
+					provider.FilePart{Data: []byte("data"), MediaType: "application/pdf", Filename: "my_report_v2.1.pdf"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	req, _, _ := fs.snapshot()
+	doc := req.Messages[0].Content[1].Document
+	if doc == nil {
+		t.Fatalf("Content[1].Document = nil, want set")
+	}
+	if doc.Name != "my report v2 1" {
+		t.Errorf("Document.Name = %q, want %q", doc.Name, "my report v2 1")
+	}
+}
+
 // TestRequestShapeUserMessageFilePartUnsupportedTypeErrors verifies a
 // FilePart with a MediaType outside Converse's fixed document-format set
 // (e.g. audio) is rejected with a descriptive error rather than silently

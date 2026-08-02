@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -510,17 +511,40 @@ func documentFormat(mediaType string) (string, error) {
 
 // documentName derives Converse's required document Name from a FilePart's
 // Filename: the filename without its extension (Converse names are used for
-// display/reference, not roundtripped as a real filename), or "document"
-// when Filename is empty — Converse requires a non-empty name and there's
-// nothing else to derive one from.
+// display/reference, not roundtripped as a real filename), with every
+// character Converse's document.name doesn't allow (only alphanumerics,
+// whitespace, hyphens, parentheses, and brackets are permitted) replaced by
+// a space, runs of whitespace collapsed to one space, and the result
+// trimmed. "document" is used when Filename is empty, or when nothing
+// allowed survives sanitization — Converse requires a non-empty name and
+// there's nothing else to derive one from.
 func documentName(filename string) string {
-	if filename == "" {
+	name := filename
+	if ext := filepath.Ext(name); ext != "" {
+		name = strings.TrimSuffix(name, ext)
+	}
+	name = strings.Map(func(r rune) rune {
+		if isAllowedDocumentNameRune(r) {
+			return r
+		}
+		return ' '
+	}, name)
+	name = strings.Join(strings.Fields(name), " ")
+	if name == "" {
 		return "document"
 	}
-	if ext := filepath.Ext(filename); ext != "" {
-		return strings.TrimSuffix(filename, ext)
+	return name
+}
+
+// isAllowedDocumentNameRune reports whether r is one of the characters
+// Converse permits in a document content block's name: letters, digits,
+// whitespace, hyphens, and parentheses/brackets.
+func isAllowedDocumentNameRune(r rune) bool {
+	switch r {
+	case '-', '(', ')', '[', ']':
+		return true
 	}
-	return filename
+	return unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsSpace(r)
 }
 
 func convertTools(tools []provider.ToolDef) []wireTool {
