@@ -2,6 +2,7 @@ package retry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"time"
@@ -54,9 +55,9 @@ func Do[T any](ctx context.Context, maxRetries int, fn func() (T, error)) (T, er
 			return v, nil
 		}
 
-		// Check if error is retryable
-		retryable, ok := err.(Retryable)
-		if !ok || !retryable.IsRetryable() {
+		// Check if error is retryable using errors.As to handle wrapped errors
+		var retryable Retryable
+		if !errors.As(err, &retryable) || !retryable.IsRetryable() {
 			// Not retryable, return immediately
 			return v, err
 		}
@@ -75,9 +76,11 @@ func Do[T any](ctx context.Context, maxRetries int, fn func() (T, error)) (T, er
 		// Calculate backoff delay
 		delay := calculateBackoff(attempt)
 
-		// Wait with context awareness
+		// Wait with context awareness, using NewTimer to ensure cleanup
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
 		select {
-		case <-time.After(delay):
+		case <-timer.C:
 			// Continue to next attempt
 		case <-ctx.Done():
 			var zero T
@@ -93,14 +96,22 @@ func Do[T any](ctx context.Context, maxRetries int, fn func() (T, error)) (T, er
 // calculateBackoff calculates the backoff delay for the given attempt number.
 // Uses exponential backoff (base 500ms, doubling) with full jitter and 8s cap.
 func calculateBackoff(attempt int) time.Duration {
-	// Calculate base delay: BaseDelay * 2^attempt
-	multiplier := 1 << uint(attempt)
-	baseDelay := BaseDelay * time.Duration(multiplier)
-
-	// Cap at 8 seconds
 	maxDelay := 8 * time.Second
-	if baseDelay > maxDelay {
-		baseDelay = maxDelay
+	baseDelay := BaseDelay
+
+	// Exponentially increase delay, but stop before overflow and cap at maxDelay.
+	// For each attempt, double the delay, but bail to maxDelay once we reach or exceed it.
+	for i := 0; i < attempt; i++ {
+		if baseDelay >= maxDelay {
+			baseDelay = maxDelay
+			break
+		}
+		// Double the delay, but cap to maxDelay to prevent overflow
+		if baseDelay > maxDelay/2 {
+			baseDelay = maxDelay
+			break
+		}
+		baseDelay *= 2
 	}
 
 	// Full jitter: random value between 0 and baseDelay

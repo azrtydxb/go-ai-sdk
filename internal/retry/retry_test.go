@@ -3,6 +3,7 @@ package retry
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -72,9 +73,56 @@ func TestBackoffWithFastDelay(t *testing.T) {
 	})
 	elapsed := time.Since(start)
 
-	// With 2 retries and BaseDelay=1ms, we should have at least 2 backoff delays
-	// Even with jitter, should be roughly >= 2ms total
-	if elapsed < 2*time.Millisecond {
-		t.Logf("elapsed=%v; backoff might not be working (expected >= 2ms)", elapsed)
+	// With 2 retries and BaseDelay=1ms, we should have backoff delays.
+	// With full jitter, delays can be tiny, so this test verifies the mechanism runs.
+	// At minimum, we should have > 0 elapsed time (the backoff loops execute).
+	if elapsed == 0 {
+		t.Errorf("elapsed=%v; backoff delays not applied", elapsed)
+	}
+}
+
+func TestDoWrapsRetryableErrors(t *testing.T) {
+	// Verify that errors.As detects wrapped Retryable errors.
+	originalDelay := BaseDelay
+	t.Cleanup(func() { BaseDelay = originalDelay })
+	BaseDelay = time.Microsecond
+
+	baseErr := &retryableErr{true}
+	wrappedErr := fmt.Errorf("wrapped: %w", baseErr)
+
+	calls := 0
+	_, err := Do(t.Context(), 1, func() (int, error) {
+		calls++
+		return 0, wrappedErr
+	})
+
+	// Should have retried despite the wrap, so calls > 1
+	if calls < 2 {
+		t.Fatalf("calls=%d; expected >= 2 (retried wrapped retryable error)", calls)
+	}
+
+	// Should get ExhaustedError wrapping the wrapped error
+	var ex *ExhaustedError
+	if !errors.As(err, &ex) {
+		t.Fatalf("err=%v; want ExhaustedError", err)
+	}
+}
+
+func TestCalculateBackoffHighAttempt(t *testing.T) {
+	// Test that calculateBackoff doesn't panic or overflow for large attempt numbers.
+	originalDelay := BaseDelay
+	t.Cleanup(func() { BaseDelay = originalDelay })
+	BaseDelay = time.Millisecond
+
+	// Test high attempt count (40+) that would overflow with bit shift.
+	delay := calculateBackoff(40)
+	if delay < 0 || delay > 8*time.Second {
+		t.Errorf("delay=%v; expected [0, 8s]", delay)
+	}
+
+	// Verify it's capped at maxDelay
+	maxDelay := 8 * time.Second
+	if delay > maxDelay {
+		t.Errorf("delay=%v exceeds cap of %v", delay, maxDelay)
 	}
 }
