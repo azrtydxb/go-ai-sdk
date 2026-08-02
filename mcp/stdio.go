@@ -16,17 +16,36 @@ import (
 // internal/sse's line limit).
 const maxLineSize = 10 * 1024 * 1024
 
+// framedResult is one line read off the wire, or a terminal error.
+type framedResult struct {
+	line []byte
+	err  error
+}
+
 // framedTransport speaks newline-delimited JSON-RPC over an io.Reader /
 // io.WriteCloser pair: one JSON object per line, in each direction. It is
 // the framing logic behind NewStdioTransport, kept independent of exec.Cmd
 // so it can be tested over plain pipes.
+//
+// A single goroutine, started at construction and living for the
+// transport's lifetime, owns the bufio.Scanner exclusively and feeds
+// framedResults to msgCh. Receive never spawns its own reader: it only
+// selects on msgCh / ctx.Done() / the transport's closed signal. This
+// matters because bufio.Scanner is not safe for concurrent use, and a
+// design where each Receive call spawned its own scanning goroutine (one
+// that outlives a cancelled call) would race two such goroutines against
+// the scanner under repeated cancel-and-retry Receive calls — a real risk
+// since Transport is a public interface and "call Receive with a short
+// timeout, retry" is a legitimate caller pattern.
 type framedTransport struct {
 	scanner *bufio.Scanner
+	msgCh   chan framedResult
 
 	writeMu sync.Mutex
 	w       io.WriteCloser
 
 	closeOnce sync.Once
+	closed    chan struct{}
 	closeFn   func() error
 }
 
@@ -37,9 +56,53 @@ type framedTransport struct {
 func newFramedTransport(r io.Reader, w io.WriteCloser, closeFn func() error) *framedTransport {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), maxLineSize)
-	return &framedTransport{scanner: sc, w: w, closeFn: closeFn}
+	t := &framedTransport{
+		scanner: sc,
+		msgCh:   make(chan framedResult),
+		w:       w,
+		closed:  make(chan struct{}),
+		closeFn: closeFn,
+	}
+	go t.readLoop()
+	return t
 }
 
+// readLoop is the sole owner of t.scanner for the transport's lifetime.
+func (t *framedTransport) readLoop() {
+	for {
+		if t.scanner.Scan() {
+			b := t.scanner.Bytes()
+			cp := make([]byte, len(b))
+			copy(cp, b)
+			select {
+			case t.msgCh <- framedResult{line: cp}:
+			case <-t.closed:
+				return
+			}
+			continue
+		}
+
+		err := t.scanner.Err()
+		if err == nil {
+			err = io.EOF
+		}
+		// Once the underlying reader is exhausted or broken, every future
+		// Receive should observe that terminal error rather than block
+		// forever, so keep offering it until Close.
+		for {
+			select {
+			case t.msgCh <- framedResult{err: err}:
+			case <-t.closed:
+				return
+			}
+		}
+	}
+}
+
+// Send writes msg as one line. Peers are expected to enforce the same
+// (or a more generous) per-line size limit as Receive's maxLineSize; a
+// peer with a tighter line buffer may reject or truncate very large
+// messages.
 func (t *framedTransport) Send(ctx context.Context, msg json.RawMessage) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -54,46 +117,29 @@ func (t *framedTransport) Send(ctx context.Context, msg json.RawMessage) error {
 	return err
 }
 
-// Receive returns the next line as a JSON-RPC message. The scan happens in
-// a goroutine so that ctx cancellation can unblock the caller even though
-// bufio.Scanner offers no native cancellation; the goroutine outlives a
-// cancelled Receive call and exits once the underlying reader unblocks
-// (Close terminates the process, which does that).
+// Receive returns the next line as a JSON-RPC message. It never loses a
+// message that the reader goroutine already read: if a Receive call is
+// abandoned via ctx cancellation while the reader goroutine is blocked
+// handing off a line, that line is delivered to whichever Receive call
+// picks it up next.
 func (t *framedTransport) Receive(ctx context.Context) (json.RawMessage, error) {
-	type result struct {
-		line []byte
-		err  error
-	}
-	ch := make(chan result, 1)
-	go func() {
-		if t.scanner.Scan() {
-			b := t.scanner.Bytes()
-			cp := make([]byte, len(b))
-			copy(cp, b)
-			ch <- result{line: cp}
-			return
-		}
-		err := t.scanner.Err()
-		if err == nil {
-			err = io.EOF
-		}
-		ch <- result{err: err}
-	}()
-
 	select {
-	case res := <-ch:
+	case res := <-t.msgCh:
 		if res.err != nil {
 			return nil, res.err
 		}
 		return json.RawMessage(res.line), nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
+	case <-t.closed:
+		return nil, errors.New("mcp: transport closed")
 	}
 }
 
 func (t *framedTransport) Close() error {
 	var err error
 	t.closeOnce.Do(func() {
+		close(t.closed)
 		werr := t.w.Close()
 		var cerr error
 		if t.closeFn != nil {

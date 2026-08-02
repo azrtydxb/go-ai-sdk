@@ -217,6 +217,42 @@ func TestFramedTransportLargeLine(t *testing.T) {
 	}
 }
 
+// TestFramedTransportRepeatedTimeoutThenMessage reproduces the scenario a
+// reviewer found data-racing an earlier implementation that spawned a new
+// scanning goroutine per Receive call: several short-timeout Receives
+// against a quiet pipe (no data yet), each abandoning its goroutine mid-scan,
+// followed by a write and a Receive that must actually get the message —
+// not lose it to one of the abandoned goroutines, and not race the
+// underlying scanner. Must be run with -race.
+func TestFramedTransportRepeatedTimeoutThenMessage(t *testing.T) {
+	r, w := io.Pipe()
+	tr := newFramedTransport(r, &nopWriteCloser{Writer: io.Discard}, nil)
+	defer tr.Close()
+
+	for i := 0; i < 5; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+		_, err := tr.Receive(ctx)
+		cancel()
+		if err == nil {
+			t.Fatalf("Receive %d: want timeout error, got nil (pipe should still be quiet)", i)
+		}
+	}
+
+	go func() {
+		_, _ = io.WriteString(w, "{\"hello\":\"world\"}\n")
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+	msg, err := tr.Receive(ctx)
+	if err != nil {
+		t.Fatalf("final Receive: %v", err)
+	}
+	if string(msg) != `{"hello":"world"}` {
+		t.Fatalf("msg = %q, want %q", msg, `{"hello":"world"}`)
+	}
+}
+
 // TestNewStdioTransportSubprocess sanity-checks the real exec.Cmd plumbing
 // (env, stdin/stdout wiring, Close) against `cat`, which just echoes stdin
 // to stdout — a stand-in for a well-behaved MCP server for framing purposes.
