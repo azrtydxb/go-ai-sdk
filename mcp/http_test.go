@@ -185,6 +185,90 @@ func TestHTTPTransportNotificationNoMessage(t *testing.T) {
 	}
 }
 
+// TestHTTPTransportSSEBodyStaysOpen exercises the deviation-from-SHOULD case
+// the doc comment on NewStreamableHTTPTransport calls out: a server that
+// sends its JSON-RPC response over SSE but keeps the response body open
+// afterward (permitted, since the spec only says the server SHOULD close
+// it). Send must not wedge behind that open body — CallTool must complete
+// promptly — and Close must release the drain goroutine blocked reading it.
+func TestHTTPTransportSSEBodyStaysOpen(t *testing.T) {
+	bodyReleased := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req struct {
+			ID     *int64 `json:"id"`
+			Method string `json:"method"`
+		}
+		_ = json.Unmarshal(body, &req)
+
+		switch req.Method {
+		case "initialize":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":{"protocolVersion":"2025-03-26","capabilities":{}}}`, *req.ID)
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+		case "tools/call":
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			fl := w.(http.Flusher)
+			fmt.Fprintf(w, "data: {\"jsonrpc\":\"2.0\",\"id\":%d,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"isError\":false}}\n\n", *req.ID)
+			fl.Flush()
+			// Deliberately keep the body open (no return) until the test
+			// tells the client to Close, to simulate a server that doesn't
+			// close the stream after responding.
+			<-bodyReleased
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	tr := NewStreamableHTTPTransport(srv.URL, nil)
+	c := NewClient(tr)
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	if err := c.Initialize(ctx); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+
+	// CallTool must complete even though the server keeps the SSE body
+	// open; Send returning promptly (not blocking on the drain) is what
+	// makes this possible.
+	callDone := make(chan error, 1)
+	go func() {
+		res, err := c.CallTool(ctx, "echo", json.RawMessage(`{}`))
+		if err == nil && res.Text != "hi" {
+			err = fmt.Errorf("Text = %q, want hi", res.Text)
+		}
+		callDone <- err
+	}()
+	select {
+	case err := <-callDone:
+		if err != nil {
+			t.Fatalf("CallTool: %v", err)
+		}
+	case <-time.After(testTimeout):
+		t.Fatal("CallTool did not complete while the SSE body stayed open")
+	}
+
+	// Close must release the drain goroutine blocked reading the still-open
+	// body, and return promptly rather than hanging.
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- c.Close() }()
+	select {
+	case err := <-closeDone:
+		if err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+	case <-time.After(testTimeout):
+		t.Fatal("Close did not return while a drain goroutine was blocked")
+	}
+	close(bodyReleased)
+}
+
 // TestHTTPTransportIntegrationWithClient exercises the transport through a
 // full mcp.Client Initialize + CallTool round trip against an httptest
 // server that replies with SSE.
