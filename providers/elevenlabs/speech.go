@@ -15,6 +15,12 @@ import (
 // defaultVoiceID is ElevenLabs' documented default voice, "Rachel".
 const defaultVoiceID = "21m00Tcm4TlvDq8ikWAM"
 
+// speechModel implements provider.SpeechModel against the ElevenLabs
+// text-to-speech API.
+//
+// Note: SpeechCall.Language is sent as language_code, which ElevenLabs only
+// accepts for turbo/flash v2.5 models (e.g. "eleven_turbo_v2_5",
+// "eleven_flash_v2_5"); other models may reject it server-side.
 type speechModel struct {
 	provider *Provider
 	modelID  string
@@ -26,9 +32,16 @@ func (m *speechModel) ProviderName() string { return providerName }
 // ---- wire types ----
 
 type speechRequest struct {
-	Text         string `json:"text"`
-	ModelID      string `json:"model_id"`
-	LanguageCode string `json:"language_code,omitempty"`
+	Text          string             `json:"text"`
+	ModelID       string             `json:"model_id"`
+	LanguageCode  string             `json:"language_code,omitempty"`
+	VoiceSettings *voiceSettingsWire `json:"voice_settings,omitempty"`
+}
+
+// voiceSettingsWire carries the subset of ElevenLabs' voice_settings object
+// this package sets: just Speed, mapped from provider.SpeechCall.Speed.
+type voiceSettingsWire struct {
+	Speed float64 `json:"speed"`
 }
 
 // outputFormatWire maps a provider.SpeechCall.OutputFormat value to the
@@ -57,6 +70,9 @@ func (m *speechModel) GenerateSpeech(ctx context.Context, call provider.SpeechCa
 		Text:         call.Text,
 		ModelID:      m.modelID,
 		LanguageCode: call.Language,
+	}
+	if call.Speed != nil {
+		req.VoiceSettings = &voiceSettingsWire{Speed: *call.Speed}
 	}
 	reqBody, err := json.Marshal(req)
 	if err != nil {

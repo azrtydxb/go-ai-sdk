@@ -24,7 +24,9 @@ func TestGenerateSpeech_HappyPath(t *testing.T) {
 		gotHeader = r.Header.Get("xi-api-key")
 		body, _ := io.ReadAll(r.Body)
 		if err := json.Unmarshal(body, &gotBody); err != nil {
-			t.Fatalf("unmarshal body: %v", err)
+			t.Errorf("unmarshal body: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
 		w.Header().Set("Content-Type", "audio/mpeg")
 		w.WriteHeader(http.StatusOK)
@@ -133,6 +135,63 @@ func TestGenerateSpeech_FormatMappingInQuery(t *testing.T) {
 	}
 	if gotQuery != "output_format=pcm_44100" {
 		t.Errorf("query = %q", gotQuery)
+	}
+}
+
+func TestGenerateSpeech_Speed(t *testing.T) {
+	var raw map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &raw); err != nil {
+			t.Errorf("unmarshal body: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
+	m := p.SpeechModel("eleven_multilingual_v2")
+
+	speed := 1.25
+	_, err := m.GenerateSpeech(context.Background(), provider.SpeechCall{Text: "hi", Speed: &speed})
+	if err != nil {
+		t.Fatalf("GenerateSpeech: %v", err)
+	}
+
+	voiceSettings, ok := raw["voice_settings"].(map[string]any)
+	if !ok {
+		t.Fatalf("voice_settings missing or wrong type, got %v", raw["voice_settings"])
+	}
+	if voiceSettings["speed"] != 1.25 {
+		t.Errorf("voice_settings.speed = %v, want 1.25", voiceSettings["speed"])
+	}
+}
+
+func TestGenerateSpeech_NoSpeedOmitsVoiceSettings(t *testing.T) {
+	var raw map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &raw); err != nil {
+			t.Errorf("unmarshal body: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
+	m := p.SpeechModel("eleven_multilingual_v2")
+
+	_, err := m.GenerateSpeech(context.Background(), provider.SpeechCall{Text: "hi"})
+	if err != nil {
+		t.Fatalf("GenerateSpeech: %v", err)
+	}
+
+	if _, ok := raw["voice_settings"]; ok {
+		t.Errorf("voice_settings should be omitted when Speed is nil, got %v", raw["voice_settings"])
 	}
 }
 

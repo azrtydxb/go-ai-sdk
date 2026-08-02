@@ -55,6 +55,9 @@ func (p *Provider) Model(id string) provider.LanguageModel {
 
 // ImageModel returns a provider.ImageModel for the given X.AI image model
 // ID, e.g. "grok-2-image".
+//
+// Note: the live X.AI API rejects the size parameter for image generation;
+// leave provider.ImageCall.Size empty when using this model.
 func (p *Provider) ImageModel(id string) provider.ImageModel {
 	return openaicompat.NewImageModel(openaicompat.Config{
 		Name:       "xai",
