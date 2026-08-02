@@ -7,10 +7,19 @@ import (
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
+// ChunkingWord and ChunkingLine are the recognized values for
+// SmoothOpts.Chunking. Any other value (including the empty string) falls
+// back to word chunking.
+const (
+	ChunkingWord = "word"
+	ChunkingLine = "line"
+)
+
 // SmoothOpts configures SmoothStream.
 type SmoothOpts struct {
-	// Chunking selects how TextDeltas are re-chunked: "word" (default,
-	// used when empty) or "line".
+	// Chunking selects how TextDeltas are re-chunked: ChunkingWord (default,
+	// used when empty) or ChunkingLine. Any unrecognized value falls back
+	// to word chunking.
 	Chunking string
 	// Delay is slept after every part SmoothStream emits (both re-chunked
 	// text deltas and passed-through parts). Zero means no delay at all —
@@ -45,7 +54,7 @@ type SmoothOpts struct {
 func SmoothStream(parts iter.Seq[provider.StreamPart], opts SmoothOpts) iter.Seq[provider.StreamPart] {
 	chunking := opts.Chunking
 	if chunking == "" {
-		chunking = "word"
+		chunking = ChunkingWord
 	}
 
 	return func(yield func(provider.StreamPart) bool) {
@@ -95,7 +104,7 @@ func SmoothStream(parts iter.Seq[provider.StreamPart], opts SmoothOpts) iter.Seq
 
 			buf += td.Text
 			var chunks []string
-			if chunking == "line" {
+			if chunking == ChunkingLine {
 				chunks, buf = splitLineChunks(buf)
 			} else {
 				chunks, buf = splitWordChunks(buf)
