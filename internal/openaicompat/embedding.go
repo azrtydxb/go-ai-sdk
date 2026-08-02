@@ -1,4 +1,4 @@
-package openai
+package openaicompat
 
 import (
 	"bytes"
@@ -11,32 +11,37 @@ import (
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
-const embeddingMaxBatchSize = 2048
+// NewEmbeddingModel returns a provider.EmbeddingModel that speaks the
+// OpenAI embeddings wire format against cfg. Callers should only construct
+// one when cfg.EmbedBatch > 0.
+func NewEmbeddingModel(cfg Config, modelID string) provider.EmbeddingModel {
+	return &embeddingModel{cfg: cfg, modelID: modelID}
+}
 
 type embeddingModel struct {
-	provider *Provider
-	modelID  string
+	cfg     Config
+	modelID string
 }
 
 func (m *embeddingModel) ModelID() string      { return m.modelID }
-func (m *embeddingModel) ProviderName() string { return "openai" }
-func (m *embeddingModel) MaxBatchSize() int    { return embeddingMaxBatchSize }
+func (m *embeddingModel) ProviderName() string { return m.cfg.Name }
+func (m *embeddingModel) MaxBatchSize() int    { return m.cfg.EmbedBatch }
 
 func (m *embeddingModel) Embed(ctx context.Context, values []string) (*provider.EmbeddingResponse, error) {
 	reqBody, err := json.Marshal(embeddingRequest{Model: m.modelID, Input: values})
 	if err != nil {
-		return nil, fmt.Errorf("openai: marshal embedding request: %w", err)
+		return nil, fmt.Errorf("openaicompat: marshal embedding request: %w", err)
 	}
 
-	url := m.provider.baseURL + "/embeddings"
+	url := m.cfg.BaseURL + "/embeddings"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
 	if err != nil {
-		return nil, fmt.Errorf("openai: build embedding request: %w", err)
+		return nil, fmt.Errorf("openaicompat: build embedding request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+m.provider.apiKey)
+	httpReq.Header.Set("Authorization", "Bearer "+m.cfg.APIKey)
 
-	resp, err := m.provider.client().Do(httpReq)
+	resp, err := m.cfg.client().Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +49,7 @@ func (m *embeddingModel) Embed(ctx context.Context, values []string) (*provider.
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("openai: read embedding response: %w", err)
+		return nil, fmt.Errorf("openaicompat: read embedding response: %w", err)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -53,13 +58,13 @@ func (m *embeddingModel) Embed(ctx context.Context, values []string) (*provider.
 
 	var wr embeddingResponse
 	if err := json.Unmarshal(body, &wr); err != nil {
-		return nil, fmt.Errorf("openai: decode embedding response: %w", err)
+		return nil, fmt.Errorf("openaicompat: decode embedding response: %w", err)
 	}
 
 	embeddings := make([][]float64, len(wr.Data))
 	for _, d := range wr.Data {
 		if d.Index < 0 || d.Index >= len(embeddings) {
-			return nil, fmt.Errorf("openai: embedding index %d out of range [0,%d)", d.Index, len(embeddings))
+			return nil, fmt.Errorf("openaicompat: embedding index %d out of range [0,%d)", d.Index, len(embeddings))
 		}
 		embeddings[d.Index] = d.Embedding
 	}

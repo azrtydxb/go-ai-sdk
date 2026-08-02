@@ -3,10 +3,12 @@ package openai
 import (
 	"context"
 	"testing"
+
+	"github.com/azrtydxb/go-ai-sdk/internal/openaicompat/compattest"
 )
 
 func TestEmbeddingModel(t *testing.T) {
-	srv, _ := newFixtureServer(t)
+	srv := compattest.NewFixtureServer(t, "openai")
 	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).EmbeddingModel("text-embedding-test")
 
 	if got := model.ModelID(); got != "text-embedding-test" {

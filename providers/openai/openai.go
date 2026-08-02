@@ -1,15 +1,20 @@
 // Package openai implements the go-ai-sdk provider interfaces against
-// OpenAI's Chat Completions and Embeddings APIs.
+// OpenAI's Chat Completions and Embeddings APIs. It is a thin preset over
+// the shared internal/openaicompat implementation.
 package openai
 
 import (
 	"net/http"
 	"os"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/openaicompat"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
-const defaultBaseURL = "https://api.openai.com/v1"
+const (
+	defaultBaseURL        = "https://api.openai.com/v1"
+	embeddingMaxBatchSize = 2048
+)
 
 // Provider is an OpenAI-backed provider.LanguageModel / EmbeddingModel
 // factory.
@@ -52,20 +57,24 @@ func New(opts ...Option) *Provider {
 	return p
 }
 
+func (p *Provider) config() openaicompat.Config {
+	return openaicompat.Config{
+		Name:       "openai",
+		APIKey:     p.apiKey,
+		BaseURL:    p.baseURL,
+		HTTPClient: p.httpClient,
+		NativeJSON: true,
+		EmbedBatch: embeddingMaxBatchSize,
+	}
+}
+
 // Model returns a provider.LanguageModel for the given OpenAI model ID.
 func (p *Provider) Model(id string) provider.LanguageModel {
-	return &languageModel{provider: p, modelID: id}
+	return openaicompat.NewLanguageModel(p.config(), id)
 }
 
 // EmbeddingModel returns a provider.EmbeddingModel for the given OpenAI
 // embedding model ID.
 func (p *Provider) EmbeddingModel(id string) provider.EmbeddingModel {
-	return &embeddingModel{provider: p, modelID: id}
-}
-
-func (p *Provider) client() *http.Client {
-	if p.httpClient != nil {
-		return p.httpClient
-	}
-	return http.DefaultClient
+	return openaicompat.NewEmbeddingModel(p.config(), id)
 }

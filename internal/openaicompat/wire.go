@@ -1,4 +1,4 @@
-package openai
+package openaicompat
 
 import (
 	"encoding/base64"
@@ -250,7 +250,7 @@ func convertMessages(msgs []provider.Message) ([]wireMessage, error) {
 				}
 				resultJSON, err := json.Marshal(trp.Result)
 				if err != nil {
-					return nil, fmt.Errorf("openai: marshal tool result: %w", err)
+					return nil, fmt.Errorf("openaicompat: marshal tool result: %w", err)
 				}
 				// trp.IsError is intentionally not encoded: OpenAI's "tool"
 				// message wire format has no dedicated error slot — the
@@ -265,7 +265,7 @@ func convertMessages(msgs []provider.Message) ([]wireMessage, error) {
 			}
 
 		default:
-			return nil, fmt.Errorf("openai: unsupported message role %q", m.Role)
+			return nil, fmt.Errorf("openaicompat: unsupported message role %q", m.Role)
 		}
 	}
 	return out, nil
@@ -313,7 +313,7 @@ func userContent(parts []provider.ContentPart) (json.RawMessage, error) {
 			}
 			wireParts = append(wireParts, wireContentPart{Type: "image_url", ImageURL: &wireImageURL{URL: url}})
 		default:
-			return nil, fmt.Errorf("openai: unsupported content part %T in user message", part)
+			return nil, fmt.Errorf("openaicompat: unsupported content part %T in user message", part)
 		}
 	}
 	return json.Marshal(wireParts)
@@ -371,7 +371,7 @@ func convertResponseFormat(rf provider.ResponseFormat) (any, error) {
 		// entirely rather than sending an explicit value for it.
 		return nil, nil
 	default:
-		return nil, fmt.Errorf("openai: unsupported ResponseFormat.Type %q", rf.Type)
+		return nil, fmt.Errorf("openaicompat: unsupported ResponseFormat.Type %q", rf.Type)
 	}
 }
 

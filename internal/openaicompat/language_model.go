@@ -1,4 +1,4 @@
-package openai
+package openaicompat
 
 import (
 	"bytes"
@@ -16,32 +16,38 @@ import (
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
+// NewLanguageModel returns a provider.LanguageModel that speaks the
+// OpenAI chat-completions wire format against cfg.
+func NewLanguageModel(cfg Config, modelID string) provider.LanguageModel {
+	return &languageModel{cfg: cfg, modelID: modelID}
+}
+
 type languageModel struct {
-	provider *Provider
-	modelID  string
+	cfg     Config
+	modelID string
 }
 
 func (m *languageModel) ModelID() string      { return m.modelID }
-func (m *languageModel) ProviderName() string { return "openai" }
+func (m *languageModel) ProviderName() string { return m.cfg.Name }
 func (m *languageModel) Capabilities() provider.Capabilities {
-	return provider.Capabilities{NativeJSON: true}
+	return provider.Capabilities{NativeJSON: m.cfg.NativeJSON}
 }
 
 func (m *languageModel) doRequest(ctx context.Context, req chatRequest) (*http.Response, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
-		return nil, fmt.Errorf("openai: marshal request: %w", err)
+		return nil, fmt.Errorf("openaicompat: marshal request: %w", err)
 	}
 
-	url := m.provider.baseURL + "/chat/completions"
+	url := m.cfg.BaseURL + "/chat/completions"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("openai: build request: %w", err)
+		return nil, fmt.Errorf("openaicompat: build request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+m.provider.apiKey)
+	httpReq.Header.Set("Authorization", "Bearer "+m.cfg.APIKey)
 
-	return m.provider.client().Do(httpReq)
+	return m.cfg.client().Do(httpReq)
 }
 
 func apiError(resp *http.Response, body []byte) error {
@@ -62,7 +68,7 @@ func (m *languageModel) Generate(ctx context.Context, call provider.Call) (*prov
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("openai: read response: %w", err)
+		return nil, fmt.Errorf("openaicompat: read response: %w", err)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -71,7 +77,7 @@ func (m *languageModel) Generate(ctx context.Context, call provider.Call) (*prov
 
 	var wr chatResponse
 	if err := json.Unmarshal(body, &wr); err != nil {
-		return nil, fmt.Errorf("openai: decode response: %w", err)
+		return nil, fmt.Errorf("openaicompat: decode response: %w", err)
 	}
 
 	return convertResponse(wr, body), nil
@@ -92,7 +98,7 @@ func (m *languageModel) Stream(ctx context.Context, call provider.Call) (provide
 		defer resp.Body.Close()
 		body, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
-			return nil, fmt.Errorf("openai: read error response: %w", readErr)
+			return nil, fmt.Errorf("openaicompat: read error response: %w", readErr)
 		}
 		return nil, apiError(resp, body)
 	}
@@ -130,7 +136,7 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 
 		for ev, err := range sse.Scan(s.body) {
 			if err != nil {
-				s.err = fmt.Errorf("openai: stream read: %w", err)
+				s.err = fmt.Errorf("openaicompat: stream read: %w", err)
 				return
 			}
 
@@ -151,7 +157,7 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 
 			var chunk chatStreamChunk
 			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-				s.err = fmt.Errorf("openai: decode stream chunk: %w", err)
+				s.err = fmt.Errorf("openaicompat: decode stream chunk: %w", err)
 				return
 			}
 
@@ -235,7 +241,7 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 			}
 			return
 		}
-		s.err = errors.New("openai: stream ended unexpectedly without [DONE]")
+		s.err = errors.New("openaicompat: stream ended unexpectedly without [DONE]")
 	}
 }
 
