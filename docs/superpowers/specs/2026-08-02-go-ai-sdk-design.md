@@ -279,9 +279,14 @@ model ids that themselves contain `:` (e.g. Bedrock's
   naturally); returning true stops the loop. `ai.StepCountIs(n)` is the
   built-in "stop once len(steps) >= n" helper. If `MaxSteps` is unset (0)
   and `StopWhen` is non-nil, the hard step cap defaults to 16 instead of 1.
-- `PrepareStep func(stepIndex int, call provider.Call) (provider.Call, bool)`
-  — called before each model call; returning `(call, true)` substitutes the
-  returned `Call` for that step.
+- `PrepareStep func(stepIndex int, plan StepPlan) (StepPlan, bool)` — called
+  before each model call with `StepPlan{Call, Model}` (`Model` is the model
+  that will make the call: `opts.Model` on step 0, or whatever a prior
+  `PrepareStep` call last swapped to); returning `(plan, true)` substitutes
+  the returned `StepPlan` for that step. `StepPlan.Model` is nil-means-keep:
+  setting it swaps the model used for that step's call AND every step after
+  it, until `PrepareStep` swaps again — the swap persists rather than
+  applying to a single step.
 - `OnStepFinish func(step Step)` — called after each step completes
   (including the final step). In `StreamText`, this fires only once a
   step's `Parts()` iteration has run to completion; if the consumer stops

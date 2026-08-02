@@ -29,10 +29,22 @@ type GenerateTextOpts struct {
 	// cap defaults to 16 instead of the usual default of 1.
 	StopWhen func(steps []Step) bool
 	// PrepareStep, when set, is called before each model call with the
-	// zero-based step index and the Call about to be sent. Returning
-	// (call, true) uses the returned Call for that step instead; returning
-	// (_, false) leaves the planned Call unchanged.
-	PrepareStep func(stepIndex int, call provider.Call) (provider.Call, bool)
+	// zero-based step index and the StepPlan about to be used: Call is the
+	// Call about to be sent, and Model is the model that will make the
+	// call (opts.Model on step 0, or whatever an earlier PrepareStep call
+	// last swapped to). Returning (plan, true) uses the returned StepPlan
+	// for that step instead; returning (_, false) leaves the planned step
+	// unchanged.
+	//
+	// Setting StepPlan.Model swaps the model used for that step's call —
+	// and every step after it, until PrepareStep swaps again (StepPlan.Model
+	// persists rather than applying to a single step). This is a deliberate
+	// divergence from a strictly per-step swap: it composes more simply (a
+	// swap made at step N doesn't need to be re-asserted at every later step
+	// to "stick") and matches the common use case of routing to a different
+	// model partway through a run (e.g. a cheaper model once a plan has been
+	// established) rather than alternating models step by step.
+	PrepareStep func(stepIndex int, plan StepPlan) (StepPlan, bool)
 	// OnStepFinish, when set, is called after each step completes
 	// (including the final step) in both GenerateText and StreamText, with
 	// the finished Step. Errors are not returned from the callback.

@@ -31,6 +31,19 @@ type ToolResultRecord struct {
 	Err        error // tool execution error, recorded not raised (see Task 7)
 }
 
+// StepPlan is the input/output of GenerateTextOpts.PrepareStep: the Call
+// about to be sent for a step, and the LanguageModel that will send it.
+type StepPlan struct {
+	Call provider.Call
+	// Model is the model that will make this step's call. On the way in,
+	// it is always the model currently active for the loop (opts.Model, or
+	// whatever a prior PrepareStep call swapped to). On the way out, a nil
+	// Model means keep the current model; a non-nil Model swaps to it for
+	// this step and every step after, until PrepareStep swaps again — see
+	// GenerateTextOpts.PrepareStep for why the swap persists.
+	Model provider.LanguageModel
+}
+
 // Step captures the result of a single model call within a GenerateText run.
 type Step struct {
 	Text          string
@@ -88,19 +101,23 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 
 	var steps []Step
 	var totalUsage provider.Usage
+	model := opts.Model
 
 	for {
 		stepIndex := len(steps)
 		stepCall := call
 		stepCall.Messages = messages
 		if opts.PrepareStep != nil {
-			if modified, ok := opts.PrepareStep(stepIndex, stepCall); ok {
-				stepCall = modified
+			if plan, ok := opts.PrepareStep(stepIndex, StepPlan{Call: stepCall, Model: model}); ok {
+				stepCall = plan.Call
+				if plan.Model != nil {
+					model = plan.Model
+				}
 			}
 		}
 
 		resp, err := retry.Do(ctx, maxRetries, func() (*provider.Response, error) {
-			return opts.Model.Generate(ctx, stepCall)
+			return model.Generate(ctx, stepCall)
 		})
 		if err != nil {
 			var exhausted *retry.ExhaustedError

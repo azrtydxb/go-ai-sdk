@@ -181,12 +181,12 @@ func TestPrepareStepSwapsToolChoiceOnStep2(t *testing.T) {
 	required := &provider.ToolChoice{Mode: provider.ToolChoiceRequired}
 	_, err := GenerateText(t.Context(), GenerateTextOpts{
 		Model: m, Prompt: "x", Tools: []Tool{tool}, MaxSteps: 3,
-		PrepareStep: func(stepIndex int, call provider.Call) (provider.Call, bool) {
+		PrepareStep: func(stepIndex int, plan StepPlan) (StepPlan, bool) {
 			if stepIndex == 1 {
-				call.ToolChoice = required
-				return call, true
+				plan.Call.ToolChoice = required
+				return plan, true
 			}
-			return provider.Call{}, false
+			return StepPlan{}, false
 		},
 	})
 	if err != nil {
@@ -203,6 +203,51 @@ func TestPrepareStepSwapsToolChoiceOnStep2(t *testing.T) {
 	}
 	if m.Calls[2].ToolChoice != nil {
 		t.Fatalf("step 2 ToolChoice = %+v, want nil (unchanged)", m.Calls[2].ToolChoice)
+	}
+}
+
+// TestPrepareStepSwapsModelAndPersists covers StepPlan.Model: PrepareStep
+// swaps to model B on step 1 (leaving it unset, i.e. nil, on every other
+// step), and the swap must persist — model B, not the original model A,
+// must also make the call for step 2, even though PrepareStep didn't set
+// Model again on that step.
+func TestPrepareStepSwapsModelAndPersists(t *testing.T) {
+	modelA := &aitest.MockModel{Responses: []*provider.Response{
+		toolCallResponse("t", "c1", `{"city":"a"}`),
+	}}
+	modelB := &aitest.MockModel{Responses: []*provider.Response{
+		toolCallResponse("t", "c2", `{"city":"b"}`),
+		{Content: []provider.ContentPart{provider.TextPart{Text: "done"}},
+			FinishReason: provider.FinishStop},
+	}}
+	tool := NewTool("t", "", func(_ context.Context, a weatherArgs) (any, error) { return "r", nil })
+
+	var sawModelOnStep1 provider.LanguageModel
+	res, err := GenerateText(t.Context(), GenerateTextOpts{
+		Model: modelA, Prompt: "x", Tools: []Tool{tool}, MaxSteps: 3,
+		PrepareStep: func(stepIndex int, plan StepPlan) (StepPlan, bool) {
+			if stepIndex == 1 {
+				sawModelOnStep1 = plan.Model
+				plan.Model = modelB
+				return plan, true
+			}
+			return StepPlan{}, false
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sawModelOnStep1 != modelA {
+		t.Fatalf("plan.Model seen at step 1 = %v, want modelA (the model active before the swap)", sawModelOnStep1)
+	}
+	if len(modelA.Calls) != 1 {
+		t.Fatalf("modelA.Calls = %d, want 1 (only step 0)", len(modelA.Calls))
+	}
+	if len(modelB.Calls) != 2 {
+		t.Fatalf("modelB.Calls = %d, want 2 (steps 1 and 2 — the swap must persist)", len(modelB.Calls))
+	}
+	if res.Text != "done" {
+		t.Fatalf("Text = %q, want %q", res.Text, "done")
 	}
 }
 
