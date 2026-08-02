@@ -144,6 +144,58 @@ Shared SSE parser in `internal/sse` (handles `data:` framing, `[DONE]`, comment 
 - **Examples** in `examples/` are compiled in CI; ones needing live keys are gated behind env vars.
 - Development follows TDD (red-green-refactor).
 
+## Capability extension (wave 4, shipped)
+
+Wave 4 extends the core API with image generation, speech synthesis, and audio transcription capabilities, following the same pattern as text and embeddings.
+
+### Provider interfaces
+
+Three new interfaces parallel `LanguageModel` and `EmbeddingModel`:
+
+```go
+type ImageModel interface {
+    GenerateImages(ctx context.Context, call ImageCall) (*ImageResponse, error)
+    ModelID() string
+    ProviderName() string
+}
+
+type SpeechModel interface {
+    GenerateSpeech(ctx context.Context, call SpeechCall) (*SpeechResponse, error)
+    ModelID() string
+    ProviderName() string
+}
+
+type TranscriptionModel interface {
+    Transcribe(ctx context.Context, call TranscriptionCall) (*TranscriptionResponse, error)
+    ModelID() string
+    ProviderName() string
+}
+```
+
+Unified types:
+- `ImageCall`: prompt, N (count), size, aspect ratio, seed.
+- `SpeechCall`: text, voice, output format, speed, language.
+- `TranscriptionCall`: audio bytes, media type, language, prompt (for context).
+- Responses carry the generated media (raw bytes), media type, and metadata (language, duration).
+
+### Core API functions
+
+- `ai.GenerateImage(ctx, GenerateImageOpts)` — generates one or more images from a text prompt.
+- `ai.GenerateSpeech(ctx, GenerateSpeechOpts)` — synthesizes speech audio from text.
+- `ai.Transcribe(ctx, TranscribeOpts)` — transcribes audio to text.
+
+Each follows the established pattern: validates required fields, wraps the call in retry logic (default 2 retries), and returns a result struct or typed error.
+
+### Provider coverage
+
+| Capability | OpenAI | Google | Vertex AI | xAI | ElevenLabs | Groq |
+|---|---|---|---|---|---|---|
+| `GenerateImage` | ✅ | ✅ | ✅ | ✅ | — | — |
+| `GenerateSpeech` | ✅ | — | — | — | ✅ | — |
+| `Transcribe` | ✅ | — | — | — | ✅ | ✅ |
+
+**Shared implementation:** OpenAI-compatible providers (groq, xai) reuse the `openaicompat` helpers introduced for text. Google-based providers (vertex) reuse the `geminicompat` base. ElevenLabs gets its own full implementation.
+
 ## Key decisions log
 
 1. **Vercel AI SDK, not Google Vertex** — "vertex" in the original request meant Vercel; confirmed with user.
@@ -151,3 +203,4 @@ Shared SSE parser in `internal/sse` (handles `data:` framing, `[DONE]`, comment 
 3. **Single module** — submodules deferred until dependency bloat is demonstrated.
 4. **All Vercel-supported providers as the end goal**, delivered in waves; v0.1 ships wave 1.
 5. **Reflection-based JSON Schema from structs** replaces Zod for tools and structured output.
+6. **Wave 4 media interfaces** — new top-level interfaces for image/speech/transcription (not embedded in LanguageModel) to keep the contract simple and separate concerns. Providers implement one, some, or all capabilities; the capability matrix is the source of truth.

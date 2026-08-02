@@ -83,6 +83,74 @@ object generation (`ai.GenerateObject[T]`), and embeddings — live in
 [`examples/`](examples/). Each one is a self-contained `package main`
 guarded by an API-key env check, and each is compiled by CI.
 
+## Beyond text
+
+### Generate images
+
+```go
+model := openai.New().ImageModel("gpt-image-1")
+
+result, err := ai.GenerateImage(context.Background(), ai.GenerateImageOpts{
+	Model:  model,
+	Prompt: "A serene landscape with mountains and a clear blue sky",
+	N:      1,
+	Size:   "1024x1024",
+})
+if err != nil {
+	panic(err)
+}
+
+os.WriteFile("out.png", result.Image.Data, 0o644)
+```
+
+### Generate speech
+
+```go
+model := openai.New().SpeechModel("gpt-4o-mini-tts")
+
+result, err := ai.GenerateSpeech(context.Background(), ai.GenerateSpeechOpts{
+	Model:        model,
+	Text:         "Hello world!",
+	Voice:        "alloy",
+	OutputFormat: "mp3",
+})
+if err != nil {
+	panic(err)
+}
+
+os.WriteFile("out.mp3", result.Audio, 0o644)
+```
+
+### Transcribe audio
+
+```go
+audioData, _ := os.ReadFile("input.mp3")
+model := openai.New().TranscriptionModel("whisper-1")
+
+result, err := ai.Transcribe(context.Background(), ai.TranscribeOpts{
+	Model:     model,
+	Audio:     audioData,
+	MediaType: "audio/mpeg",
+})
+if err != nil {
+	panic(err)
+}
+
+fmt.Println(result.Text)
+```
+
+## Media capabilities
+
+Supported providers for image generation, speech synthesis, and transcription:
+
+| Capability | OpenAI | Google | Vertex AI | xAI | ElevenLabs | Groq |
+|---|---|---|---|---|---|---|
+| `GenerateImage` | ✅ gpt-image-1 | ✅ imagen-3 | ✅ imagen-3 | ✅ grok-vision-beta | — | — |
+| `GenerateSpeech` | ✅ gpt-4o-mini-tts | — | — | — | ✅ eleven-turbo-v2 | — |
+| `Transcribe` | ✅ whisper-1 | — | — | — | ✅ eleven-turbo-v2 | ✅ whisper-large-v3-turbo |
+
+**Note:** Other Vercel-supported media providers (Fal, Replicate, Luma, Deepgram, LMNT, Hume) are not yet included. The provider interface makes them straightforward follow-ups.
+
 ## Features
 
 All supported providers, by capability:
