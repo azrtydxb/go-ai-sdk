@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"iter"
+	"reflect"
 	"testing"
 
 	"github.com/azrtydxb/go-ai-sdk/ai/aitest"
@@ -804,5 +805,214 @@ func TestTextStreamMessagesAfterToolLoop(t *testing.T) {
 	}
 	if msgs[3].Role != provider.RoleAssistant {
 		t.Fatalf("msgs[3].Role = %v, want assistant", msgs[3].Role)
+	}
+}
+
+// TestStreamTextOnChunkSeesEveryPartInOrder verifies OnChunk is invoked once
+// per StreamPart, in the exact order they are produced, and strictly before
+// each part is yielded to the Parts() consumer (not just eventually, and not
+// batched at the end).
+func TestStreamTextOnChunkSeesEveryPartInOrder(t *testing.T) {
+	scripted := []provider.StreamPart{
+		provider.TextDelta{Text: "hel"},
+		provider.ReasoningDelta{Text: "thinking"},
+		provider.TextDelta{Text: "lo"},
+		provider.FinishPart{Reason: provider.FinishStop, Usage: provider.Usage{TotalTokens: 4}},
+	}
+	m := &aitest.MockModel{Streams: [][]provider.StreamPart{scripted}}
+
+	var chunks []provider.StreamPart
+	s, err := StreamText(t.Context(), GenerateTextOpts{
+		Model:  m,
+		Prompt: "hi",
+		OnChunk: func(p provider.StreamPart) {
+			chunks = append(chunks, p)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	i := 0
+	var yielded []provider.StreamPart
+	for p := range s.Parts() {
+		i++
+		// OnChunk for this part must already have fired by the time the
+		// consumer observes it.
+		if len(chunks) != i {
+			t.Fatalf("at yielded part %d, len(chunks) = %d, want %d (OnChunk must fire before yield)", i, len(chunks), i)
+		}
+		yielded = append(yielded, p)
+	}
+	if s.Err() != nil {
+		t.Fatal(s.Err())
+	}
+
+	if !reflect.DeepEqual(chunks, scripted) {
+		t.Fatalf("OnChunk saw:\n%#v\nwant:\n%#v", chunks, scripted)
+	}
+	if !reflect.DeepEqual(yielded, scripted) {
+		t.Fatalf("yielded:\n%#v\nwant:\n%#v", yielded, scripted)
+	}
+}
+
+// TestOnFinishEquivalenceGenerateTextVsStreamText scripts the same logical
+// result (same final text/usage/finish reason) through GenerateText's
+// Response-based mock path and StreamText's part-based mock path, and
+// verifies OnFinish delivers equivalent *GenerateTextResult values from
+// both — confirming StreamText's accumulated-state result assembly matches
+// GenerateText's for the same underlying model behavior.
+func TestOnFinishEquivalenceGenerateTextVsStreamText(t *testing.T) {
+	wantUsage := provider.Usage{InputTokens: 5, OutputTokens: 3, TotalTokens: 8}
+
+	genModel := &aitest.MockModel{Responses: []*provider.Response{{
+		Content:      []provider.ContentPart{provider.TextPart{Text: "hello world"}},
+		FinishReason: provider.FinishStop,
+		Usage:        wantUsage,
+	}}}
+	streamModel := &aitest.MockModel{Streams: [][]provider.StreamPart{{
+		provider.TextDelta{Text: "hello "},
+		provider.TextDelta{Text: "world"},
+		provider.FinishPart{Reason: provider.FinishStop, Usage: wantUsage},
+	}}}
+
+	var genResult *GenerateTextResult
+	if _, err := GenerateText(t.Context(), GenerateTextOpts{
+		Model:  genModel,
+		Prompt: "hi",
+		OnFinish: func(r *GenerateTextResult) {
+			genResult = r
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var streamResult *GenerateTextResult
+	s, err := StreamText(t.Context(), GenerateTextOpts{
+		Model:  streamModel,
+		Prompt: "hi",
+		OnFinish: func(r *GenerateTextResult) {
+			streamResult = r
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+	}
+	if s.Err() != nil {
+		t.Fatal(s.Err())
+	}
+
+	if genResult == nil {
+		t.Fatal("GenerateText: OnFinish was not called")
+	}
+	if streamResult == nil {
+		t.Fatal("StreamText: OnFinish was not called")
+	}
+
+	if genResult.Text != streamResult.Text {
+		t.Errorf("Text: GenerateText=%q StreamText=%q", genResult.Text, streamResult.Text)
+	}
+	if genResult.FinishReason != streamResult.FinishReason {
+		t.Errorf("FinishReason: GenerateText=%v StreamText=%v", genResult.FinishReason, streamResult.FinishReason)
+	}
+	if genResult.Usage != streamResult.Usage {
+		t.Errorf("Usage: GenerateText=%+v StreamText=%+v", genResult.Usage, streamResult.Usage)
+	}
+	if len(genResult.Steps) != len(streamResult.Steps) {
+		t.Errorf("len(Steps): GenerateText=%d StreamText=%d", len(genResult.Steps), len(streamResult.Steps))
+	}
+	if !reflect.DeepEqual(genResult.Messages, streamResult.Messages) {
+		t.Errorf("Messages differ:\nGenerateText=%#v\nStreamText=%#v", genResult.Messages, streamResult.Messages)
+	}
+
+	// StreamText's OnFinish result must also match the TextStream's own
+	// accumulated-state accessors.
+	if streamResult.Text != s.Text() {
+		t.Errorf("streamResult.Text = %q, s.Text() = %q", streamResult.Text, s.Text())
+	}
+	if streamResult.Usage != s.Usage() {
+		t.Errorf("streamResult.Usage = %+v, s.Usage() = %+v", streamResult.Usage, s.Usage())
+	}
+	if streamResult.FinishReason != s.FinishReason() {
+		t.Errorf("streamResult.FinishReason = %v, s.FinishReason() = %v", streamResult.FinishReason, s.FinishReason())
+	}
+}
+
+// TestStreamTextOnFinishNotCalledOnError verifies OnFinish is skipped (in
+// favor of OnError) when the stream ends abnormally.
+func TestStreamTextOnFinishNotCalledOnError(t *testing.T) {
+	wantErr := errors.New("boom mid-stream")
+	m := &aitest.MockModel{Streams: [][]provider.StreamPart{{
+		provider.TextDelta{Text: "a"},
+	}}}
+	errModel := &errStreamModel{inner: m, err: wantErr}
+
+	var gotErr error
+	onFinishCalled := false
+	s, err := StreamText(t.Context(), GenerateTextOpts{
+		Model:  errModel,
+		Prompt: "x",
+		OnError: func(e error) {
+			gotErr = e
+		},
+		OnFinish: func(r *GenerateTextResult) {
+			onFinishCalled = true
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+	}
+
+	if !errors.Is(gotErr, wantErr) {
+		t.Fatalf("OnError err = %v, want %v", gotErr, wantErr)
+	}
+	if !errors.Is(s.Err(), wantErr) {
+		t.Fatalf("Err() = %v, want %v", s.Err(), wantErr)
+	}
+	if onFinishCalled {
+		t.Fatal("OnFinish must not be called when the stream ends in error")
+	}
+}
+
+// TestStreamTextOnErrorToolLoopError verifies OnError also fires for a
+// tool-loop error (an unknown tool requested by the model), not just for
+// mid-stream provider errors.
+func TestStreamTextOnErrorToolLoopError(t *testing.T) {
+	m := &aitest.MockModel{Streams: [][]provider.StreamPart{{
+		provider.ToolCallEnd{Call: provider.ToolCallPart{ID: "c1", Name: "unknown_tool", Args: []byte(`{}`)}},
+		provider.FinishPart{Reason: provider.FinishToolCalls},
+	}}}
+
+	var gotErr error
+	onFinishCalled := false
+	s, err := StreamText(t.Context(), GenerateTextOpts{
+		Model:  m,
+		Prompt: "hi",
+		OnError: func(e error) {
+			gotErr = e
+		},
+		OnFinish: func(r *GenerateTextResult) {
+			onFinishCalled = true
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+	}
+
+	var noSuchTool *NoSuchToolError
+	if !errors.As(gotErr, &noSuchTool) {
+		t.Fatalf("OnError err = %v (%T), want *NoSuchToolError", gotErr, gotErr)
+	}
+	if !errors.As(s.Err(), &noSuchTool) {
+		t.Fatalf("Err() = %v, want *NoSuchToolError", s.Err())
+	}
+	if onFinishCalled {
+		t.Fatal("OnFinish must not be called when the tool loop errors")
 	}
 }

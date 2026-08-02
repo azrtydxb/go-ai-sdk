@@ -56,6 +56,37 @@ type GenerateTextOpts struct {
 	// that step, even though FinishPart itself was already delivered.
 	OnStepFinish func(step Step)
 
+	// OnChunk, when set, is called with each provider.StreamPart before it
+	// is yielded to the consumer of StreamText's TextStream.Parts(). It has
+	// no effect on GenerateText, which has no stream of parts to observe.
+	OnChunk func(part provider.StreamPart)
+
+	// OnFinish, when set, is called once with the call's result after it
+	// completes successfully: in GenerateText, right before it returns,
+	// with the same *GenerateTextResult that is returned; in StreamText, at
+	// the natural end of TextStream.Parts() iteration (the tool loop
+	// stopped because a step had no tool calls, MaxSteps was reached, or
+	// StopWhen returned true) — never on a step that ended in an error, nor
+	// if the consumer abandons iteration (stops ranging) before the stream
+	// ends naturally. The StreamText case builds a fresh *GenerateTextResult
+	// from the same accumulated step/usage/message state exposed by
+	// TextStream's Steps/Usage/Messages accessors, so it is equivalent in
+	// shape to what GenerateText would return for the same underlying model
+	// script.
+	OnFinish func(result *GenerateTextResult)
+
+	// OnError, when set, is called with a call's terminal error. In
+	// StreamText this covers errors that end TextStream.Parts() iteration
+	// abnormally — a mid-stream provider error (TextStream.Err()) or a
+	// tool-loop error (e.g. an unknown tool, or a subsequent step's stream
+	// failing to start) — but not a failure to start the very first stream,
+	// which is reported solely via the error StreamText itself returns. In
+	// GenerateText, the function's returned error already fully signals
+	// failure to the caller; OnError additionally fires with that same
+	// error for symmetry with StreamText, so code that wires up both APIs
+	// through one callback doesn't have to special-case GenerateText.
+	OnError func(err error)
+
 	// ProviderOptions carries provider-specific escape-hatch parameters. It
 	// is threaded through to provider.Call.ProviderOptions unchanged — see
 	// that field's doc for the keying and merge semantics.

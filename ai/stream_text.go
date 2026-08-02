@@ -144,6 +144,9 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 			abandoned := false
 
 			for p := range stream.Parts() {
+				if s.opts.OnChunk != nil {
+					s.opts.OnChunk(p)
+				}
 				switch part := p.(type) {
 				case provider.TextDelta:
 					text += part.Text
@@ -188,6 +191,9 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 				s.err = err
 				_ = stream.Close()
 				s.current = nil
+				if s.opts.OnError != nil {
+					s.opts.OnError(err)
+				}
 				return
 			}
 			_ = stream.Close()
@@ -279,6 +285,9 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 					step.ToolResults = nil
 					s.steps = append(s.steps, step)
 					s.current = nil
+					if s.opts.OnError != nil {
+						s.opts.OnError(err)
+					}
 					return
 				}
 				step.ToolResults = results
@@ -303,14 +312,17 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 
 			if !hasToolCalls {
 				s.current = nil
+				s.finish()
 				return
 			}
 			if len(s.steps) >= s.maxSteps {
 				s.current = nil
+				s.finish()
 				return
 			}
 			if s.opts.StopWhen != nil && s.opts.StopWhen(s.steps) {
 				s.current = nil
+				s.finish()
 				return
 			}
 
@@ -318,6 +330,9 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 			if err != nil {
 				s.err = err
 				s.current = nil
+				if s.opts.OnError != nil {
+					s.opts.OnError(err)
+				}
 				return
 			}
 			call.Messages = s.messages
@@ -333,6 +348,9 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 			if err != nil {
 				s.err = err
 				s.current = nil
+				if s.opts.OnError != nil {
+					s.opts.OnError(err)
+				}
 				return
 			}
 			s.current = next
@@ -348,6 +366,37 @@ func assistantContent(respContent []provider.ContentPart) []provider.ContentPart
 		return nil
 	}
 	return append([]provider.ContentPart(nil), respContent...)
+}
+
+// finish invokes opts.OnFinish, if set, with a *GenerateTextResult built
+// from the stream's accumulated state. Called only at a natural end of
+// Parts() iteration (no error, not abandoned early).
+func (s *TextStream) finish() {
+	if s.opts.OnFinish == nil {
+		return
+	}
+	s.opts.OnFinish(s.buildResult())
+}
+
+// buildResult assembles a *GenerateTextResult from the stream's accumulated
+// steps/usage/messages, mirroring the shape GenerateText returns for the
+// same underlying model script.
+func (s *TextStream) buildResult() *GenerateTextResult {
+	result := &GenerateTextResult{
+		Steps:    append([]Step(nil), s.steps...),
+		Usage:    s.totalUsage,
+		Messages: s.messages,
+	}
+	if len(s.steps) > 0 {
+		last := s.steps[len(s.steps)-1]
+		result.Text = last.Text
+		result.ReasoningText = last.ReasoningText
+		result.Sources = last.Sources
+		result.ToolCalls = last.ToolCalls
+		result.ToolResults = last.ToolResults
+		result.FinishReason = last.FinishReason
+	}
+	return result
 }
 
 // Err returns the error, if any, that ended iteration abnormally: a

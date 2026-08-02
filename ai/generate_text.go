@@ -80,9 +80,16 @@ type GenerateTextResult struct {
 // while tool calls occur and len(Steps) < MaxSteps (default 1). Usage is
 // summed across steps.
 func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResult, error) {
+	fail := func(err error) (*GenerateTextResult, error) {
+		if opts.OnError != nil {
+			opts.OnError(err)
+		}
+		return nil, err
+	}
+
 	call, err := buildCall(opts)
 	if err != nil {
-		return nil, err
+		return fail(err)
 	}
 
 	maxRetries := defaultMaxRetries
@@ -122,9 +129,9 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 		if err != nil {
 			var exhausted *retry.ExhaustedError
 			if errors.As(err, &exhausted) {
-				return nil, &RetryError{Attempts: exhausted.Attempts, LastErr: exhausted.LastErr}
+				return fail(&RetryError{Attempts: exhausted.Attempts, LastErr: exhausted.LastErr})
 			}
-			return nil, err
+			return fail(err)
 		}
 
 		step := buildStep(resp)
@@ -142,7 +149,7 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 		if hasToolCalls {
 			results, err := runToolCalls(ctx, opts.Tools, toolCalls)
 			if err != nil {
-				return nil, err
+				return fail(err)
 			}
 			step.ToolResults = results
 
@@ -177,7 +184,7 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 
 	last := steps[len(steps)-1]
 
-	return &GenerateTextResult{
+	result := &GenerateTextResult{
 		Text:          last.Text,
 		ReasoningText: last.ReasoningText,
 		Sources:       last.Sources,
@@ -187,7 +194,11 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 		FinishReason:  last.FinishReason,
 		Usage:         totalUsage,
 		Messages:      messages,
-	}, nil
+	}
+	if opts.OnFinish != nil {
+		opts.OnFinish(result)
+	}
+	return result, nil
 }
 
 // toolResultValue returns the value to send to the model for a tool result:

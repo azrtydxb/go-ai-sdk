@@ -170,3 +170,57 @@ func TestGenerateTextRetriesThenWrapsError(t *testing.T) {
 		t.Fatalf("calls = %d, want 3 (1 + 2 retries)", len(m.Calls))
 	}
 }
+
+// TestGenerateTextOnFinishCalledWithResult verifies OnFinish fires once,
+// after success, with the same result GenerateText returns.
+func TestGenerateTextOnFinishCalledWithResult(t *testing.T) {
+	m := &aitest.MockModel{Responses: []*provider.Response{{
+		Content:      []provider.ContentPart{provider.TextPart{Text: "hello"}},
+		FinishReason: provider.FinishStop,
+		Usage:        provider.Usage{TotalTokens: 4},
+	}}}
+	var onFinishResult *GenerateTextResult
+	res, err := GenerateText(t.Context(), GenerateTextOpts{
+		Model:  m,
+		Prompt: "hi",
+		OnFinish: func(r *GenerateTextResult) {
+			onFinishResult = r
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if onFinishResult != res {
+		t.Fatalf("OnFinish result = %+v, want the same *GenerateTextResult returned (%+v)", onFinishResult, res)
+	}
+}
+
+// TestGenerateTextOnErrorFiresForSymmetry verifies that OnError fires with
+// the same error GenerateText returns, per its documented symmetry with
+// StreamText (where the returned error IS the caller-facing signal, but
+// OnError still fires alongside it).
+func TestGenerateTextOnErrorFiresForSymmetry(t *testing.T) {
+	wantErr := NewAPICallError(400, "https://x", "", "bad request")
+	m := &aitest.MockModel{Err: wantErr}
+	var gotErr error
+	onFinishCalled := false
+	_, err := GenerateText(t.Context(), GenerateTextOpts{
+		Model:  m,
+		Prompt: "hi",
+		OnError: func(e error) {
+			gotErr = e
+		},
+		OnFinish: func(r *GenerateTextResult) {
+			onFinishCalled = true
+		},
+	})
+	if err == nil {
+		t.Fatal("want error")
+	}
+	if gotErr != err {
+		t.Fatalf("OnError err = %v, want the same error returned (%v)", gotErr, err)
+	}
+	if onFinishCalled {
+		t.Fatal("OnFinish must not be called when GenerateText fails")
+	}
+}
