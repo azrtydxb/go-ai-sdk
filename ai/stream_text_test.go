@@ -857,29 +857,41 @@ func TestStreamTextOnChunkSeesEveryPartInOrder(t *testing.T) {
 }
 
 // TestOnFinishEquivalenceGenerateTextVsStreamText scripts the same logical
-// result (same final text/usage/finish reason) through GenerateText's
+// result (same final text/usage/finish reason, plus reasoning, sources, and
+// a tool call/result on the final step) through GenerateText's
 // Response-based mock path and StreamText's part-based mock path, and
 // verifies OnFinish delivers equivalent *GenerateTextResult values from
 // both — confirming StreamText's accumulated-state result assembly matches
-// GenerateText's for the same underlying model behavior.
+// GenerateText's for the same underlying model behavior, across every field
+// OnFinish exposes (not just Text/FinishReason/Usage/Messages).
 func TestOnFinishEquivalenceGenerateTextVsStreamText(t *testing.T) {
 	wantUsage := provider.Usage{InputTokens: 5, OutputTokens: 3, TotalTokens: 8}
+	tool := NewTool("t", "", func(_ context.Context, _ struct{}) (any, error) { return "tool-out", nil })
 
 	genModel := &aitest.MockModel{Responses: []*provider.Response{{
-		Content:      []provider.ContentPart{provider.TextPart{Text: "hello world"}},
-		FinishReason: provider.FinishStop,
+		Content: []provider.ContentPart{
+			provider.ReasoningPart{Text: "because"},
+			provider.TextPart{Text: "hello world"},
+			provider.SourcePart{ID: "s1", URL: "https://example.com", Title: "Example"},
+			provider.ToolCallPart{ID: "c1", Name: "t", Args: []byte(`{}`)},
+		},
+		FinishReason: provider.FinishToolCalls,
 		Usage:        wantUsage,
 	}}}
 	streamModel := &aitest.MockModel{Streams: [][]provider.StreamPart{{
 		provider.TextDelta{Text: "hello "},
 		provider.TextDelta{Text: "world"},
-		provider.FinishPart{Reason: provider.FinishStop, Usage: wantUsage},
+		provider.ReasoningDelta{Text: "because"},
+		provider.SourceEvent{Source: provider.SourcePart{ID: "s1", URL: "https://example.com", Title: "Example"}},
+		provider.ToolCallEnd{Call: provider.ToolCallPart{ID: "c1", Name: "t", Args: []byte(`{}`)}},
+		provider.FinishPart{Reason: provider.FinishToolCalls, Usage: wantUsage},
 	}}}
 
 	var genResult *GenerateTextResult
 	if _, err := GenerateText(t.Context(), GenerateTextOpts{
 		Model:  genModel,
 		Prompt: "hi",
+		Tools:  []Tool{tool},
 		OnFinish: func(r *GenerateTextResult) {
 			genResult = r
 		},
@@ -891,6 +903,7 @@ func TestOnFinishEquivalenceGenerateTextVsStreamText(t *testing.T) {
 	s, err := StreamText(t.Context(), GenerateTextOpts{
 		Model:  streamModel,
 		Prompt: "hi",
+		Tools:  []Tool{tool},
 		OnFinish: func(r *GenerateTextResult) {
 			streamResult = r
 		},
@@ -925,6 +938,28 @@ func TestOnFinishEquivalenceGenerateTextVsStreamText(t *testing.T) {
 	}
 	if !reflect.DeepEqual(genResult.Messages, streamResult.Messages) {
 		t.Errorf("Messages differ:\nGenerateText=%#v\nStreamText=%#v", genResult.Messages, streamResult.Messages)
+	}
+
+	// The fields beyond Text/FinishReason/Usage/Messages that OnFinish
+	// exposes must also be equivalent: reasoning, sources, and the tool
+	// call/result recorded on the final step.
+	if genResult.ReasoningText != streamResult.ReasoningText {
+		t.Errorf("ReasoningText: GenerateText=%q StreamText=%q", genResult.ReasoningText, streamResult.ReasoningText)
+	}
+	if !reflect.DeepEqual(genResult.Sources, streamResult.Sources) {
+		t.Errorf("Sources differ:\nGenerateText=%#v\nStreamText=%#v", genResult.Sources, streamResult.Sources)
+	}
+	if !reflect.DeepEqual(genResult.ToolCalls, streamResult.ToolCalls) {
+		t.Errorf("ToolCalls differ:\nGenerateText=%#v\nStreamText=%#v", genResult.ToolCalls, streamResult.ToolCalls)
+	}
+	if len(genResult.ToolResults) != 1 || len(streamResult.ToolResults) != 1 {
+		t.Fatalf("ToolResults: GenerateText=%d StreamText=%d, want 1 each", len(genResult.ToolResults), len(streamResult.ToolResults))
+	}
+	if genResult.ToolResults[0].Result != streamResult.ToolResults[0].Result {
+		t.Errorf("ToolResults[0].Result: GenerateText=%v StreamText=%v", genResult.ToolResults[0].Result, streamResult.ToolResults[0].Result)
+	}
+	if genResult.ToolResults[0].Name != streamResult.ToolResults[0].Name || genResult.ToolResults[0].ToolCallID != streamResult.ToolResults[0].ToolCallID {
+		t.Errorf("ToolResults[0] identity differs: GenerateText=%+v StreamText=%+v", genResult.ToolResults[0], streamResult.ToolResults[0])
 	}
 
 	// StreamText's OnFinish result must also match the TextStream's own

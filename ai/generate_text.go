@@ -281,6 +281,12 @@ func runToolCalls(ctx context.Context, tools []Tool, calls []provider.ToolCallPa
 						res, err = rt.Execute(ctx, rc.Args)
 						c.ID, c.Name = rc.ID, rc.Name
 					}
+					// else: repair renamed the call to a tool that isn't in
+					// the active set either; res/err are left as the
+					// original InvalidToolArgumentsError rather than
+					// re-validated into a NoSuchToolError — this retry path
+					// is only entered for bad-args repair, so an unknown
+					// name here is recorded as-is, not retried again.
 				}
 			}
 		}

@@ -331,6 +331,30 @@ func TestActiveToolsInactiveCallIsNoSuchTool(t *testing.T) {
 	}
 }
 
+// TestActiveToolsEmptySliceOffersNoToolsAndRejectsAnyCall verifies the
+// documented distinction between a nil and an empty (but non-nil)
+// ActiveTools: []string{} is not "no filtering" — it replaces the active
+// set with the empty set, so zero ToolDefs are offered to the model and any
+// tool call the model makes anyway (Tools is non-empty; the model just
+// isn't supposed to call any of it) is treated as unknown.
+func TestActiveToolsEmptySliceOffersNoToolsAndRejectsAnyCall(t *testing.T) {
+	m := &aitest.MockModel{Responses: []*provider.Response{
+		toolCallResponse("get_weather", "c1", `{"city":"Ghent"}`),
+	}}
+	weather := NewTool("get_weather", "", func(_ context.Context, a weatherArgs) (any, error) { return "sunny", nil })
+	_, err := GenerateText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "weather?", Tools: []Tool{weather},
+		ActiveTools: []string{},
+	})
+	if len(m.Calls[0].Tools) != 0 {
+		t.Fatalf("offered tools = %+v, want none", m.Calls[0].Tools)
+	}
+	var nst *NoSuchToolError
+	if !errors.As(err, &nst) || nst.ToolName != "get_weather" {
+		t.Fatalf("err = %v, want NoSuchToolError(get_weather)", err)
+	}
+}
+
 // TestRepairToolCallFixesUnknownName verifies that a hallucinated tool name
 // ("get_wether") is corrected by RepairToolCall to a known one
 // ("get_weather"), letting the loop proceed normally.
