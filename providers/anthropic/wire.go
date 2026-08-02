@@ -84,6 +84,12 @@ type wireUsage struct {
 	InputTokens          int `json:"input_tokens"`
 	OutputTokens         int `json:"output_tokens"`
 	CacheReadInputTokens int `json:"cache_read_input_tokens,omitempty"`
+	// CacheCreationInputTokens is the number of input tokens written to the
+	// prompt cache on this request (as opposed to read from it — see
+	// CacheReadInputTokens). Surfaced via
+	// Response.ProviderMetadata["anthropic"]["cache_creation_input_tokens"]
+	// when non-zero.
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
 }
 
 // ---- Streaming wire types ----
@@ -448,6 +454,14 @@ func convertResponse(wr messageResponse, raw []byte) *provider.Response {
 			TotalTokens:       wr.Usage.InputTokens + wr.Usage.OutputTokens,
 			CachedInputTokens: wr.Usage.CacheReadInputTokens,
 		},
+	}
+
+	if wr.Usage.CacheCreationInputTokens != 0 {
+		resp.ProviderMetadata = map[string]any{
+			"anthropic": map[string]any{
+				"cache_creation_input_tokens": wr.Usage.CacheCreationInputTokens,
+			},
+		}
 	}
 
 	for _, block := range wr.Content {

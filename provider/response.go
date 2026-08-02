@@ -38,6 +38,14 @@ type Response struct {
 	FinishReason FinishReason
 	Usage        Usage
 	Raw          json.RawMessage // raw provider response body
+
+	// ProviderMetadata carries provider-specific response data that has no
+	// home in the fields above, namespaced by provider name — the same
+	// convention as Call.ProviderOptions (e.g.
+	// ProviderMetadata["anthropic"], ProviderMetadata["openai"]). Each
+	// provider decides what (if anything) to populate under its own key;
+	// nil when the provider has nothing to report.
+	ProviderMetadata map[string]any
 }
 
 // Text concatenates all TextParts in the response

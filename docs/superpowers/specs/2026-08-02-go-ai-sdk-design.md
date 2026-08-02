@@ -331,6 +331,146 @@ zero-magnitude vector (undefined cosine similarity).
   previously duplicated in `internal/openaicompat` and
   `internal/geminicompat`'s image models.
 
+## Wave 6 (shipped)
+
+Wave 6 closes the remaining core-parity gaps for wave 1's target scope: an
+MCP client and tool adapter, telemetry spans, stream lifecycle callbacks,
+tool-call repair and active-tool filtering, file-attachment content parts,
+and a provider-metadata escape hatch on responses.
+
+### MCP client (`mcp`)
+
+New package `mcp` implements a client for the [Model Context
+Protocol](https://modelcontextprotocol.io) — the OTel-free analog of the TS
+SDK's `experimental_createMCPClient`:
+
+- `mcp.NewClient(t Transport) *Client` wraps a `Transport` with the JSON-RPC
+  request/response bookkeeping (`call`, `notify`, a `recvLoop` that
+  demultiplexes replies by id). `Client.Initialize(ctx)` performs the MCP
+  handshake (`initialize` request, then a `notifications/initialized`
+  notification). `Client.Close()` shuts down the transport.
+- Two `Transport` implementations: `mcp.NewStdioTransport(cmd []string, env
+  []string) (Transport, error)` launches `cmd` as a child process and speaks
+  newline-delimited JSON-RPC over its stdin/stdout (stderr passed through to
+  the parent's); `mcp.NewStreamableHTTPTransport(url string, headers
+  map[string]string) Transport` speaks the MCP Streamable HTTP transport
+  (POST per message, response either a direct JSON body or an SSE stream,
+  session id captured from `Mcp-Session-Id` and echoed on later requests).
+- `Client.ListTools(ctx) ([]ToolDef, error)` calls `tools/list`,
+  transparently paginating via `nextCursor`. `Client.CallTool(ctx, name,
+  args) (*ToolResult, error)` calls `tools/call`, concatenating `"text"`
+  content parts into `ToolResult.Text` (other content types, e.g. images,
+  are ignored in v1).
+- `mcp.Tools(ctx, client) ([]ai.Tool, error)` adapts every tool the server
+  lists into an `ai.Tool` whose `Execute` forwards raw JSON arguments to
+  `CallTool` verbatim (schema is not re-derived) and turns
+  `ToolResult.IsError == true` into a Go error, so the `ai` tool loop
+  records it as a failed tool call. The returned slice drops straight into
+  `GenerateTextOpts.Tools` / `StreamText`, closing a tool loop over an
+  external MCP server in four calls:
+
+  ```go
+  transport, _ := mcp.NewStdioTransport([]string{"my-mcp-server"}, nil)
+  client := mcp.NewClient(transport)
+  defer client.Close()
+  client.Initialize(ctx)
+  tools, _ := mcp.Tools(ctx, client)
+
+  result, _ := ai.GenerateText(ctx, ai.GenerateTextOpts{
+      Model: model, Prompt: "...", Tools: tools, MaxSteps: 3,
+  })
+  ```
+
+  See `examples/mcp-tools/main.go` for a complete, env-guarded runnable
+  version (argv[1:] is the server command).
+
+### Telemetry (OTel-free analog)
+
+`ai.TelemetryMiddleware(model, t Telemetry) provider.LanguageModel` wraps a
+model so every `Generate`/`Stream` call reports a span
+(`SpanInfo{Operation, ModelID, ProviderName, StartTime, EndTime, Usage,
+FinishReason, Err}`) to a user-supplied `Telemetry` (`OnSpanStart`,
+`OnSpanEnd`). This is a deliberate, documented divergence from the TS SDK's
+`experimental_telemetry`, which integrates directly with OpenTelemetry:
+`go-ai-sdk` ships no OTel dependency (stdlib-only constraint), so
+`Telemetry` is a minimal seam an application wires to OTel itself (start a
+span in `OnSpanStart`, stash it, end it in `OnSpanEnd`) or to any other
+sink. `Generate` emits exactly one span; `Stream` emits one span that ends
+at the stream's `FinishPart` (or, failing that, whenever `Parts()` iteration
+stops for any other reason — a mid-stream error, early abandonment, or
+`Close`) — in every case ending with whatever is known at that point, never
+inventing usage/finish data for an abandoned or errored stream.
+
+### Stream lifecycle callbacks
+
+`GenerateTextOpts` gained three callbacks, effective in both `GenerateText`
+and `StreamText`:
+
+- `OnChunk func(part provider.StreamPart)` — called with each stream part
+  before it reaches the consumer (`StreamText` only; `GenerateText` has no
+  part stream to observe).
+- `OnFinish func(result *GenerateTextResult)` — called once on successful
+  completion: right before `GenerateText` returns, or at `StreamText`'s
+  natural end-of-loop (never on an error, and never if the consumer
+  abandons iteration early).
+- `OnError func(err error)` — called with a call's terminal error in both
+  APIs (for `GenerateText`, in addition to — not instead of — the returned
+  error, so one callback can serve both APIs uniformly); not invoked for
+  argument-validation failures (nil `Model`, bad `Prompt`/`Messages`
+  combination), which are reported solely via the returned error.
+
+### RepairToolCall and ActiveTools
+
+Two more `GenerateTextOpts` fields, also shared by `GenerateText` and
+`StreamText`:
+
+- `ActiveTools []string` limits which of `Tools` are offered to the model
+  (filters the `ToolDef`s built into the `Call`) and, independently,
+  restricts execution: a call naming a tool outside the active set is
+  treated as unknown (`*NoSuchToolError`) even if it's present in `Tools`.
+  `nil` means every tool is active.
+- `RepairToolCall func(ctx, call ToolCallRecord, toolErr error)
+  (ToolCallRecord, bool)` is invoked when a tool call fails to validate — an
+  unknown name or an `*InvalidToolArgumentsError` from `Execute` — and may
+  return a corrected call, retried once. If the repaired call fails again,
+  `RepairToolCall` is not invoked a second time for that original call, and
+  the normal error path (abort the batch / record the error) applies.
+
+### FilePart
+
+`provider.FilePart{Data, MediaType, Filename}` is a new user-message
+content part for file attachments, alongside `TextPart`/`ImagePart`.
+Support is intentionally uneven across providers (documented on the type
+itself, `provider/message.go`):
+
+| Provider(s) | Support |
+|---|---|
+| anthropic | `application/pdf` only, sent as a `"document"` content block |
+| google, vertex (`geminicompat`) | any `MediaType`, sent inline via `inlineData` |
+| openai + `openaicompat` presets (azure, cerebras, deepseek, fireworks, groq, perplexity, together, xai) | `application/pdf` only, sent as a `"file"` content part with a `data:` URL — OpenAI itself is confirmed to accept it; other OpenAI-compatible servers may reject it |
+| cohere, mistral, bedrock | unsupported; a `FilePart` in a user message returns a descriptive error |
+
+### ProviderMetadata
+
+`provider.Response` gained `ProviderMetadata map[string]any` — the response
+analog of `Call.ProviderOptions`, namespaced by provider name, `nil` when a
+provider has nothing to report. Two providers populate it in this wave:
+
+- `anthropic`: `ProviderMetadata["anthropic"]["cache_creation_input_tokens"]`
+  when the Messages API usage block reports a non-zero
+  `cache_creation_input_tokens` (tokens newly written to the prompt cache,
+  as opposed to `Usage.CachedInputTokens`, which tracks cache *reads*).
+- `openaicompat` (every preset built on it): `ProviderMetadata["<cfg.Name>"]["system_fingerprint"]`
+  when the response carries a non-empty `system_fingerprint`.
+
+### Remaining gaps (explicitly out of scope)
+
+Documented here rather than silently dropped: Anthropic citations/source
+parts (Google-only today, via `geminicompat`'s `groundingMetadata`),
+provider-executed tools (server-side tool execution some providers offer),
+and a native OpenTelemetry exporter (superseded by the minimal `Telemetry`
+seam above, which an application can bridge to OTel itself).
+
 ## Key decisions log
 
 1. **Vercel AI SDK, not Google Vertex** — "vertex" in the original request meant Vercel; confirmed with user.

@@ -209,6 +209,131 @@ via `groundingMetadata`) surface them as `provider.SourcePart` content:
 similarity between two embedding vectors — handy for comparing the output
 of `ai.Embed` / `ai.EmbedMany`.
 
+### MCP (Model Context Protocol)
+
+Package `mcp` is a client for [MCP](https://modelcontextprotocol.io) servers,
+letting `GenerateText`/`StreamText` call tools an external process exposes.
+`mcp.NewClient(transport)` wraps either transport — `mcp.NewStdioTransport(cmd
+[]string, env []string)` launches a child process and speaks
+newline-delimited JSON-RPC over its stdin/stdout, or
+`mcp.NewStreamableHTTPTransport(url string, headers map[string]string)`
+speaks the MCP Streamable HTTP transport — then `Client.Initialize(ctx)`
+performs the handshake. `mcp.Tools(ctx, client)` lists the server's tools and
+adapts each into an `ai.Tool`, ready to hand straight to `Tools:` in
+`GenerateTextOpts`:
+
+```go
+transport, err := mcp.NewStdioTransport([]string{"my-mcp-server"}, nil)
+if err != nil {
+	panic(err)
+}
+client := mcp.NewClient(transport)
+defer client.Close()
+
+if err := client.Initialize(ctx); err != nil {
+	panic(err)
+}
+tools, err := mcp.Tools(ctx, client)
+if err != nil {
+	panic(err)
+}
+
+result, err := ai.GenerateText(ctx, ai.GenerateTextOpts{
+	Model:    model,
+	Prompt:   "List the tools you have available, then use one if it helps.",
+	Tools:    tools,
+	MaxSteps: 3,
+})
+```
+
+A tool call that comes back `IsError` from the MCP server is turned into a
+Go error, so it's recorded as a failed tool call by the normal tool loop —
+no special-casing needed. A complete, runnable, env-guarded version lives at
+[`examples/mcp-tools`](examples/mcp-tools).
+
+### Telemetry
+
+`ai.TelemetryMiddleware(model, t ai.Telemetry)` wraps a `provider.LanguageModel`
+so every `Generate`/`Stream` call reports a `SpanInfo` (`Operation`,
+`ModelID`, `ProviderName`, `StartTime`/`EndTime`, `Usage`, `FinishReason`,
+`Err`) to `t.OnSpanStart` / `t.OnSpanEnd`. This SDK ships no OpenTelemetry
+dependency (stdlib-only); `Telemetry` is a minimal seam you bridge to OTel
+(or anything else) yourself — start a span in `OnSpanStart`, end it in
+`OnSpanEnd`:
+
+```go
+model = ai.TelemetryMiddleware(model, myOTelBridge)
+```
+
+### Stream lifecycle callbacks
+
+`GenerateTextOpts.OnChunk`, `.OnFinish`, and `.OnError` observe a call as it
+happens, in both `GenerateText` and `StreamText`:
+
+```go
+result, err := ai.GenerateText(ctx, ai.GenerateTextOpts{
+	Model:  model,
+	Prompt: "...",
+	OnChunk:  func(part provider.StreamPart) { /* StreamText only */ },
+	OnFinish: func(result *ai.GenerateTextResult) { /* fires on success */ },
+	OnError:  func(err error) { /* fires on failure */ },
+})
+```
+
+### Tool-call repair and active tools
+
+`GenerateTextOpts.ActiveTools` narrows which of `Tools` are offered to the
+model and executable for a given call (`nil` means all are active).
+`GenerateTextOpts.RepairToolCall` gets one retry at fixing a tool call that
+failed to validate — unknown name, or bad arguments — before the normal
+error path (abort / record the error) takes over:
+
+```go
+result, err := ai.GenerateText(ctx, ai.GenerateTextOpts{
+	Model:       model,
+	Prompt:      "...",
+	Tools:       []ai.Tool{weatherTool, searchTool},
+	ActiveTools: []string{"get_weather"}, // searchTool offered but not usable
+	RepairToolCall: func(ctx context.Context, call ai.ToolCallRecord, toolErr error) (ai.ToolCallRecord, bool) {
+		// inspect toolErr, fix call.Args, return (call, true) to retry once
+		return call, false
+	},
+})
+```
+
+### File attachments
+
+`provider.FilePart{Data, MediaType, Filename}` adds file attachments to a
+user message, alongside `TextPart`/`ImagePart`. Support varies by provider
+(see the `FilePart` doc comment in `provider/message.go` for the
+authoritative source):
+
+| Provider(s) | Support |
+|---|---|
+| anthropic | `application/pdf` only |
+| google, vertex | any `MediaType` |
+| openai + OpenAI-compatible presets (azure, cerebras, deepseek, fireworks, groq, perplexity, together, xai) | `application/pdf` only |
+| cohere, mistral, bedrock | unsupported — returns an error |
+
+### ProviderMetadata
+
+`provider.Response.ProviderMetadata map[string]any` is the response-side
+counterpart to `ProviderOptions`, namespaced by provider name, `nil` when a
+provider reports nothing extra. It's reachable from a `LanguageModel`'s raw
+`Generate` result, or, after a `GenerateText`/`StreamText` call, from
+`ai.Step.Response` (each `result.Steps[i].Response`):
+
+```go
+lastStep := result.Steps[len(result.Steps)-1]
+if meta, ok := lastStep.Response.ProviderMetadata["anthropic"].(map[string]any); ok {
+	fmt.Println(meta["cache_creation_input_tokens"])
+}
+```
+
+Populated today by `anthropic` (`cache_creation_input_tokens`, when
+non-zero) and every `openaicompat`-based provider (`system_fingerprint`,
+when present).
+
 ## Beyond text
 
 ### Generate images

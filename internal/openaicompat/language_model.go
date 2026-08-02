@@ -88,7 +88,7 @@ func (m *languageModel) Generate(ctx context.Context, call provider.Call) (*prov
 		return nil, fmt.Errorf("openaicompat: decode response: %w", err)
 	}
 
-	return convertResponse(wr, body), nil
+	return convertResponse(wr, body, m.cfg.Name), nil
 }
 
 func (m *languageModel) Stream(ctx context.Context, call provider.Call) (provider.StreamResponse, error) {

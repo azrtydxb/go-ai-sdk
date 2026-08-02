@@ -136,6 +136,11 @@ func (r chatRequest) MarshalJSON() ([]byte, error) {
 type chatResponse struct {
 	Choices []chatResponseChoice `json:"choices"`
 	Usage   wireUsage            `json:"usage"`
+	// SystemFingerprint identifies the backend configuration that served
+	// this response. Surfaced via
+	// Response.ProviderMetadata["<cfg.Name>"]["system_fingerprint"] when
+	// present.
+	SystemFingerprint string `json:"system_fingerprint,omitempty"`
 }
 
 type chatResponseChoice struct {
@@ -511,7 +516,7 @@ func mapFinishReason(reason string) provider.FinishReason {
 	}
 }
 
-func convertResponse(wr chatResponse, raw []byte) *provider.Response {
+func convertResponse(wr chatResponse, raw []byte, providerName string) *provider.Response {
 	usage := provider.Usage{
 		InputTokens:  wr.Usage.PromptTokens,
 		OutputTokens: wr.Usage.CompletionTokens,
@@ -526,6 +531,14 @@ func convertResponse(wr chatResponse, raw []byte) *provider.Response {
 	resp := &provider.Response{
 		Raw:   json.RawMessage(raw),
 		Usage: usage,
+	}
+
+	if wr.SystemFingerprint != "" {
+		resp.ProviderMetadata = map[string]any{
+			providerName: map[string]any{
+				"system_fingerprint": wr.SystemFingerprint,
+			},
+		}
 	}
 
 	if len(wr.Choices) == 0 {
