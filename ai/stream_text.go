@@ -22,6 +22,8 @@ type TextStream struct {
 
 	current provider.StreamResponse // the active provider stream
 
+	activeTools map[string]bool // nil means all of opts.Tools are active
+
 	started bool
 	closed  bool
 	err     error
@@ -57,12 +59,13 @@ func StreamText(ctx context.Context, opts GenerateTextOpts) (*TextStream, error)
 	messages := append([]provider.Message(nil), call.Messages...)
 
 	s := &TextStream{
-		ctx:        ctx,
-		opts:       opts,
-		maxRetries: maxRetries,
-		maxSteps:   maxSteps,
-		messages:   messages,
-		model:      opts.Model,
+		ctx:         ctx,
+		opts:        opts,
+		maxRetries:  maxRetries,
+		maxSteps:    maxSteps,
+		messages:    messages,
+		model:       opts.Model,
+		activeTools: activeToolSet(opts.ActiveTools),
 	}
 
 	call.Messages = messages
@@ -279,7 +282,7 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 			hasToolCalls := len(toolCalls) > 0
 
 			if hasToolCalls {
-				results, err := runToolCalls(s.ctx, s.opts.Tools, toolCalls)
+				results, err := runToolCalls(s.ctx, s.opts.Tools, toolCalls, s.activeTools, s.opts.RepairToolCall)
 				if err != nil {
 					s.err = err
 					step.ToolResults = nil

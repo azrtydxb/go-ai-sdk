@@ -109,6 +109,7 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 	}
 
 	messages := append([]provider.Message(nil), call.Messages...)
+	active := activeToolSet(opts.ActiveTools)
 
 	var steps []Step
 	var totalUsage provider.Usage
@@ -151,7 +152,7 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 		hasToolCalls := len(toolCalls) > 0
 
 		if hasToolCalls {
-			results, err := runToolCalls(ctx, opts.Tools, toolCalls)
+			results, err := runToolCalls(ctx, opts.Tools, toolCalls, active, opts.RepairToolCall)
 			if err != nil {
 				return fail(err)
 			}
@@ -214,29 +215,75 @@ func toolResultValue(r ToolResultRecord) any {
 	return r.Result
 }
 
+// repairFunc matches GenerateTextOpts.RepairToolCall's signature; named here
+// so runToolCalls's signature stays readable.
+type repairFunc func(ctx context.Context, call ToolCallRecord, toolErr error) (ToolCallRecord, bool)
+
 // runToolCalls executes calls sequentially in order against tools. It first
-// validates that every call references a known tool, returning a
+// validates that every call references a known tool — one present in tools
+// and, if active is non-nil, also named in active — returning a
 // *NoSuchToolError without executing anything if not (so earlier calls in
 // the batch never run with real side effects just because a later one is
-// unknown). Once validated, all calls are executed; an
-// InvalidToolArgumentsError/ToolExecutionError from a tool's Execute is
-// recorded on the corresponding ToolResultRecord.Err rather than aborting.
-func runToolCalls(ctx context.Context, tools []Tool, calls []provider.ToolCallPart) ([]ToolResultRecord, error) {
+// unknown). If repair is non-nil, an unknown-tool call is offered to repair
+// once before that abort: repair may return a corrected ToolCallRecord,
+// which is re-validated in its place; a second failure (still unknown) is
+// not retried again and aborts as usual.
+//
+// Once every call is validated (post-repair, if applicable), all calls are
+// executed in order. An *InvalidToolArgumentsError from a tool's Execute is
+// likewise offered to repair once (if non-nil): repair may return a
+// corrected call, which is looked up and executed once more in its place;
+// whatever that second attempt produces (success or another error) is
+// recorded on the corresponding ToolResultRecord.Err rather than retried
+// again. A *ToolExecutionError, or any InvalidToolArgumentsError when repair
+// is nil or declines, is recorded on ToolResultRecord.Err rather than
+// aborting.
+func runToolCalls(ctx context.Context, tools []Tool, calls []provider.ToolCallPart, active map[string]bool, repair repairFunc) ([]ToolResultRecord, error) {
 	byName := make(map[string]Tool, len(tools))
 	for _, t := range tools {
+		if active != nil && !active[t.Name()] {
+			continue
+		}
 		byName[t.Name()] = t
 	}
 
-	for _, c := range calls {
-		if _, ok := byName[c.Name]; !ok {
-			return nil, &NoSuchToolError{ToolName: c.Name}
+	resolved := make([]provider.ToolCallPart, len(calls))
+	for i, c := range calls {
+		if _, ok := byName[c.Name]; ok {
+			resolved[i] = c
+			continue
 		}
+		var toolErr error = &NoSuchToolError{ToolName: c.Name}
+		if repair != nil {
+			rc, ok := repair(ctx, ToolCallRecord{ID: c.ID, Name: c.Name, Args: c.Args}, toolErr)
+			if ok {
+				fixed := provider.ToolCallPart{ID: rc.ID, Name: rc.Name, Args: rc.Args}
+				if _, ok2 := byName[fixed.Name]; ok2 {
+					resolved[i] = fixed
+					continue
+				}
+				toolErr = &NoSuchToolError{ToolName: fixed.Name}
+			}
+		}
+		return nil, toolErr
 	}
 
-	results := make([]ToolResultRecord, 0, len(calls))
-	for _, c := range calls {
+	results := make([]ToolResultRecord, 0, len(resolved))
+	for _, c := range resolved {
 		t := byName[c.Name]
 		res, err := t.Execute(ctx, c.Args)
+		if err != nil && repair != nil {
+			var iae *InvalidToolArgumentsError
+			if errors.As(err, &iae) {
+				rc, ok := repair(ctx, ToolCallRecord{ID: c.ID, Name: c.Name, Args: c.Args}, err)
+				if ok {
+					if rt, known := byName[rc.Name]; known {
+						res, err = rt.Execute(ctx, rc.Args)
+						c.ID, c.Name = rc.ID, rc.Name
+					}
+				}
+			}
+		}
 		results = append(results, ToolResultRecord{
 			ToolCallID: c.ID,
 			Name:       c.Name,

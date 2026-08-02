@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"context"
 	"errors"
 
 	"github.com/azrtydxb/go-ai-sdk/provider"
@@ -100,6 +101,28 @@ type GenerateTextOpts struct {
 	// is threaded through to provider.Call.ProviderOptions unchanged — see
 	// that field's doc for the keying and merge semantics.
 	ProviderOptions map[string]any
+
+	// ActiveTools, when non-nil, limits which of Tools are OFFERED to the
+	// model (ToolDefs in the Call built by buildCall — PrepareStep, which
+	// runs afterward, sees the already-filtered call and may replace
+	// Call.Tools itself). Execution is restricted the same way: a call
+	// (whether from the model directly or a corrected call returned by
+	// RepairToolCall) that names a tool outside the active set is treated
+	// as unknown — a *NoSuchToolError — even though that tool is present in
+	// Tools. A nil ActiveTools means all of Tools are active; a non-nil,
+	// possibly empty, slice replaces the active set entirely.
+	ActiveTools []string
+	// RepairToolCall is invoked when a tool call fails to validate — an
+	// unknown tool name (not in the active set), or an
+	// *InvalidToolArgumentsError from the tool's Execute. It may return a
+	// corrected call (retried ONCE per original call) or false to give up,
+	// in which case the original error's normal semantics apply (a
+	// *NoSuchToolError aborts the batch; an *InvalidToolArgumentsError is
+	// recorded on the corresponding ToolResultRecord.Err). Repair runs
+	// before either of those normal-path outcomes. If the repaired call
+	// fails again — still unknown, or Execute fails again — RepairToolCall
+	// is not invoked a second time for that original call.
+	RepairToolCall func(ctx context.Context, call ToolCallRecord, toolErr error) (ToolCallRecord, bool)
 }
 
 // StepCountIs returns a StopWhen function that stops the tool loop once at
@@ -136,8 +159,12 @@ func buildCall(opts GenerateTextOpts) (provider.Call, error) {
 		messages = append(messages, opts.Messages...)
 	}
 
+	active := activeToolSet(opts.ActiveTools)
 	var toolDefs []provider.ToolDef
 	for _, t := range opts.Tools {
+		if active != nil && !active[t.Name()] {
+			continue
+		}
 		toolDefs = append(toolDefs, provider.ToolDef{
 			Name:        t.Name(),
 			Description: t.Description(),
@@ -155,4 +182,17 @@ func buildCall(opts GenerateTextOpts) (provider.Call, error) {
 		StopSequences:   opts.StopSequences,
 		ProviderOptions: opts.ProviderOptions,
 	}, nil
+}
+
+// activeToolSet returns the set of active tool names from activeTools, or
+// nil if activeTools is nil (meaning every tool is active — no filtering).
+func activeToolSet(activeTools []string) map[string]bool {
+	if activeTools == nil {
+		return nil
+	}
+	set := make(map[string]bool, len(activeTools))
+	for _, name := range activeTools {
+		set[name] = true
+	}
+	return set
 }

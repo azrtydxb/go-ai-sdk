@@ -94,7 +94,7 @@ func TestRunToolCallsValidatesBeforeExecuting(t *testing.T) {
 		{ID: "c1", Name: "known", Args: []byte(`{"city":"x"}`)},
 		{ID: "c2", Name: "unknown", Args: []byte(`{}`)},
 	}
-	_, err := runToolCalls(t.Context(), []Tool{known}, calls)
+	_, err := runToolCalls(t.Context(), []Tool{known}, calls, nil, nil)
 	var nst *NoSuchToolError
 	if !errors.As(err, &nst) || nst.ToolName != "unknown" {
 		t.Fatalf("err = %v", err)
@@ -282,5 +282,208 @@ func TestOnStepFinishInvokedOncePerStep(t *testing.T) {
 	}
 	if len(finished) != len(res.Steps) {
 		t.Fatalf("OnStepFinish count %d != len(res.Steps) %d", len(finished), len(res.Steps))
+	}
+}
+
+// TestActiveToolsFiltersOfferedToolDefs verifies ActiveTools limits which
+// tools are OFFERED (ToolDefs in the Call) while a call to a still-active
+// tool executes normally against the full Tools implementation.
+func TestActiveToolsFiltersOfferedToolDefs(t *testing.T) {
+	m := &aitest.MockModel{Responses: []*provider.Response{
+		toolCallResponse("get_weather", "c1", `{"city":"Ghent"}`),
+		{Content: []provider.ContentPart{provider.TextPart{Text: "sunny"}},
+			FinishReason: provider.FinishStop},
+	}}
+	weather := NewTool("get_weather", "", func(_ context.Context, a weatherArgs) (any, error) { return "sunny", nil })
+	other := NewTool("get_time", "", func(_ context.Context, a weatherArgs) (any, error) { return "noon", nil })
+	res, err := GenerateText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "weather?", Tools: []Tool{weather, other},
+		ActiveTools: []string{"get_weather"}, MaxSteps: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The offered ToolDefs on the first call must include only get_weather.
+	if len(m.Calls[0].Tools) != 1 || m.Calls[0].Tools[0].Name != "get_weather" {
+		t.Fatalf("offered tools = %+v, want only get_weather", m.Calls[0].Tools)
+	}
+	if res.Steps[0].ToolResults[0].Result != "sunny" {
+		t.Fatalf("active tool execution failed: %+v", res.Steps[0].ToolResults)
+	}
+}
+
+// TestActiveToolsInactiveCallIsNoSuchTool verifies that calling a tool
+// outside the active set is treated as unknown (NoSuchToolError), even
+// though it's present in Tools.
+func TestActiveToolsInactiveCallIsNoSuchTool(t *testing.T) {
+	m := &aitest.MockModel{Responses: []*provider.Response{
+		toolCallResponse("get_time", "c1", `{}`),
+	}}
+	weather := NewTool("get_weather", "", func(_ context.Context, a weatherArgs) (any, error) { return "sunny", nil })
+	other := NewTool("get_time", "", func(_ context.Context, a weatherArgs) (any, error) { return "noon", nil })
+	_, err := GenerateText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "x", Tools: []Tool{weather, other},
+		ActiveTools: []string{"get_weather"},
+	})
+	var nst *NoSuchToolError
+	if !errors.As(err, &nst) || nst.ToolName != "get_time" {
+		t.Fatalf("err = %v, want NoSuchToolError(get_time)", err)
+	}
+}
+
+// TestRepairToolCallFixesUnknownName verifies that a hallucinated tool name
+// ("get_wether") is corrected by RepairToolCall to a known one
+// ("get_weather"), letting the loop proceed normally.
+func TestRepairToolCallFixesUnknownName(t *testing.T) {
+	m := &aitest.MockModel{Responses: []*provider.Response{
+		toolCallResponse("get_wether", "c1", `{"city":"Ghent"}`),
+		{Content: []provider.ContentPart{provider.TextPart{Text: "sunny"}},
+			FinishReason: provider.FinishStop},
+	}}
+	weather := NewTool("get_weather", "", func(_ context.Context, a weatherArgs) (any, error) { return "sunny", nil })
+	var repairCalls int
+	res, err := GenerateText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "weather?", Tools: []Tool{weather}, MaxSteps: 2,
+		RepairToolCall: func(_ context.Context, call ToolCallRecord, toolErr error) (ToolCallRecord, bool) {
+			repairCalls++
+			var nst *NoSuchToolError
+			if errors.As(toolErr, &nst) && call.Name == "get_wether" {
+				call.Name = "get_weather"
+				return call, true
+			}
+			return ToolCallRecord{}, false
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repairCalls != 1 {
+		t.Fatalf("repairCalls = %d, want 1", repairCalls)
+	}
+	if res.Steps[0].ToolResults[0].Result != "sunny" {
+		t.Fatalf("repaired call did not execute: %+v", res.Steps[0].ToolResults)
+	}
+}
+
+// TestRepairToolCallFixesBadArgs verifies that an InvalidToolArgumentsError
+// from Execute is offered to RepairToolCall, and the corrected args are
+// re-executed.
+func TestRepairToolCallFixesBadArgs(t *testing.T) {
+	m := &aitest.MockModel{Responses: []*provider.Response{
+		toolCallResponse("get_weather", "c1", `{"bogus":1}`),
+		{Content: []provider.ContentPart{provider.TextPart{Text: "sunny"}},
+			FinishReason: provider.FinishStop},
+	}}
+	weather := NewTool("get_weather", "", func(_ context.Context, a weatherArgs) (any, error) { return "sunny in " + a.City, nil })
+	var repairCalls int
+	res, err := GenerateText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "weather?", Tools: []Tool{weather}, MaxSteps: 2,
+		RepairToolCall: func(_ context.Context, call ToolCallRecord, toolErr error) (ToolCallRecord, bool) {
+			repairCalls++
+			var iae *InvalidToolArgumentsError
+			if errors.As(toolErr, &iae) {
+				call.Args = []byte(`{"city":"Ghent"}`)
+				return call, true
+			}
+			return ToolCallRecord{}, false
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repairCalls != 1 {
+		t.Fatalf("repairCalls = %d, want 1", repairCalls)
+	}
+	if res.Steps[0].ToolResults[0].Err != nil {
+		t.Fatalf("tool result err = %v, want nil after repair", res.Steps[0].ToolResults[0].Err)
+	}
+	if res.Steps[0].ToolResults[0].Result != "sunny in Ghent" {
+		t.Fatalf("result = %v", res.Steps[0].ToolResults[0].Result)
+	}
+}
+
+// TestRepairToolCallFalseKeepsOriginalError verifies that RepairToolCall
+// returning false leaves the original error semantics in place: a
+// NoSuchToolError still aborts the loop.
+func TestRepairToolCallFalseKeepsOriginalError(t *testing.T) {
+	m := &aitest.MockModel{Responses: []*provider.Response{
+		toolCallResponse("nope", "c1", `{}`),
+	}}
+	weather := NewTool("get_weather", "", func(_ context.Context, a weatherArgs) (any, error) { return "sunny", nil })
+	var repairCalls int
+	_, err := GenerateText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "x", Tools: []Tool{weather},
+		RepairToolCall: func(_ context.Context, call ToolCallRecord, toolErr error) (ToolCallRecord, bool) {
+			repairCalls++
+			return ToolCallRecord{}, false
+		},
+	})
+	var nst *NoSuchToolError
+	if !errors.As(err, &nst) || nst.ToolName != "nope" {
+		t.Fatalf("err = %v, want NoSuchToolError(nope)", err)
+	}
+	if repairCalls != 1 {
+		t.Fatalf("repairCalls = %d, want 1", repairCalls)
+	}
+}
+
+// TestRepairToolCallSingleShotCap verifies that a repaired call which fails
+// again does NOT re-invoke RepairToolCall a second time for the same
+// original call.
+func TestRepairToolCallSingleShotCap(t *testing.T) {
+	m := &aitest.MockModel{Responses: []*provider.Response{
+		toolCallResponse("nope", "c1", `{}`),
+	}}
+	weather := NewTool("get_weather", "", func(_ context.Context, a weatherArgs) (any, error) { return "sunny", nil })
+	var repairCalls int
+	_, err := GenerateText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "x", Tools: []Tool{weather},
+		RepairToolCall: func(_ context.Context, call ToolCallRecord, toolErr error) (ToolCallRecord, bool) {
+			repairCalls++
+			// "Correct" to another, still-unknown name — the repaired call
+			// must fail validation again, and RepairToolCall must not be
+			// invoked a second time for it.
+			call.Name = "still_unknown"
+			return call, true
+		},
+	})
+	var nst *NoSuchToolError
+	if !errors.As(err, &nst) || nst.ToolName != "still_unknown" {
+		t.Fatalf("err = %v, want NoSuchToolError(still_unknown)", err)
+	}
+	if repairCalls != 1 {
+		t.Fatalf("repairCalls = %d, want 1 (no re-invocation on second failure)", repairCalls)
+	}
+}
+
+// TestRepairToolCallSingleShotCapOnBadArgs verifies the same single-shot cap
+// for the bad-args (Execute) path: a repaired call whose args are still
+// invalid does not trigger a second RepairToolCall invocation, and the
+// second failure is recorded normally rather than aborting the loop.
+func TestRepairToolCallSingleShotCapOnBadArgs(t *testing.T) {
+	m := &aitest.MockModel{Responses: []*provider.Response{
+		toolCallResponse("get_weather", "c1", `{"bogus":1}`),
+		{Content: []provider.ContentPart{provider.TextPart{Text: "sorry"}},
+			FinishReason: provider.FinishStop},
+	}}
+	weather := NewTool("get_weather", "", func(_ context.Context, a weatherArgs) (any, error) { return "sunny", nil })
+	var repairCalls int
+	res, err := GenerateText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "x", Tools: []Tool{weather}, MaxSteps: 2,
+		RepairToolCall: func(_ context.Context, call ToolCallRecord, toolErr error) (ToolCallRecord, bool) {
+			repairCalls++
+			// Still-invalid args: the retried Execute fails again.
+			call.Args = []byte(`{"also_bogus":2}`)
+			return call, true
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repairCalls != 1 {
+		t.Fatalf("repairCalls = %d, want 1 (no re-invocation on second failure)", repairCalls)
+	}
+	if res.Steps[0].ToolResults[0].Err == nil {
+		t.Fatal("expected recorded tool error after second (unrepaired) failure")
 	}
 }

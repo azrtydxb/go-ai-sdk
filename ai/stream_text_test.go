@@ -1016,3 +1016,215 @@ func TestStreamTextOnErrorToolLoopError(t *testing.T) {
 		t.Fatal("OnFinish must not be called when the tool loop errors")
 	}
 }
+
+// TestStreamTextActiveToolsFiltersOfferedToolDefs mirrors
+// TestActiveToolsFiltersOfferedToolDefs for StreamText: ActiveTools limits
+// which tools are OFFERED (ToolDefs in the Call) while execution against an
+// active tool proceeds normally.
+func TestStreamTextActiveToolsFiltersOfferedToolDefs(t *testing.T) {
+	m := &aitest.MockModel{Streams: [][]provider.StreamPart{
+		{
+			provider.ToolCallEnd{Call: provider.ToolCallPart{ID: "c1", Name: "get_weather", Args: []byte(`{"city":"Ghent"}`)}},
+			provider.FinishPart{Reason: provider.FinishToolCalls},
+		},
+		{
+			provider.TextDelta{Text: "sunny"},
+			provider.FinishPart{Reason: provider.FinishStop},
+		},
+	}}
+	weather := NewTool("get_weather", "", func(_ context.Context, a weatherArgs) (any, error) { return "sunny", nil })
+	other := NewTool("get_time", "", func(_ context.Context, a weatherArgs) (any, error) { return "noon", nil })
+	s, err := StreamText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "weather?", Tools: []Tool{weather, other},
+		ActiveTools: []string{"get_weather"}, MaxSteps: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+	}
+	if s.Err() != nil {
+		t.Fatal(s.Err())
+	}
+	if len(m.Calls[0].Tools) != 1 || m.Calls[0].Tools[0].Name != "get_weather" {
+		t.Fatalf("offered tools = %+v, want only get_weather", m.Calls[0].Tools)
+	}
+	if s.Steps()[0].ToolResults[0].Result != "sunny" {
+		t.Fatalf("active tool execution failed: %+v", s.Steps()[0].ToolResults)
+	}
+}
+
+// TestStreamTextActiveToolsInactiveCallIsNoSuchTool mirrors
+// TestActiveToolsInactiveCallIsNoSuchTool for StreamText.
+func TestStreamTextActiveToolsInactiveCallIsNoSuchTool(t *testing.T) {
+	m := &aitest.MockModel{Streams: [][]provider.StreamPart{{
+		provider.ToolCallEnd{Call: provider.ToolCallPart{ID: "c1", Name: "get_time", Args: []byte(`{}`)}},
+		provider.FinishPart{Reason: provider.FinishToolCalls},
+	}}}
+	weather := NewTool("get_weather", "", func(_ context.Context, a weatherArgs) (any, error) { return "sunny", nil })
+	other := NewTool("get_time", "", func(_ context.Context, a weatherArgs) (any, error) { return "noon", nil })
+	s, err := StreamText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "x", Tools: []Tool{weather, other},
+		ActiveTools: []string{"get_weather"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+	}
+	var nst *NoSuchToolError
+	if !errors.As(s.Err(), &nst) || nst.ToolName != "get_time" {
+		t.Fatalf("Err() = %v, want NoSuchToolError(get_time)", s.Err())
+	}
+}
+
+// TestStreamTextRepairToolCallFixesUnknownName mirrors
+// TestRepairToolCallFixesUnknownName for StreamText.
+func TestStreamTextRepairToolCallFixesUnknownName(t *testing.T) {
+	m := &aitest.MockModel{Streams: [][]provider.StreamPart{
+		{
+			provider.ToolCallEnd{Call: provider.ToolCallPart{ID: "c1", Name: "get_wether", Args: []byte(`{"city":"Ghent"}`)}},
+			provider.FinishPart{Reason: provider.FinishToolCalls},
+		},
+		{
+			provider.TextDelta{Text: "sunny"},
+			provider.FinishPart{Reason: provider.FinishStop},
+		},
+	}}
+	weather := NewTool("get_weather", "", func(_ context.Context, a weatherArgs) (any, error) { return "sunny", nil })
+	var repairCalls int
+	s, err := StreamText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "weather?", Tools: []Tool{weather}, MaxSteps: 2,
+		RepairToolCall: func(_ context.Context, call ToolCallRecord, toolErr error) (ToolCallRecord, bool) {
+			repairCalls++
+			var nst *NoSuchToolError
+			if errors.As(toolErr, &nst) && call.Name == "get_wether" {
+				call.Name = "get_weather"
+				return call, true
+			}
+			return ToolCallRecord{}, false
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+	}
+	if s.Err() != nil {
+		t.Fatal(s.Err())
+	}
+	if repairCalls != 1 {
+		t.Fatalf("repairCalls = %d, want 1", repairCalls)
+	}
+	if s.Steps()[0].ToolResults[0].Result != "sunny" {
+		t.Fatalf("repaired call did not execute: %+v", s.Steps()[0].ToolResults)
+	}
+}
+
+// TestStreamTextRepairToolCallFixesBadArgs mirrors
+// TestRepairToolCallFixesBadArgs for StreamText.
+func TestStreamTextRepairToolCallFixesBadArgs(t *testing.T) {
+	m := &aitest.MockModel{Streams: [][]provider.StreamPart{
+		{
+			provider.ToolCallEnd{Call: provider.ToolCallPart{ID: "c1", Name: "get_weather", Args: []byte(`{"bogus":1}`)}},
+			provider.FinishPart{Reason: provider.FinishToolCalls},
+		},
+		{
+			provider.TextDelta{Text: "sunny"},
+			provider.FinishPart{Reason: provider.FinishStop},
+		},
+	}}
+	weather := NewTool("get_weather", "", func(_ context.Context, a weatherArgs) (any, error) { return "sunny in " + a.City, nil })
+	var repairCalls int
+	s, err := StreamText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "weather?", Tools: []Tool{weather}, MaxSteps: 2,
+		RepairToolCall: func(_ context.Context, call ToolCallRecord, toolErr error) (ToolCallRecord, bool) {
+			repairCalls++
+			var iae *InvalidToolArgumentsError
+			if errors.As(toolErr, &iae) {
+				call.Args = []byte(`{"city":"Ghent"}`)
+				return call, true
+			}
+			return ToolCallRecord{}, false
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+	}
+	if s.Err() != nil {
+		t.Fatal(s.Err())
+	}
+	if repairCalls != 1 {
+		t.Fatalf("repairCalls = %d, want 1", repairCalls)
+	}
+	if s.Steps()[0].ToolResults[0].Err != nil {
+		t.Fatalf("tool result err = %v, want nil after repair", s.Steps()[0].ToolResults[0].Err)
+	}
+	if s.Steps()[0].ToolResults[0].Result != "sunny in Ghent" {
+		t.Fatalf("result = %v", s.Steps()[0].ToolResults[0].Result)
+	}
+}
+
+// TestStreamTextRepairToolCallFalseKeepsOriginalError mirrors
+// TestRepairToolCallFalseKeepsOriginalError for StreamText.
+func TestStreamTextRepairToolCallFalseKeepsOriginalError(t *testing.T) {
+	m := &aitest.MockModel{Streams: [][]provider.StreamPart{{
+		provider.ToolCallEnd{Call: provider.ToolCallPart{ID: "c1", Name: "nope", Args: []byte(`{}`)}},
+		provider.FinishPart{Reason: provider.FinishToolCalls},
+	}}}
+	weather := NewTool("get_weather", "", func(_ context.Context, a weatherArgs) (any, error) { return "sunny", nil })
+	var repairCalls int
+	s, err := StreamText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "x", Tools: []Tool{weather},
+		RepairToolCall: func(_ context.Context, call ToolCallRecord, toolErr error) (ToolCallRecord, bool) {
+			repairCalls++
+			return ToolCallRecord{}, false
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+	}
+	var nst *NoSuchToolError
+	if !errors.As(s.Err(), &nst) || nst.ToolName != "nope" {
+		t.Fatalf("Err() = %v, want NoSuchToolError(nope)", s.Err())
+	}
+	if repairCalls != 1 {
+		t.Fatalf("repairCalls = %d, want 1", repairCalls)
+	}
+}
+
+// TestStreamTextRepairToolCallSingleShotCap mirrors
+// TestRepairToolCallSingleShotCap for StreamText: a repaired call that fails
+// again must not re-invoke RepairToolCall.
+func TestStreamTextRepairToolCallSingleShotCap(t *testing.T) {
+	m := &aitest.MockModel{Streams: [][]provider.StreamPart{{
+		provider.ToolCallEnd{Call: provider.ToolCallPart{ID: "c1", Name: "nope", Args: []byte(`{}`)}},
+		provider.FinishPart{Reason: provider.FinishToolCalls},
+	}}}
+	weather := NewTool("get_weather", "", func(_ context.Context, a weatherArgs) (any, error) { return "sunny", nil })
+	var repairCalls int
+	s, err := StreamText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "x", Tools: []Tool{weather},
+		RepairToolCall: func(_ context.Context, call ToolCallRecord, toolErr error) (ToolCallRecord, bool) {
+			repairCalls++
+			call.Name = "still_unknown"
+			return call, true
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+	}
+	var nst *NoSuchToolError
+	if !errors.As(s.Err(), &nst) || nst.ToolName != "still_unknown" {
+		t.Fatalf("Err() = %v, want NoSuchToolError(still_unknown)", s.Err())
+	}
+	if repairCalls != 1 {
+		t.Fatalf("repairCalls = %d, want 1 (no re-invocation on second failure)", repairCalls)
+	}
+}
