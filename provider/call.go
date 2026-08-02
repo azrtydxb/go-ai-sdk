@@ -37,5 +37,10 @@ type Call struct {
 	Temperature    *float64
 	TopP           *float64
 	StopSequences  []string
-	ProviderOptions map[string]any // escape hatch, provider-specific
+
+	// ProviderOptions is an escape hatch for provider-specific parameters.
+	// It is reserved for future use: as of v0.1 none of the built-in
+	// LanguageModel implementations (OpenAI, Anthropic, Google) read this
+	// field, so setting it is currently a silent no-op.
+	ProviderOptions map[string]any
 }

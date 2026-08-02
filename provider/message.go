@@ -49,7 +49,7 @@ func (ToolCallPart) isContentPart() {}
 type ToolResultPart struct {
 	ToolCallID string
 	Name       string
-	Result     any  // JSON-marshalable
+	Result     any // JSON-marshalable
 	IsError    bool
 }
 
