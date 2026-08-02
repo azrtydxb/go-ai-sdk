@@ -132,12 +132,12 @@ func TestEmbeddingProviderOptionsOverridesAndPassthrough(t *testing.T) {
 	cfg.EmbedBatch = 100
 	model := NewEmbeddingModel(cfg, "text-embedding-test")
 
-	m2, ok := model.(provider.EmbeddingModelWithOptions)
+	optioned, ok := model.(provider.EmbeddingModelWithOptions)
 	if !ok {
 		t.Fatalf("geminicompat embeddingModel does not implement provider.EmbeddingModelWithOptions")
 	}
 
-	_, err := m2.EmbedCall(context.Background(), provider.EmbeddingCall{
+	_, err := optioned.EmbedCall(context.Background(), provider.EmbeddingCall{
 		Values: []string{"a"},
 		ProviderOptions: map[string]any{
 			"google": map[string]any{

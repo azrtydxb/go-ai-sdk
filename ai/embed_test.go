@@ -49,6 +49,61 @@ func TestEmbedSingle(t *testing.T) {
 	}
 }
 
+// fullUsageEmbedder is a provider.EmbeddingModel test double whose Embed
+// returns a Usage with every field populated (including CachedInputTokens
+// and ReasoningTokens), one call per batch, so EmbedMany's per-batch usage
+// summation can be exercised across all Usage fields, not just TotalTokens.
+type fullUsageEmbedder struct {
+	batchSize int
+	calls     int
+}
+
+func (m *fullUsageEmbedder) Embed(ctx context.Context, values []string) (*provider.EmbeddingResponse, error) {
+	m.calls++
+	embeddings := make([][]float64, len(values))
+	for i := range values {
+		embeddings[i] = []float64{1}
+	}
+	return &provider.EmbeddingResponse{
+		Embeddings: embeddings,
+		Usage: provider.Usage{
+			InputTokens:       10,
+			OutputTokens:      0,
+			TotalTokens:       10,
+			CachedInputTokens: 2,
+			ReasoningTokens:   1,
+		},
+	}, nil
+}
+
+func (m *fullUsageEmbedder) MaxBatchSize() int {
+	if m.batchSize <= 0 {
+		return 1000
+	}
+	return m.batchSize
+}
+
+func (m *fullUsageEmbedder) ModelID() string      { return "mock-full-usage" }
+func (m *fullUsageEmbedder) ProviderName() string { return "aitest" }
+
+// TestEmbedManySumsAllUsageFields covers that EmbedMany sums
+// CachedInputTokens and ReasoningTokens across batches, the same as it
+// already did for InputTokens/OutputTokens/TotalTokens.
+func TestEmbedManySumsAllUsageFields(t *testing.T) {
+	m := &fullUsageEmbedder{batchSize: 2}
+	res, err := EmbedMany(t.Context(), EmbedManyOpts{Model: m, Values: []string{"a", "b", "c", "d"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.calls != 2 {
+		t.Fatalf("calls = %d, want 2 (2 batches of 2)", m.calls)
+	}
+	want := provider.Usage{InputTokens: 20, OutputTokens: 0, TotalTokens: 20, CachedInputTokens: 4, ReasoningTokens: 2}
+	if res.Usage != want {
+		t.Fatalf("usage = %+v, want %+v", res.Usage, want)
+	}
+}
+
 // TestEmbedManyEmptyValues: empty Values slice returns empty result with no model call
 func TestEmbedManyEmptyValues(t *testing.T) {
 	m := &aitest.MockEmbedder{}

@@ -80,8 +80,8 @@ type EmbedManyOpts struct {
 // non-empty.
 func embedCall(ctx context.Context, model provider.EmbeddingModel, values []string, providerOptions map[string]any) (*provider.EmbeddingResponse, error) {
 	if len(providerOptions) > 0 {
-		if m2, ok := model.(provider.EmbeddingModelWithOptions); ok {
-			return m2.EmbedCall(ctx, provider.EmbeddingCall{Values: values, ProviderOptions: providerOptions})
+		if optioned, ok := model.(provider.EmbeddingModelWithOptions); ok {
+			return optioned.EmbedCall(ctx, provider.EmbeddingCall{Values: values, ProviderOptions: providerOptions})
 		}
 	}
 	return model.Embed(ctx, values)
@@ -151,6 +151,8 @@ func EmbedMany(ctx context.Context, opts EmbedManyOpts) (*EmbedManyResult, error
 		totalUsage.InputTokens += resp.Usage.InputTokens
 		totalUsage.OutputTokens += resp.Usage.OutputTokens
 		totalUsage.TotalTokens += resp.Usage.TotalTokens
+		totalUsage.CachedInputTokens += resp.Usage.CachedInputTokens
+		totalUsage.ReasoningTokens += resp.Usage.ReasoningTokens
 	}
 
 	return &EmbedManyResult{
