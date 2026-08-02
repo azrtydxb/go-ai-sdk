@@ -67,6 +67,43 @@ func TestGenerateTextReasoningText(t *testing.T) {
 	}
 }
 
+// TestGenerateTextReasoningTextSkipsRedacted covers the case where a
+// response mixes a visible ReasoningPart with a Redacted one (opaque
+// provider-encrypted data): the redacted part's Text must not appear in
+// Step.ReasoningText / GenerateTextResult.ReasoningText, but must remain in
+// Response.Content for round-tripping.
+func TestGenerateTextReasoningTextSkipsRedacted(t *testing.T) {
+	m := &aitest.MockModel{Responses: []*provider.Response{{
+		Content: []provider.ContentPart{
+			provider.ReasoningPart{Text: "visible"},
+			provider.ReasoningPart{Redacted: true, Text: "CIPHERTEXT"},
+			provider.TextPart{Text: "answer"},
+		},
+		FinishReason: provider.FinishStop,
+	}}}
+	res, err := GenerateText(t.Context(), GenerateTextOpts{Model: m, Prompt: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.ReasoningText != "visible" {
+		t.Fatalf("ReasoningText = %q, want %q (redacted text must be excluded)", res.ReasoningText, "visible")
+	}
+	if res.Steps[0].ReasoningText != "visible" {
+		t.Fatalf("Steps[0].ReasoningText = %q, want %q", res.Steps[0].ReasoningText, "visible")
+	}
+	// The redacted part must still be present in the step's Response
+	// content (needed to round-trip on a later turn).
+	var haveRedacted bool
+	for _, part := range res.Steps[0].Response.Content {
+		if rp, ok := part.(provider.ReasoningPart); ok && rp.Redacted {
+			haveRedacted = true
+		}
+	}
+	if !haveRedacted {
+		t.Fatal("redacted ReasoningPart missing from Steps[0].Response.Content")
+	}
+}
+
 func TestGenerateTextUsageDetailsSummedAcrossSteps(t *testing.T) {
 	m := &aitest.MockModel{Responses: []*provider.Response{
 		{

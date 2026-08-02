@@ -145,6 +145,69 @@ func TestStreamTextReasoningEndCarriesSignature(t *testing.T) {
 	}
 }
 
+// TestStreamTextReasoningTextSkipsRedacted covers a stream that emits a
+// visible ReasoningEnd part alongside a Redacted one (Anthropic
+// redacted_thinking, whole opaque payload delivered via ReasoningEnd with no
+// preceding ReasoningDelta): TextStream.ReasoningText() and
+// Step.ReasoningText must exclude the redacted ciphertext, while the
+// redacted part must still be present in Step.Response.Content and the
+// appended assistant message for round-tripping.
+func TestStreamTextReasoningTextSkipsRedacted(t *testing.T) {
+	m := &aitest.MockModel{Streams: [][]provider.StreamPart{{
+		provider.ReasoningDelta{Text: "visible"},
+		provider.ReasoningEnd{Part: provider.ReasoningPart{Text: "visible"}},
+		provider.ReasoningEnd{Part: provider.ReasoningPart{Redacted: true, Text: "CIPHERTEXT"}},
+		provider.TextDelta{Text: "answer"},
+		provider.FinishPart{Reason: provider.FinishStop},
+	}}}
+	s, err := StreamText(t.Context(), GenerateTextOpts{Model: m, Prompt: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+	}
+	if s.Err() != nil {
+		t.Fatal(s.Err())
+	}
+
+	if s.ReasoningText() != "visible" {
+		t.Fatalf("ReasoningText() = %q, want %q (redacted text must be excluded)", s.ReasoningText(), "visible")
+	}
+
+	steps := s.Steps()
+	if len(steps) != 1 || steps[0].Response == nil {
+		t.Fatalf("Steps = %#v", steps)
+	}
+	if steps[0].ReasoningText != "visible" {
+		t.Fatalf("Steps[0].ReasoningText = %q, want %q", steps[0].ReasoningText, "visible")
+	}
+
+	var haveRedacted bool
+	for _, part := range steps[0].Response.Content {
+		if rp, ok := part.(provider.ReasoningPart); ok && rp.Redacted {
+			haveRedacted = true
+			if rp.Text != "CIPHERTEXT" {
+				t.Fatalf("redacted part Text = %q, want CIPHERTEXT", rp.Text)
+			}
+		}
+	}
+	if !haveRedacted {
+		t.Fatal("redacted ReasoningPart missing from Steps[0].Response.Content")
+	}
+
+	msgs := s.Messages()
+	last := msgs[len(msgs)-1]
+	var haveRedactedInMsg bool
+	for _, part := range last.Content {
+		if rp, ok := part.(provider.ReasoningPart); ok && rp.Redacted {
+			haveRedactedInMsg = true
+		}
+	}
+	if !haveRedactedInMsg {
+		t.Fatal("redacted ReasoningPart missing from appended assistant message")
+	}
+}
+
 func TestStreamTextToolLoop(t *testing.T) {
 	m := &aitest.MockModel{Streams: [][]provider.StreamPart{
 		{

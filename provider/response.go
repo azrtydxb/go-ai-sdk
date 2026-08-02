@@ -51,11 +51,16 @@ func (r *Response) Text() string {
 	return sb.String()
 }
 
-// ReasoningText concatenates all ReasoningParts in the response.
+// ReasoningText concatenates all non-Redacted ReasoningParts in the
+// response. Redacted parts are skipped: their Text holds opaque
+// provider-encrypted data, not readable reasoning, so including it here
+// would leak ciphertext into a user-facing text accessor. Redacted parts
+// remain present in Content (and thus round-trip correctly back to the
+// provider) — only this aggregation filters them out.
 func (r *Response) ReasoningText() string {
 	var sb strings.Builder
 	for _, part := range r.Content {
-		if rp, ok := part.(ReasoningPart); ok {
+		if rp, ok := part.(ReasoningPart); ok && !rp.Redacted {
 			sb.WriteString(rp.Text)
 		}
 	}

@@ -37,6 +37,31 @@ func TestResponseReasoningTextConcatenates(t *testing.T) {
 	}
 }
 
+func TestResponseReasoningTextSkipsRedacted(t *testing.T) {
+	r := &Response{Content: []ContentPart{
+		ReasoningPart{Text: "visible"},
+		ReasoningPart{Redacted: true, Text: "CIPHERTEXT"},
+	}}
+	if got := r.ReasoningText(); got != "visible" {
+		t.Fatalf("ReasoningText() = %q, want %q (redacted part must be excluded)", got, "visible")
+	}
+	// The redacted part must still be present in Content so it round-trips
+	// back to the provider on a later turn — only the text aggregation
+	// filters it out.
+	found := false
+	for _, part := range r.Content {
+		if rp, ok := part.(ReasoningPart); ok && rp.Redacted {
+			found = true
+			if rp.Text != "CIPHERTEXT" {
+				t.Fatalf("redacted part Text = %q, want CIPHERTEXT", rp.Text)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("redacted ReasoningPart missing from Content")
+	}
+}
+
 func TestReasoningPartIsContentPart(t *testing.T) {
 	var _ ContentPart = ReasoningPart{Text: "x", Redacted: true, Signature: "sig"}
 }
