@@ -58,7 +58,13 @@ func Sign(req *http.Request, body []byte, creds Credentials, region, service str
 	for name, vals := range req.Header {
 		lower := strings.ToLower(name)
 		if strings.HasPrefix(lower, "x-amz-") || lower == "content-type" {
-			headerValues[lower] = strings.Join(vals, ",")
+			// SigV4 requires duplicate header values to be sorted before
+			// joining with "," in the canonical request — not left in
+			// insertion order — so requests differing only in the order a
+			// multi-valued header was added still sign identically.
+			sortedVals := append([]string(nil), vals...)
+			sort.Strings(sortedVals)
+			headerValues[lower] = strings.Join(sortedVals, ",")
 		}
 	}
 

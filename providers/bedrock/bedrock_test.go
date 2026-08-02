@@ -50,8 +50,8 @@ func lastUserText(req converseRequest) string {
 			continue
 		}
 		for _, b := range m.Content {
-			if b.Text != "" {
-				return b.Text
+			if b.Text != nil && *b.Text != "" {
+				return *b.Text
 			}
 		}
 	}
@@ -193,7 +193,7 @@ func newFixtureServer(t *testing.T) (*httptest.Server, *fixtureState) {
 		switch text {
 		case "simple":
 			writeJSON(t, w, converseResponse{
-				Output:     converseOutput{Message: wireMessage{Role: "assistant", Content: []wireContentBlock{{Text: fmt.Sprintf("Hello from %s!", providerName)}}}},
+				Output:     converseOutput{Message: wireMessage{Role: "assistant", Content: []wireContentBlock{{Text: strPtr(fmt.Sprintf("Hello from %s!", providerName))}}}},
 				StopReason: "end_turn",
 				Usage:      wireUsage{InputTokens: 5, OutputTokens: 3, TotalTokens: 8},
 			})
@@ -464,7 +464,7 @@ func TestModelPath_URLEscapesModelID(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.EscapedPath()
 		writeJSON(t, w, converseResponse{
-			Output:     converseOutput{Message: wireMessage{Role: "assistant", Content: []wireContentBlock{{Text: "hi"}}}},
+			Output:     converseOutput{Message: wireMessage{Role: "assistant", Content: []wireContentBlock{{Text: strPtr("hi")}}}},
 			StopReason: "end_turn",
 			Usage:      wireUsage{InputTokens: 1, OutputTokens: 1, TotalTokens: 2},
 		})
@@ -488,6 +488,36 @@ func TestModelPath_URLEscapesModelID(t *testing.T) {
 	const want = "/model/anthropic.claude-3-sonnet-20240229-v1%3A0/converse"
 	if gotPath != want {
 		t.Errorf("request path = %q, want %q", gotPath, want)
+	}
+}
+
+// TestConvertResponse_EmptyTextBlockNotDropped covers a bug where
+// convertResponse discriminated content blocks with `block.Text != ""`: a
+// text block whose text happens to be the empty string is a legitimate,
+// present block (e.g. {"text":""}), not the absence of one, and must still
+// surface as an (empty) provider.TextPart rather than being silently
+// dropped from the response.
+func TestConvertResponse_EmptyTextBlockNotDropped(t *testing.T) {
+	wr := converseResponse{
+		Output: converseOutput{Message: wireMessage{
+			Role:    "assistant",
+			Content: []wireContentBlock{{Text: strPtr("")}},
+		}},
+		StopReason: "end_turn",
+		Usage:      wireUsage{InputTokens: 1, OutputTokens: 0, TotalTokens: 1},
+	}
+
+	resp := convertResponse(wr, nil)
+
+	if len(resp.Content) != 1 {
+		t.Fatalf("Content = %d parts, want 1 (empty text block must not be dropped)", len(resp.Content))
+	}
+	tp, ok := resp.Content[0].(provider.TextPart)
+	if !ok {
+		t.Fatalf("Content[0] = %T, want provider.TextPart", resp.Content[0])
+	}
+	if tp.Text != "" {
+		t.Errorf("TextPart.Text = %q, want empty string", tp.Text)
 	}
 }
 

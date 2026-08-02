@@ -117,6 +117,14 @@ func (m *embeddingModel) Embed(ctx context.Context, values []string) (*provider.
 		return nil, fmt.Errorf("vertex: decode embedding response: %w", err)
 	}
 
+	// :predict returns predictions positionally (one per instance, in
+	// order) with no per-prediction identifier to correlate them back to
+	// their input value. A short response would otherwise silently zip
+	// mismatched embeddings to values; fail loudly instead.
+	if len(pr.Predictions) != len(values) {
+		return nil, fmt.Errorf("vertex: embedding response count mismatch: requested %d values, got %d predictions", len(values), len(pr.Predictions))
+	}
+
 	embeddings := make([][]float64, len(pr.Predictions))
 	totalTokens := 0
 	for i, p := range pr.Predictions {

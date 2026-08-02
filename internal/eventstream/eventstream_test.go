@@ -247,6 +247,38 @@ func TestScan_SkipsNonStringHeaderWithoutDesync(t *testing.T) {
 	}
 }
 
+// TestScan_RejectsOversizedTotalLength covers a sanity upper bound on a
+// frame's declared total length: a frame prelude that is otherwise
+// well-formed (valid CRC) but claims a total length above the 16 MiB sanity
+// ceiling must be rejected with an error rather than attempting to read (and
+// allocate a buffer for) that many bytes — a malicious or corrupted prelude
+// must not be able to force an oversized allocation.
+func TestScan_RejectsOversizedTotalLength(t *testing.T) {
+	const oversized = 16*1024*1024 + 1
+
+	prelude := make([]byte, preludeLen)
+	binary.BigEndian.PutUint32(prelude[0:4], uint32(oversized))
+	binary.BigEndian.PutUint32(prelude[4:8], 0) // headers length
+	preludeCRC := crc32.ChecksumIEEE(prelude)
+
+	var buf bytes.Buffer
+	buf.Write(prelude)
+	var crcBuf [4]byte
+	binary.BigEndian.PutUint32(crcBuf[:], preludeCRC)
+	buf.Write(crcBuf[:])
+	// No further bytes: if Scan tried to read `oversized` more bytes it
+	// would block/EOF-truncate; the bound check must reject before that.
+
+	var gotErr error
+	for _, err := range Scan(&buf) {
+		gotErr = err
+		break
+	}
+	if gotErr == nil {
+		t.Fatal("Scan: want error for oversized total length, got nil")
+	}
+}
+
 func TestEncode_FrameStructureSanity(t *testing.T) {
 	frame := Encode(map[string]string{"a": "1"}, []byte("xy"))
 	if len(frame) < 12 {

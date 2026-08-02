@@ -253,6 +253,29 @@ func TestURLPathShape(t *testing.T) {
 	}
 }
 
+// TestEndpointFor_URLEscapesModelID covers URL-escaping of the project,
+// location, and model ID path segments in endpointFor: each segment is
+// escaped independently (via url.PathEscape) before being joined into the
+// path, so a value containing characters with path significance — a space,
+// or (as here) a colon, which a versioned Vertex model ID can contain —
+// cannot be misread as altering the URL's path structure. A colon is legal
+// unescaped within a URL path segment per RFC 3986, so url.PathEscape
+// leaves it as-is; this test pins that exact, spec-correct output (as
+// opposed to Bedrock's SigV4 signing path, which requires the stronger,
+// non-standard escaping SigV4's canonical form demands).
+func TestEndpointFor_URLEscapesModelID(t *testing.T) {
+	p := New(
+		WithProject("my project"),
+		WithLocation(testLocation),
+		WithBaseURL("https://example.invalid"),
+	)
+	got := p.endpointFor("gemini-test:v1", "generateContent")
+	want := "https://example.invalid/projects/my%20project/locations/" + testLocation + "/publishers/google/models/gemini-test:v1:generateContent"
+	if got != want {
+		t.Errorf("endpointFor = %q, want %q", got, want)
+	}
+}
+
 func TestWithTokenSource(t *testing.T) {
 	const token = "from-token-source"
 	srv := newFixtureServer(t, token)

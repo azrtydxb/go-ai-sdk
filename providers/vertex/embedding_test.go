@@ -120,6 +120,31 @@ func TestEmbeddingModel_Error(t *testing.T) {
 	}
 }
 
+// TestEmbeddingModel_ShortResponseErrors covers a defensive check: Vertex's
+// :predict response returns predictions positionally, one per instance, in
+// order, with no per-prediction identifier to correlate it back to its
+// input value. A response with fewer predictions than instances requested
+// must error rather than silently returning fewer (mis-paired) embeddings.
+func TestEmbeddingModel_ShortResponseErrors(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Two values requested ("a", "b"), only one prediction returned.
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"predictions":[{"embeddings":{"values":[0.1,0.2],"statistics":{"token_count":1}}}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	p := New(WithProject(testProject), WithLocation(testLocation), WithBaseURL(srv.URL), WithAccessToken("tok"))
+	model := p.EmbeddingModel("text-embedding-test")
+
+	_, err := model.Embed(context.Background(), []string{"a", "b"})
+	if err == nil {
+		t.Fatal("Embed: want error when response has fewer predictions than requested values, got nil")
+	}
+	if !strings.Contains(err.Error(), "2") || !strings.Contains(err.Error(), "1") {
+		t.Errorf("error = %q, want it to mention both counts (requested 2, got 1)", err.Error())
+	}
+}
+
 func TestEmbeddingModel_NoCredentials(t *testing.T) {
 	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "")
 	p := New(WithProject(testProject), WithLocation(testLocation), WithBaseURL("http://example.invalid"))

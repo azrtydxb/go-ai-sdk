@@ -156,6 +156,72 @@ func TestSign_VanillaGET(t *testing.T) {
 	}
 }
 
+// TestSign_MultiValueHeaderSortedBeforeJoin covers the SigV4 canonical-header
+// rule for a header with multiple values: each header's *values* must be
+// sorted before being joined with "," (this is distinct from and in addition
+// to sorting header *names*). A request built with the same multi-valued
+// header added in two different orders must therefore produce byte-identical
+// canonical headers, and hence identical signatures — the reverse of what
+// you'd get from a naive strings.Join(vals, ",") over insertion order.
+func TestSign_MultiValueHeaderSortedBeforeJoin(t *testing.T) {
+	now := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	creds := Credentials{AccessKeyID: "AKID", SecretAccessKey: "secret"}
+
+	req1, _ := http.NewRequest(http.MethodGet, "https://example.amazonaws.com/path", nil)
+	req1.Header.Add("X-Amz-Meta", "b")
+	req1.Header.Add("X-Amz-Meta", "a")
+	if err := Sign(req1, nil, creds, "us-east-1", "service", now); err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+
+	req2, _ := http.NewRequest(http.MethodGet, "https://example.amazonaws.com/path", nil)
+	req2.Header.Add("X-Amz-Meta", "a")
+	req2.Header.Add("X-Amz-Meta", "b")
+	if err := Sign(req2, nil, creds, "us-east-1", "service", now); err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+
+	auth1 := req1.Header.Get("Authorization")
+	auth2 := req2.Header.Get("Authorization")
+	if auth1 != auth2 {
+		t.Fatalf("signatures differ for a multi-valued header added in different orders:\n%q\n%q", auth1, auth2)
+	}
+
+	// Independently confirm the canonical form: values sorted ("a,b"), not
+	// insertion order ("b,a").
+	headerNames := []string{"host", "x-amz-content-sha256", "x-amz-date", "x-amz-meta"}
+	headerValues := map[string]string{
+		"host":                 "example.amazonaws.com",
+		"x-amz-content-sha256": sha256Hex(""),
+		"x-amz-date":           "20200101T000000Z",
+		"x-amz-meta":           "a,b",
+	}
+	var canonicalHeaders strings.Builder
+	for _, n := range headerNames {
+		canonicalHeaders.WriteString(n)
+		canonicalHeaders.WriteByte(':')
+		canonicalHeaders.WriteString(headerValues[n])
+		canonicalHeaders.WriteByte('\n')
+	}
+	signedHeaders := strings.Join(headerNames, ";")
+	canonicalRequest := strings.Join([]string{
+		http.MethodGet, "/path", "", canonicalHeaders.String(), signedHeaders, sha256Hex(""),
+	}, "\n")
+	hashedCanonical := sha256Hex(canonicalRequest)
+	credentialScope := "20200101/us-east-1/service/aws4_request"
+	stringToSign := strings.Join([]string{"AWS4-HMAC-SHA256", "20200101T000000Z", credentialScope, hashedCanonical}, "\n")
+	kDate := hmacSum([]byte("AWS4secret"), "20200101")
+	kRegion := hmacSum(kDate, "us-east-1")
+	kService := hmacSum(kRegion, "service")
+	kSigning := hmacSum(kService, "aws4_request")
+	wantSignature := hex.EncodeToString(hmacSum(kSigning, stringToSign))
+	wantAuth := "AWS4-HMAC-SHA256 Credential=AKID/" + credentialScope + ", SignedHeaders=" + signedHeaders + ", Signature=" + wantSignature
+
+	if auth1 != wantAuth {
+		t.Fatalf("Authorization = %q, want %q (sorted duplicate values)", auth1, wantAuth)
+	}
+}
+
 func TestSign_WithBodyAndSessionToken(t *testing.T) {
 	const (
 		accessKey    = "AKIDEXAMPLE"

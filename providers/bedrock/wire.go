@@ -21,13 +21,19 @@ type wireMessage struct {
 
 // wireContentBlock is a union of all Converse content block shapes. Exactly
 // one of Text/Image/ToolUse/ToolResult is populated when marshaled; omitempty
-// keeps the others out of the JSON.
+// keeps the others out of the JSON. Text is a *string (not string) so a
+// present-but-empty text block ({"text":""}) can be told apart, on decode,
+// from no text block at all — a plain string field would make both cases
+// indistinguishable via block.Text != "", causing convertResponse to
+// silently drop an empty TextPart from the response.
 type wireContentBlock struct {
-	Text       string          `json:"text,omitempty"`
+	Text       *string         `json:"text,omitempty"`
 	Image      *wireImage      `json:"image,omitempty"`
 	ToolUse    *wireToolUse    `json:"toolUse,omitempty"`
 	ToolResult *wireToolResult `json:"toolResult,omitempty"`
 }
+
+func strPtr(s string) *string { return &s }
 
 type wireImage struct {
 	Format string          `json:"format"`
@@ -267,7 +273,7 @@ func convertMessages(msgs []provider.Message) ([]wireMessage, error) {
 			for _, part := range m.Content {
 				switch p := part.(type) {
 				case provider.TextPart:
-					content = append(content, wireContentBlock{Text: p.Text})
+					content = append(content, wireContentBlock{Text: strPtr(p.Text)})
 				case provider.ToolCallPart:
 					args := p.Args
 					if len(args) == 0 {
@@ -326,7 +332,7 @@ func convertUserContent(parts []provider.ContentPart) ([]wireContentBlock, error
 	for _, part := range parts {
 		switch p := part.(type) {
 		case provider.TextPart:
-			out = append(out, wireContentBlock{Text: p.Text})
+			out = append(out, wireContentBlock{Text: strPtr(p.Text)})
 		case provider.ImagePart:
 			if len(p.Data) == 0 {
 				return nil, fmt.Errorf("bedrock: image parts require inline Data (URL images are not supported)")
@@ -417,8 +423,8 @@ func convertResponse(wr converseResponse, raw []byte) *provider.Response {
 
 	for _, block := range wr.Output.Message.Content {
 		switch {
-		case block.Text != "":
-			resp.Content = append(resp.Content, provider.TextPart{Text: block.Text})
+		case block.Text != nil:
+			resp.Content = append(resp.Content, provider.TextPart{Text: *block.Text})
 		case block.ToolUse != nil:
 			args := block.ToolUse.Input
 			if len(args) == 0 {

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/gauth"
@@ -113,7 +114,7 @@ func (p *Provider) resolvedBaseURL() string {
 
 func (p *Provider) endpointFor(modelID, method string) string {
 	return fmt.Sprintf("%s/projects/%s/locations/%s/publishers/google/models/%s:%s",
-		p.resolvedBaseURL(), p.project, p.location, modelID, method)
+		p.resolvedBaseURL(), url.PathEscape(p.project), url.PathEscape(p.location), url.PathEscape(modelID), method)
 }
 
 func (p *Provider) authorize(ctx context.Context, req *http.Request) error {

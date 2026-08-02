@@ -70,6 +70,24 @@ func TestEmbeddings(t *testing.T) {
 	if len(resp.Embeddings) != 3 {
 		t.Fatalf("embeddings = %d", len(resp.Embeddings))
 	}
+
+	// Embeddings must authenticate the same way as chat: the "api-key"
+	// header, not "Authorization: Bearer".
+	if got := srv.HeaderValues("api-key"); len(got) != 1 || got[0] != "k" {
+		t.Fatalf("api-key header = %v, want [k]", got)
+	}
+}
+
+// TestResourceNameThenBaseURL is the reverse-order counterpart to
+// TestBaseURLOverridesResourceName: WithBaseURL still takes precedence over
+// WithResourceName even when WithResourceName is given AFTER WithBaseURL in
+// the option list, since resolvedBaseURL prefers p.baseURL unconditionally
+// rather than "whichever option was applied last".
+func TestResourceNameThenBaseURL(t *testing.T) {
+	p := New(WithAPIKey("k"), WithBaseURL("https://custom.example.com/openai/v1"), WithResourceName("myres"))
+	if got := p.resolvedBaseURL(); got != "https://custom.example.com/openai/v1" {
+		t.Fatalf("resolvedBaseURL() = %q, want override regardless of option order", got)
+	}
 }
 
 func TestNoBaseURLErrors(t *testing.T) {

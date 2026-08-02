@@ -8,7 +8,13 @@
 //
 // Header layout (repeated to fill the headers section):
 //
-//	[1B name length][name][1B value type][2B value length][value]
+//	[1B name length][name][1B value type][value]
+//
+// The value's own encoding depends on its type: only byte-array (type 6)
+// and string (type 7) are length-prefixed ([2B value length][value]); the
+// other types have a fixed, type-implied size (0 bytes for the two boolean
+// types, 1/2/4/8/8/16 bytes for byte/int16/int32/int64/timestamp/uuid) and
+// carry no length prefix on the wire.
 //
 // Only string-typed header values (type 7) are decoded into Message.Headers.
 // Other header value types (0=bool-true, 1=bool-false, 2=byte, 3=int16,
@@ -39,6 +45,13 @@ const (
 	preludeLen    = 8 // total length (4) + headers length (4)
 	crcLen        = 4
 	headerTypeStr = 7
+
+	// maxTotalLen is a sanity upper bound on a frame's declared total
+	// length: no legitimate Bedrock streaming event approaches this size,
+	// so a prelude claiming more is either corrupted or malicious, and must
+	// be rejected before attempting to read (and allocate a buffer for)
+	// that many bytes.
+	maxTotalLen = 16 * 1024 * 1024
 )
 
 // ErrInvalidCRC is returned (wrapped) when a frame's prelude or message CRC
@@ -85,6 +98,9 @@ func readMessage(r io.Reader) (Message, error) {
 
 	if totalLen < preludeLen+crcLen+crcLen {
 		return Message{}, fmt.Errorf("eventstream: invalid total length %d", totalLen)
+	}
+	if totalLen > maxTotalLen {
+		return Message{}, fmt.Errorf("eventstream: total length %d exceeds sanity ceiling %d", totalLen, maxTotalLen)
 	}
 
 	// Remaining bytes after the prelude+preludeCRC: headers + payload +

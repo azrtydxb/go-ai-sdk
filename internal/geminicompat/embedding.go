@@ -71,6 +71,14 @@ func (m *embeddingModel) Embed(ctx context.Context, values []string) (*provider.
 		return nil, fmt.Errorf("%s: decode embedding response: %w", m.cfg.Name, err)
 	}
 
+	// batchEmbedContents returns embeddings positionally (one per request,
+	// in order) with no per-embedding identifier to correlate them back to
+	// their input value. A short response would otherwise silently zip
+	// mismatched embeddings to values; fail loudly instead.
+	if len(wr.Embeddings) != len(values) {
+		return nil, fmt.Errorf("%s: embedding response count mismatch: requested %d values, got %d embeddings", m.cfg.Name, len(values), len(wr.Embeddings))
+	}
+
 	embeddings := make([][]float64, len(wr.Embeddings))
 	for i, e := range wr.Embeddings {
 		embeddings[i] = e.Values
