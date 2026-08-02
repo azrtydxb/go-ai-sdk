@@ -28,13 +28,27 @@ type wireMessage struct {
 // indistinguishable via block.Text != "", causing convertResponse to
 // silently drop an empty TextPart from the response.
 type wireContentBlock struct {
-	Text       *string         `json:"text,omitempty"`
-	Image      *wireImage      `json:"image,omitempty"`
-	ToolUse    *wireToolUse    `json:"toolUse,omitempty"`
-	ToolResult *wireToolResult `json:"toolResult,omitempty"`
+	Text             *string               `json:"text,omitempty"`
+	Image            *wireImage            `json:"image,omitempty"`
+	ToolUse          *wireToolUse          `json:"toolUse,omitempty"`
+	ToolResult       *wireToolResult       `json:"toolResult,omitempty"`
+	ReasoningContent *wireReasoningContent `json:"reasoningContent,omitempty"`
 }
 
 func strPtr(s string) *string { return &s }
+
+// wireReasoningContent is the Converse API's reasoningContent block: exactly
+// one of ReasoningText (signed, visible thinking) or RedactedContent (an
+// opaque base64 blob, when the reasoning trace was redacted) is populated.
+type wireReasoningContent struct {
+	ReasoningText   *wireReasoningText `json:"reasoningText,omitempty"`
+	RedactedContent string             `json:"redactedContent,omitempty"` // base64
+}
+
+type wireReasoningText struct {
+	Text      string `json:"text,omitempty"`
+	Signature string `json:"signature,omitempty"`
+}
 
 type wireImage struct {
 	Format string          `json:"format"`
@@ -169,12 +183,24 @@ type eventContentBlockDelta struct {
 }
 
 type eventDeltaUnion struct {
-	Text    string             `json:"text,omitempty"`
-	ToolUse *eventToolUseDelta `json:"toolUse,omitempty"`
+	Text             string                      `json:"text,omitempty"`
+	ToolUse          *eventToolUseDelta          `json:"toolUse,omitempty"`
+	ReasoningContent *eventReasoningContentDelta `json:"reasoningContent,omitempty"`
 }
 
 type eventToolUseDelta struct {
 	Input string `json:"input"` // partial JSON string fragment
+}
+
+// eventReasoningContentDelta is the Converse streaming reasoningContent
+// delta shape: each contentBlockDelta carries at most one of Text (a
+// fragment of the visible thinking text), Signature (a fragment of the
+// trailing signature, delivered after the text is complete), or
+// RedactedContent (a base64 fragment, for a redacted reasoning block).
+type eventReasoningContentDelta struct {
+	Text            string `json:"text,omitempty"`
+	Signature       string `json:"signature,omitempty"`
+	RedactedContent string `json:"redactedContent,omitempty"`
 }
 
 type eventContentBlockStop struct {
@@ -298,30 +324,9 @@ func convertMessages(msgs []provider.Message) ([]wireMessage, error) {
 			out = append(out, wireMessage{Role: "user", Content: content})
 
 		case provider.RoleAssistant:
-			var content []wireContentBlock
-			for _, part := range m.Content {
-				switch p := part.(type) {
-				case provider.TextPart:
-					content = append(content, wireContentBlock{Text: strPtr(p.Text)})
-				case provider.ToolCallPart:
-					args := p.Args
-					if len(args) == 0 {
-						args = json.RawMessage("{}")
-					}
-					content = append(content, wireContentBlock{ToolUse: &wireToolUse{
-						ToolUseID: p.ID,
-						Name:      p.Name,
-						Input:     args,
-					}})
-				case provider.SourcePart:
-					// informational, not replayable — skip
-				case provider.ReasoningPart:
-					// informational, not replayable — skip (bedrock's
-					// Converse wire format here has no reasoning/thinking
-					// block representation)
-				default:
-					return nil, fmt.Errorf("bedrock: unsupported content part %T in assistant message", part)
-				}
+			content, err := assistantBlocks(m.Content)
+			if err != nil {
+				return nil, err
 			}
 			out = append(out, wireMessage{Role: "assistant", Content: content})
 
@@ -360,6 +365,53 @@ func convertMessages(msgs []provider.Message) ([]wireMessage, error) {
 		}
 	}
 	return out, nil
+}
+
+// assistantBlocks converts an assistant message's content parts into wire
+// blocks. Reasoning parts are emitted first, before any other block type —
+// mirroring the Anthropic provider's convention, since Converse likewise
+// expects a reasoningContent block to lead an assistant turn when it is
+// present.
+func assistantBlocks(parts []provider.ContentPart) ([]wireContentBlock, error) {
+	var reasoning []wireContentBlock
+	var rest []wireContentBlock
+	for _, part := range parts {
+		switch p := part.(type) {
+		case provider.TextPart:
+			rest = append(rest, wireContentBlock{Text: strPtr(p.Text)})
+		case provider.ToolCallPart:
+			args := p.Args
+			if len(args) == 0 {
+				args = json.RawMessage("{}")
+			}
+			rest = append(rest, wireContentBlock{ToolUse: &wireToolUse{
+				ToolUseID: p.ID,
+				Name:      p.Name,
+				Input:     args,
+			}})
+		case provider.SourcePart:
+			// informational, not replayable — skip
+		case provider.ReasoningPart:
+			switch {
+			case p.Redacted:
+				reasoning = append(reasoning, wireContentBlock{ReasoningContent: &wireReasoningContent{
+					RedactedContent: p.Text,
+				}})
+			case p.Signature != "":
+				reasoning = append(reasoning, wireContentBlock{ReasoningContent: &wireReasoningContent{
+					ReasoningText: &wireReasoningText{Text: p.Text, Signature: p.Signature},
+				}})
+			default:
+				// A non-redacted ReasoningPart with no signature cannot be
+				// replayed (Converse requires a signature on a replayed
+				// reasoningText block, like Anthropic's thinking blocks) —
+				// informational, not replayable — skip.
+			}
+		default:
+			return nil, fmt.Errorf("bedrock: unsupported content part %T in assistant message", part)
+		}
+	}
+	return append(reasoning, rest...), nil
 }
 
 func convertUserContent(parts []provider.ContentPart) ([]wireContentBlock, error) {
@@ -470,8 +522,22 @@ func convertResponse(wr converseResponse, raw []byte) *provider.Response {
 				Name: block.ToolUse.Name,
 				Args: args,
 			})
+		case block.ReasoningContent != nil:
+			resp.Content = append(resp.Content, reasoningPartFromWire(block.ReasoningContent))
 		}
 	}
 
 	return resp
+}
+
+// reasoningPartFromWire converts a Converse reasoningContent block into a
+// provider.ReasoningPart: a populated ReasoningText carries the signed,
+// visible thinking text/signature; a populated RedactedContent (base64) is
+// surfaced as a Redacted part whose Text holds the base64 payload verbatim,
+// mirroring how the Anthropic provider surfaces redacted_thinking.
+func reasoningPartFromWire(rc *wireReasoningContent) provider.ReasoningPart {
+	if rc.ReasoningText != nil {
+		return provider.ReasoningPart{Text: rc.ReasoningText.Text, Signature: rc.ReasoningText.Signature}
+	}
+	return provider.ReasoningPart{Redacted: true, Text: rc.RedactedContent}
 }

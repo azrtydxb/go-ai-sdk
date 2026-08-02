@@ -184,6 +184,33 @@ func newFixtureServer(t *testing.T) (*httptest.Server, *fixtureState) {
 				writeEvent(t, w, "metadata", eventMetadata{Usage: wireUsage{InputTokens: 6, OutputTokens: 4, TotalTokens: 10}})
 				flusher.Flush()
 
+			case "stream reasoning":
+				writeEvent(t, w, "messageStart", eventMessageStart{Role: "assistant"})
+				flusher.Flush()
+				writeEvent(t, w, "contentBlockDelta", eventContentBlockDelta{
+					ContentBlockIndex: 0,
+					Delta:             eventDeltaUnion{ReasoningContent: &eventReasoningContentDelta{Text: "let me "}},
+				})
+				writeEvent(t, w, "contentBlockDelta", eventContentBlockDelta{
+					ContentBlockIndex: 0,
+					Delta:             eventDeltaUnion{ReasoningContent: &eventReasoningContentDelta{Text: "think..."}},
+				})
+				writeEvent(t, w, "contentBlockDelta", eventContentBlockDelta{
+					ContentBlockIndex: 0,
+					Delta:             eventDeltaUnion{ReasoningContent: &eventReasoningContentDelta{Signature: "sig-"}},
+				})
+				writeEvent(t, w, "contentBlockDelta", eventContentBlockDelta{
+					ContentBlockIndex: 0,
+					Delta:             eventDeltaUnion{ReasoningContent: &eventReasoningContentDelta{Signature: "abc"}},
+				})
+				writeEvent(t, w, "contentBlockStop", eventContentBlockStop{ContentBlockIndex: 0})
+				flusher.Flush()
+				writeEvent(t, w, "contentBlockDelta", eventContentBlockDelta{ContentBlockIndex: 1, Delta: eventDeltaUnion{Text: "42"}})
+				writeEvent(t, w, "contentBlockStop", eventContentBlockStop{ContentBlockIndex: 1})
+				writeEvent(t, w, "messageStop", eventMessageStop{StopReason: "end_turn"})
+				writeEvent(t, w, "metadata", eventMetadata{Usage: wireUsage{InputTokens: 7, OutputTokens: 5, TotalTokens: 12}})
+				flusher.Flush()
+
 			case "stream truncated":
 				writeEvent(t, w, "messageStart", eventMessageStart{Role: "assistant"})
 				writeEvent(t, w, "contentBlockDelta", eventContentBlockDelta{ContentBlockIndex: 0, Delta: eventDeltaUnion{Text: "partial"}})
@@ -298,6 +325,13 @@ func TestAssistantSourcePartSkippedNotError(t *testing.T) {
 	}
 }
 
+// TestAssistantReasoningPartSkippedNotError covers a non-redacted
+// ReasoningPart with no Signature: it cannot be replayed as a
+// reasoningContent block (Converse requires a signature on a replayed
+// reasoningText block, mirroring Anthropic's thinking blocks), so it must
+// still be silently skipped, not rejected as unsupported. A signed
+// ReasoningPart round-trips instead — see
+// TestAssistantRoundTripSignedReasoningFirst.
 func TestAssistantReasoningPartSkippedNotError(t *testing.T) {
 	model, fs := newTestModel(t)
 
@@ -320,7 +354,128 @@ func TestAssistantReasoningPartSkippedNotError(t *testing.T) {
 	req, _, _ := fs.snapshot()
 	blocks := req.Messages[1].Content
 	if len(blocks) != 1 || blocks[0].Text == nil || *blocks[0].Text != "answer" {
-		t.Fatalf("blocks = %#v, want exactly one text block (ReasoningPart dropped)", blocks)
+		t.Fatalf("blocks = %#v, want exactly one text block (unsigned ReasoningPart dropped)", blocks)
+	}
+}
+
+// TestAssistantRoundTripSignedReasoningFirst covers that a signed
+// (non-redacted) ReasoningPart round-trips as a reasoningContent block, and
+// that it leads the assistant turn (mirroring the Anthropic provider's
+// convention) even when it isn't first in the original content parts.
+func TestAssistantRoundTripSignedReasoningFirst(t *testing.T) {
+	model, fs := newTestModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			provider.UserText("simple"),
+			{
+				Role: provider.RoleAssistant,
+				Content: []provider.ContentPart{
+					provider.TextPart{Text: "answer"},
+					provider.ReasoningPart{Text: "reasoning...", Signature: "sig-1"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	req, _, _ := fs.snapshot()
+	blocks := req.Messages[1].Content
+	if len(blocks) != 2 {
+		t.Fatalf("blocks = %d, want 2: %#v", len(blocks), blocks)
+	}
+	rc := blocks[0].ReasoningContent
+	if rc == nil || rc.ReasoningText == nil || rc.ReasoningText.Text != "reasoning..." || rc.ReasoningText.Signature != "sig-1" {
+		t.Fatalf("blocks[0].ReasoningContent = %#v, want reasoningText{reasoning..., sig-1} first", rc)
+	}
+	if blocks[1].Text == nil || *blocks[1].Text != "answer" {
+		t.Errorf("blocks[1] = %#v, want text/answer", blocks[1])
+	}
+}
+
+// TestAssistantRoundTripRedactedReasoningFirst covers that a Redacted
+// ReasoningPart round-trips as a reasoningContent.redactedContent block,
+// also leading the assistant turn.
+func TestAssistantRoundTripRedactedReasoningFirst(t *testing.T) {
+	model, fs := newTestModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			provider.UserText("simple"),
+			{
+				Role: provider.RoleAssistant,
+				Content: []provider.ContentPart{
+					provider.TextPart{Text: "answer"},
+					provider.ReasoningPart{Redacted: true, Text: "b64-opaque-blob"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	req, _, _ := fs.snapshot()
+	blocks := req.Messages[1].Content
+	if len(blocks) != 2 {
+		t.Fatalf("blocks = %d, want 2: %#v", len(blocks), blocks)
+	}
+	rc := blocks[0].ReasoningContent
+	if rc == nil || rc.RedactedContent != "b64-opaque-blob" {
+		t.Fatalf("blocks[0].ReasoningContent = %#v, want redactedContent=b64-opaque-blob first", rc)
+	}
+}
+
+// TestGenerateReasoningContentRoundTrip covers the non-streaming response
+// path: a converseResponse whose message content includes a
+// reasoningContent.reasoningText block must decode into a
+// provider.ReasoningPart with matching Text/Signature.
+func TestGenerateReasoningContentRoundTrip(t *testing.T) {
+	server, fs := newFixtureServer(t)
+	t.Cleanup(server.Close)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/model/{id}/converse", func(w http.ResponseWriter, r *http.Request) {
+		raw := readBody(t, r)
+		var req converseRequest
+		json.Unmarshal(raw, &req)
+		fs.record(raw, req, r)
+		writeJSON(t, w, converseResponse{
+			Output: converseOutput{Message: wireMessage{Role: "assistant", Content: []wireContentBlock{
+				{ReasoningContent: &wireReasoningContent{ReasoningText: &wireReasoningText{Text: "let me think", Signature: "sig-xyz"}}},
+				{Text: strPtr("the answer")},
+			}}},
+			StopReason: "end_turn",
+			Usage:      wireUsage{InputTokens: 5, OutputTokens: 3, TotalTokens: 8},
+		})
+	})
+	reasoningServer := httptest.NewServer(mux)
+	t.Cleanup(reasoningServer.Close)
+
+	p := New(
+		WithRegion("us-east-1"),
+		WithCredentials("AKIDEXAMPLE", "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY", ""),
+		WithBaseURL(reasoningServer.URL),
+		WithHTTPClient(reasoningServer.Client()),
+	)
+	model := p.Model("anthropic.claude-3-sonnet-20240229-v1:0")
+
+	resp, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{provider.UserText("hi")},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(resp.Content) != 2 {
+		t.Fatalf("Content = %#v, want 2 parts", resp.Content)
+	}
+	rp, ok := resp.Content[0].(provider.ReasoningPart)
+	if !ok {
+		t.Fatalf("Content[0] = %T, want ReasoningPart", resp.Content[0])
+	}
+	if rp.Text != "let me think" || rp.Signature != "sig-xyz" || rp.Redacted {
+		t.Fatalf("ReasoningPart = %#v, want {Text: let me think, Signature: sig-xyz, Redacted: false}", rp)
 	}
 }
 
@@ -683,6 +838,60 @@ func TestConvertResponse_EmptyTextBlockNotDropped(t *testing.T) {
 	}
 	if tp.Text != "" {
 		t.Errorf("TextPart.Text = %q, want empty string", tp.Text)
+	}
+}
+
+// TestStream_ReasoningContent covers the streaming reasoningContent path:
+// text deltas accumulate into ReasoningDelta parts, signature fragments
+// accumulate silently (no stream part of their own), and contentBlockStop
+// emits a ReasoningEnd carrying the fully assembled ReasoningPart
+// (Text/Signature), followed by the ordinary text content block and a
+// FinishPart.
+func TestStream_ReasoningContent(t *testing.T) {
+	model, _ := newTestModel(t)
+
+	sr, err := model.Stream(context.Background(), provider.Call{
+		Messages: []provider.Message{provider.UserText("stream reasoning")},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	defer sr.Close()
+
+	var reasoningDeltas []string
+	var reasoningEnds []provider.ReasoningPart
+	var text string
+	var finishes int
+	for part := range sr.Parts() {
+		switch p := part.(type) {
+		case provider.ReasoningDelta:
+			reasoningDeltas = append(reasoningDeltas, p.Text)
+		case provider.ReasoningEnd:
+			reasoningEnds = append(reasoningEnds, p.Part)
+		case provider.TextDelta:
+			text += p.Text
+		case provider.FinishPart:
+			finishes++
+		}
+	}
+	if err := sr.Err(); err != nil {
+		t.Fatalf("Err(): %v", err)
+	}
+	if finishes != 1 {
+		t.Fatalf("finishes = %d, want 1", finishes)
+	}
+	if len(reasoningDeltas) != 2 || reasoningDeltas[0] != "let me " || reasoningDeltas[1] != "think..." {
+		t.Fatalf("reasoningDeltas = %#v", reasoningDeltas)
+	}
+	if len(reasoningEnds) != 1 {
+		t.Fatalf("reasoningEnds = %d, want 1", len(reasoningEnds))
+	}
+	end := reasoningEnds[0]
+	if end.Text != "let me think..." || end.Signature != "sig-abc" || end.Redacted {
+		t.Fatalf("ReasoningEnd.Part = %#v, want {Text: \"let me think...\", Signature: sig-abc, Redacted: false}", end)
+	}
+	if text != "42" {
+		t.Fatalf("text = %q, want 42", text)
 	}
 }
 

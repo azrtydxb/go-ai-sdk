@@ -168,6 +168,13 @@ type blockAccumulator struct {
 	id     string
 	name   string
 	args   strings.Builder
+
+	// reasoningContent
+	isReasoning   bool
+	reasoningText strings.Builder
+	signature     strings.Builder
+	redacted      bool
+	redactedData  strings.Builder
 }
 
 type streamResponse struct {
@@ -273,6 +280,30 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 						return
 					}
 				}
+				if ev.Delta.ReasoningContent != nil {
+					acc, ok := blocks[ev.ContentBlockIndex]
+					if !ok {
+						acc = &blockAccumulator{isReasoning: true}
+						blocks[ev.ContentBlockIndex] = acc
+					}
+					rc := ev.Delta.ReasoningContent
+					switch {
+					case rc.Text != "":
+						acc.reasoningText.WriteString(rc.Text)
+						if !yield(provider.ReasoningDelta{Text: rc.Text}) {
+							return
+						}
+					case rc.Signature != "":
+						// No stream part of its own: accumulated into the
+						// block's final ReasoningPart, emitted as a
+						// ReasoningEnd at contentBlockStop — mirrors the
+						// Anthropic provider's signature_delta handling.
+						acc.signature.WriteString(rc.Signature)
+					case rc.RedactedContent != "":
+						acc.redacted = true
+						acc.redactedData.WriteString(rc.RedactedContent)
+					}
+				}
 
 			case "contentBlockStop":
 				var ev eventContentBlockStop
@@ -281,7 +312,8 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 					return
 				}
 				acc, ok := blocks[ev.ContentBlockIndex]
-				if ok && acc.isTool {
+				switch {
+				case ok && acc.isTool:
 					args := acc.args.String()
 					if args == "" {
 						args = "{}"
@@ -292,6 +324,16 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 						Args: json.RawMessage(args),
 					}}
 					if !yield(end) {
+						return
+					}
+				case ok && acc.isReasoning:
+					var part provider.ReasoningPart
+					if acc.redacted {
+						part = provider.ReasoningPart{Redacted: true, Text: acc.redactedData.String()}
+					} else {
+						part = provider.ReasoningPart{Text: acc.reasoningText.String(), Signature: acc.signature.String()}
+					}
+					if !yield(provider.ReasoningEnd{Part: part}) {
 						return
 					}
 				}
