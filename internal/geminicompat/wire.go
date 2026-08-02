@@ -1,4 +1,4 @@
-package google
+package geminicompat
 
 import (
 	"encoding/base64"
@@ -216,7 +216,7 @@ func convertMessages(msgs []provider.Message) (system string, out []wireContent,
 			out = append(out, wireContent{Role: "user", Parts: parts})
 
 		default:
-			return "", nil, fmt.Errorf("google: unsupported message role %q", m.Role)
+			return "", nil, fmt.Errorf("geminicompat: unsupported message role %q", m.Role)
 		}
 	}
 	return strings.Join(systemParts, "\n\n"), out, nil
@@ -248,7 +248,7 @@ func userParts(parts []provider.ContentPart) ([]wirePart, error) {
 				Data:     base64.StdEncoding.EncodeToString(p.Data),
 			}})
 		default:
-			return nil, fmt.Errorf("google: unsupported content part %T in user message", part)
+			return nil, fmt.Errorf("geminicompat: unsupported content part %T in user message", part)
 		}
 	}
 	return out, nil
@@ -263,14 +263,14 @@ func assistantParts(parts []provider.ContentPart) ([]wirePart, error) {
 		case provider.ToolCallPart:
 			args, err := parsedArgs(p.Args)
 			if err != nil {
-				return nil, fmt.Errorf("google: parse tool call args: %w", err)
+				return nil, fmt.Errorf("geminicompat: parse tool call args: %w", err)
 			}
 			out = append(out, wirePart{FunctionCall: &wireFunctionCall{
 				Name: p.Name,
 				Args: args,
 			}})
 		default:
-			return nil, fmt.Errorf("google: unsupported content part %T in assistant message", part)
+			return nil, fmt.Errorf("geminicompat: unsupported content part %T in assistant message", part)
 		}
 	}
 	return out, nil
@@ -306,7 +306,7 @@ func toolResultParts(parts []provider.ContentPart) ([]wirePart, error) {
 	for _, part := range parts {
 		trp, ok := part.(provider.ToolResultPart)
 		if !ok {
-			return nil, fmt.Errorf("google: unsupported content part %T in tool message", part)
+			return nil, fmt.Errorf("geminicompat: unsupported content part %T in tool message", part)
 		}
 		out = append(out, wirePart{FunctionResponse: &wireFunctionResponse{
 			Name: trp.Name,

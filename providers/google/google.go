@@ -1,15 +1,21 @@
 // Package google implements the go-ai-sdk provider interfaces against
-// Google's Generative Language API (Gemini).
+// Google's Generative Language API (Gemini). It is a thin preset over the
+// shared internal/geminicompat implementation.
 package google
 
 import (
+	"context"
 	"net/http"
 	"os"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/geminicompat"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
-const defaultBaseURL = "https://generativelanguage.googleapis.com/v1beta"
+const (
+	defaultBaseURL        = "https://generativelanguage.googleapis.com/v1beta"
+	embeddingMaxBatchSize = 100
+)
 
 // Provider is a Google-backed provider.LanguageModel / EmbeddingModel
 // factory.
@@ -52,20 +58,32 @@ func New(opts ...Option) *Provider {
 	return p
 }
 
+func (p *Provider) endpointFor(modelID, method string) string {
+	return p.baseURL + "/models/" + modelID + ":" + method
+}
+
+func (p *Provider) authorize(_ context.Context, req *http.Request) error {
+	req.Header.Set("x-goog-api-key", p.apiKey)
+	return nil
+}
+
+func (p *Provider) config() geminicompat.Config {
+	return geminicompat.Config{
+		Name:        "google",
+		HTTPClient:  p.httpClient,
+		EndpointFor: p.endpointFor,
+		Authorize:   p.authorize,
+		EmbedBatch:  embeddingMaxBatchSize,
+	}
+}
+
 // Model returns a provider.LanguageModel for the given Gemini model ID.
 func (p *Provider) Model(id string) provider.LanguageModel {
-	return &languageModel{provider: p, modelID: id}
+	return geminicompat.NewLanguageModel(p.config(), id)
 }
 
 // EmbeddingModel returns a provider.EmbeddingModel for the given Gemini
 // embedding model ID.
 func (p *Provider) EmbeddingModel(id string) provider.EmbeddingModel {
-	return &embeddingModel{provider: p, modelID: id}
-}
-
-func (p *Provider) client() *http.Client {
-	if p.httpClient != nil {
-		return p.httpClient
-	}
-	return http.DefaultClient
+	return geminicompat.NewEmbeddingModel(p.config(), id)
 }

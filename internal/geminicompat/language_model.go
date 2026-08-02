@@ -1,10 +1,9 @@
-package google
+package geminicompat
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"iter"
@@ -16,13 +15,19 @@ import (
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
+// NewLanguageModel returns a provider.LanguageModel that speaks the Gemini
+// generateContent/streamGenerateContent wire format against cfg.
+func NewLanguageModel(cfg Config, modelID string) provider.LanguageModel {
+	return &languageModel{cfg: cfg, modelID: modelID}
+}
+
 type languageModel struct {
-	provider *Provider
-	modelID  string
+	cfg     Config
+	modelID string
 }
 
 func (m *languageModel) ModelID() string      { return m.modelID }
-func (m *languageModel) ProviderName() string { return "google" }
+func (m *languageModel) ProviderName() string { return m.cfg.Name }
 func (m *languageModel) Capabilities() provider.Capabilities {
 	return provider.Capabilities{NativeJSON: true}
 }
@@ -30,12 +35,14 @@ func (m *languageModel) Capabilities() provider.Capabilities {
 func (m *languageModel) doRequest(ctx context.Context, url string, body []byte) (*http.Response, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("google: build request: %w", err)
+		return nil, fmt.Errorf("%s: build request: %w", m.cfg.Name, err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("x-goog-api-key", m.provider.apiKey)
+	if err := m.cfg.Authorize(ctx, httpReq); err != nil {
+		return nil, fmt.Errorf("%s: authorize request: %w", m.cfg.Name, err)
+	}
 
-	return m.provider.client().Do(httpReq)
+	return m.cfg.client().Do(httpReq)
 }
 
 func apiError(resp *http.Response, body []byte) error {
@@ -49,10 +56,10 @@ func (m *languageModel) Generate(ctx context.Context, call provider.Call) (*prov
 	}
 	body, err := json.Marshal(req)
 	if err != nil {
-		return nil, fmt.Errorf("google: marshal request: %w", err)
+		return nil, fmt.Errorf("%s: marshal request: %w", m.cfg.Name, err)
 	}
 
-	url := m.provider.baseURL + "/models/" + m.modelID + ":generateContent"
+	url := m.cfg.EndpointFor(m.modelID, "generateContent")
 	resp, err := m.doRequest(ctx, url, body)
 	if err != nil {
 		return nil, err
@@ -61,7 +68,7 @@ func (m *languageModel) Generate(ctx context.Context, call provider.Call) (*prov
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("google: read response: %w", err)
+		return nil, fmt.Errorf("%s: read response: %w", m.cfg.Name, err)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -70,7 +77,7 @@ func (m *languageModel) Generate(ctx context.Context, call provider.Call) (*prov
 
 	var wr generateContentResponse
 	if err := json.Unmarshal(respBody, &wr); err != nil {
-		return nil, fmt.Errorf("google: decode response: %w", err)
+		return nil, fmt.Errorf("%s: decode response: %w", m.cfg.Name, err)
 	}
 
 	return convertResponse(wr, respBody), nil
@@ -83,10 +90,12 @@ func (m *languageModel) Stream(ctx context.Context, call provider.Call) (provide
 	}
 	body, err := json.Marshal(req)
 	if err != nil {
-		return nil, fmt.Errorf("google: marshal request: %w", err)
+		return nil, fmt.Errorf("%s: marshal request: %w", m.cfg.Name, err)
 	}
 
-	url := m.provider.baseURL + "/models/" + m.modelID + ":streamGenerateContent?alt=sse"
+	// EndpointFor is called without query parameters; ?alt=sse is appended
+	// here so EndpointFor implementations stay query-free.
+	url := m.cfg.EndpointFor(m.modelID, "streamGenerateContent") + "?alt=sse"
 	resp, err := m.doRequest(ctx, url, body)
 	if err != nil {
 		return nil, err
@@ -96,17 +105,18 @@ func (m *languageModel) Stream(ctx context.Context, call provider.Call) (provide
 		defer resp.Body.Close()
 		respBody, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
-			return nil, fmt.Errorf("google: read error response: %w", readErr)
+			return nil, fmt.Errorf("%s: read error response: %w", m.cfg.Name, readErr)
 		}
 		return nil, apiError(resp, respBody)
 	}
 
-	return &streamResponse{body: resp.Body}, nil
+	return &streamResponse{cfg: m.cfg, body: resp.Body}, nil
 }
 
 // ---- Streaming ----
 
 type streamResponse struct {
+	cfg    Config
 	body   io.ReadCloser
 	err    error
 	used   bool
@@ -136,7 +146,7 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 
 		for ev, err := range sse.Scan(s.body) {
 			if err != nil {
-				s.err = fmt.Errorf("google: stream read: %w", err)
+				s.err = fmt.Errorf("%s: stream read: %w", s.cfg.Name, err)
 				return
 			}
 
@@ -147,7 +157,7 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 
 			var chunk generateContentResponse
 			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-				s.err = fmt.Errorf("google: decode stream chunk: %w", err)
+				s.err = fmt.Errorf("%s: decode stream chunk: %w", s.cfg.Name, err)
 				return
 			}
 
@@ -209,7 +219,7 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 			}
 			return
 		}
-		s.err = errors.New("google: stream ended unexpectedly without a finishReason")
+		s.err = fmt.Errorf("%s: stream ended unexpectedly without a finishReason", s.cfg.Name)
 	}
 }
 

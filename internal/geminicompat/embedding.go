@@ -1,4 +1,4 @@
-package google
+package geminicompat
 
 import (
 	"bytes"
@@ -11,16 +11,21 @@ import (
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
-const embeddingMaxBatchSize = 100
+// NewEmbeddingModel returns a provider.EmbeddingModel that speaks the
+// Gemini batchEmbedContents wire format against cfg. Callers should only
+// construct one when cfg.EmbedBatch > 0.
+func NewEmbeddingModel(cfg Config, modelID string) provider.EmbeddingModel {
+	return &embeddingModel{cfg: cfg, modelID: modelID}
+}
 
 type embeddingModel struct {
-	provider *Provider
-	modelID  string
+	cfg     Config
+	modelID string
 }
 
 func (m *embeddingModel) ModelID() string      { return m.modelID }
-func (m *embeddingModel) ProviderName() string { return "google" }
-func (m *embeddingModel) MaxBatchSize() int    { return embeddingMaxBatchSize }
+func (m *embeddingModel) ProviderName() string { return m.cfg.Name }
+func (m *embeddingModel) MaxBatchSize() int    { return m.cfg.EmbedBatch }
 
 func (m *embeddingModel) Embed(ctx context.Context, values []string) (*provider.EmbeddingResponse, error) {
 	reqs := make([]embedContentRequest, len(values))
@@ -33,18 +38,20 @@ func (m *embeddingModel) Embed(ctx context.Context, values []string) (*provider.
 
 	reqBody, err := json.Marshal(batchEmbedRequest{Requests: reqs})
 	if err != nil {
-		return nil, fmt.Errorf("google: marshal embedding request: %w", err)
+		return nil, fmt.Errorf("%s: marshal embedding request: %w", m.cfg.Name, err)
 	}
 
-	url := m.provider.baseURL + "/models/" + m.modelID + ":batchEmbedContents"
+	url := m.cfg.EndpointFor(m.modelID, "batchEmbedContents")
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
 	if err != nil {
-		return nil, fmt.Errorf("google: build embedding request: %w", err)
+		return nil, fmt.Errorf("%s: build embedding request: %w", m.cfg.Name, err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("x-goog-api-key", m.provider.apiKey)
+	if err := m.cfg.Authorize(ctx, httpReq); err != nil {
+		return nil, fmt.Errorf("%s: authorize request: %w", m.cfg.Name, err)
+	}
 
-	resp, err := m.provider.client().Do(httpReq)
+	resp, err := m.cfg.client().Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +59,7 @@ func (m *embeddingModel) Embed(ctx context.Context, values []string) (*provider.
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("google: read embedding response: %w", err)
+		return nil, fmt.Errorf("%s: read embedding response: %w", m.cfg.Name, err)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -61,7 +68,7 @@ func (m *embeddingModel) Embed(ctx context.Context, values []string) (*provider.
 
 	var wr batchEmbedResponse
 	if err := json.Unmarshal(body, &wr); err != nil {
-		return nil, fmt.Errorf("google: decode embedding response: %w", err)
+		return nil, fmt.Errorf("%s: decode embedding response: %w", m.cfg.Name, err)
 	}
 
 	embeddings := make([][]float64, len(wr.Embeddings))
