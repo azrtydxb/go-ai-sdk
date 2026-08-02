@@ -96,7 +96,6 @@ func (m *transcriptionModel) Transcribe(ctx context.Context, call provider.Trans
 	}
 
 	var segments []provider.TranscriptSegment
-	var duration float64
 	for _, w := range wr.Words {
 		if w.Type == "word" {
 			segments = append(segments, provider.TranscriptSegment{
@@ -106,8 +105,9 @@ func (m *transcriptionModel) Transcribe(ctx context.Context, call provider.Trans
 			})
 		}
 	}
-	if n := len(wr.Words); n > 0 {
-		duration = wr.Words[n-1].End
+	var duration float64
+	if n := len(segments); n > 0 {
+		duration = segments[n-1].EndSec
 	}
 
 	return &provider.TranscriptionResponse{

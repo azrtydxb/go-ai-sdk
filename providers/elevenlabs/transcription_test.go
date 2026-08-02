@@ -126,6 +126,71 @@ func TestTranscribe_NoLanguageOmitsField(t *testing.T) {
 	}
 }
 
+func TestTranscribe_DurationIgnoresTrailingNonWordEntry(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{
+			"text": "hello world",
+			"language_code": "en",
+			"words": [
+				{"text":"hello","start":0.0,"end":0.5,"type":"word"},
+				{"text":"world","start":0.6,"end":1.2,"type":"word"},
+				{"text":" ","start":1.2,"end":2.5,"type":"spacing"}
+			]
+		}`))
+	}))
+	defer srv.Close()
+
+	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL))
+	m := p.TranscriptionModel("scribe_v1")
+
+	resp, err := m.Transcribe(context.Background(), provider.TranscriptionCall{
+		Audio:     []byte("fake-audio-bytes"),
+		MediaType: "audio/mpeg",
+	})
+	if err != nil {
+		t.Fatalf("Transcribe: %v", err)
+	}
+
+	if len(resp.Segments) != 2 {
+		t.Fatalf("Segments len = %d, want 2", len(resp.Segments))
+	}
+	if resp.DurationSec != 1.2 {
+		t.Errorf("DurationSec = %v, want 1.2 (last WORD's end, not trailing spacing's end 2.5)", resp.DurationSec)
+	}
+}
+
+func TestTranscribe_EmptyWords(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"text":"hello world","language_code":"en","words":[]}`))
+	}))
+	defer srv.Close()
+
+	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL))
+	m := p.TranscriptionModel("scribe_v1")
+
+	resp, err := m.Transcribe(context.Background(), provider.TranscriptionCall{
+		Audio:     []byte("fake-audio-bytes"),
+		MediaType: "audio/mpeg",
+	})
+	if err != nil {
+		t.Fatalf("Transcribe: %v", err)
+	}
+
+	if len(resp.Segments) != 0 {
+		t.Errorf("Segments len = %d, want 0", len(resp.Segments))
+	}
+	if resp.DurationSec != 0 {
+		t.Errorf("DurationSec = %v, want 0", resp.DurationSec)
+	}
+	if resp.Text != "hello world" {
+		t.Errorf("Text = %q, want %q", resp.Text, "hello world")
+	}
+}
+
 func TestTranscribe_Unauthorized(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
