@@ -111,6 +111,11 @@ func (m *telemetryModel) Stream(ctx context.Context, call provider.Call) (provid
 // ended exactly once, as soon as enough is known: at the FinishPart (if
 // one is observed), otherwise at the end of iteration (error, abandonment,
 // or natural close-without-finish), whichever happens first.
+//
+// Like the rest of this codebase, telemetryStream assumes StreamResponse
+// has a single consumer driving Parts() to completion; it does not
+// synchronize s.ended/s.info against a concurrent Close() call made from
+// another goroutine while Parts() is still being iterated.
 type telemetryStream struct {
 	inner provider.StreamResponse
 	t     Telemetry

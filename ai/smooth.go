@@ -51,6 +51,11 @@ type SmoothOpts struct {
 // currently-buffered text first (as a TextDelta), then is yielded
 // unchanged. Any text still buffered when the inner sequence ends is
 // flushed as a final TextDelta before SmoothStream itself ends.
+//
+// Callers typically apply SmoothStream to the iter.Seq[provider.StreamPart]
+// obtained from a TextStream, downstream of anything CallOpts.OnChunk
+// observed: OnChunk always sees the provider's original, unsmoothed parts,
+// never these re-chunked ones.
 func SmoothStream(parts iter.Seq[provider.StreamPart], opts SmoothOpts) iter.Seq[provider.StreamPart] {
 	chunking := opts.Chunking
 	if chunking == "" {

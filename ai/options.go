@@ -60,6 +60,10 @@ type GenerateTextOpts struct {
 	// OnChunk, when set, is called with each provider.StreamPart before it
 	// is yielded to the consumer of StreamText's TextStream.Parts(). It has
 	// no effect on GenerateText, which has no stream of parts to observe.
+	// It observes the raw parts the provider produced: if the result is
+	// wrapped with SmoothStream, that re-chunking happens downstream of
+	// OnChunk, so OnChunk still sees the provider's original, unsmoothed
+	// parts rather than the re-chunked ones the consumer ultimately reads.
 	OnChunk func(part provider.StreamPart)
 
 	// OnFinish, when set, is called once with the call's result after it
