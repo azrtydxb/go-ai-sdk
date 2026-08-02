@@ -344,6 +344,49 @@ func TestStreamTextOnStepFinishInvokedOncePerStep(t *testing.T) {
 	}
 }
 
+// TestStreamTextOnStepFinishNotCalledWhenAbandoned pins down the documented
+// caveat on GenerateTextOpts.OnStepFinish: if the consumer stops ranging
+// over Parts() before a step's iteration completes naturally (here, by
+// breaking as soon as the step's FinishPart is observed), the step-finish
+// bookkeeping (appending to Steps(), invoking OnStepFinish) never runs for
+// that step, even though FinishPart itself was delivered to the consumer.
+func TestStreamTextOnStepFinishNotCalledWhenAbandoned(t *testing.T) {
+	m := &aitest.MockModel{Streams: [][]provider.StreamPart{
+		{
+			provider.ToolCallDelta{ID: "c1", Name: "t", ArgsDelta: `{"city":`},
+			provider.ToolCallDelta{ID: "c1", ArgsDelta: `"Ghent"}`},
+			provider.ToolCallEnd{Call: provider.ToolCallPart{ID: "c1", Name: "t", Args: []byte(`{"city":"Ghent"}`)}},
+			provider.FinishPart{Reason: provider.FinishToolCalls},
+		},
+		{
+			provider.TextDelta{Text: "sunny"},
+			provider.FinishPart{Reason: provider.FinishStop, Usage: provider.Usage{TotalTokens: 3}},
+		},
+	}}
+	tool := NewTool("t", "", func(_ context.Context, a weatherArgs) (any, error) { return "sunny", nil })
+	var finished []Step
+	s, err := StreamText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "x", Tools: []Tool{tool}, MaxSteps: 2,
+		OnStepFinish: func(step Step) {
+			finished = append(finished, step)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for p := range s.Parts() {
+		if _, ok := p.(provider.FinishPart); ok {
+			break
+		}
+	}
+	if len(finished) != 0 {
+		t.Fatalf("OnStepFinish calls = %d, want 0 (step abandoned before iteration completed)", len(finished))
+	}
+	if len(s.Steps()) != 0 {
+		t.Fatalf("Steps() = %d, want 0 (step never appended for an abandoned iteration)", len(s.Steps()))
+	}
+}
+
 func TestStreamTextEarlyBreakCloses(t *testing.T) {
 	m := &aitest.MockModel{Streams: [][]provider.StreamPart{{
 		provider.TextDelta{Text: "a"}, provider.TextDelta{Text: "b"},

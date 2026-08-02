@@ -36,6 +36,12 @@ type GenerateTextOpts struct {
 	// OnStepFinish, when set, is called after each step completes
 	// (including the final step) in both GenerateText and StreamText, with
 	// the finished Step. Errors are not returned from the callback.
+	//
+	// Caveat for StreamText: the callback fires only once a step's Parts()
+	// iteration has run to completion. If the consumer stops ranging over
+	// Parts() before that (e.g. breaking out of the loop right after
+	// observing that step's FinishPart), OnStepFinish does not fire for
+	// that step, even though FinishPart itself was already delivered.
 	OnStepFinish func(step Step)
 
 	// ProviderOptions carries provider-specific escape-hatch parameters. It
