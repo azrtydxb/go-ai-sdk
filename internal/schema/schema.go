@@ -37,6 +37,15 @@ func ForType(t reflect.Type) (json.RawMessage, error) {
 	return json.Marshal(m)
 }
 
+// fieldEntry holds a computed field schema plus enough bookkeeping to
+// resolve name collisions between fields promoted from embedded structs at
+// different depths, mirroring encoding/json's embedding rules.
+type fieldEntry struct {
+	schema   map[string]any
+	required bool
+	depth    int
+}
+
 // structSchema builds the object schema for a struct type, detecting cycles
 // via the visiting set of types currently being expanded on the call stack.
 func structSchema(t reflect.Type, visiting map[reflect.Type]bool) (map[string]any, error) {
@@ -46,34 +55,16 @@ func structSchema(t reflect.Type, visiting map[reflect.Type]bool) (map[string]an
 	visiting[t] = true
 	defer delete(visiting, t)
 
+	fields, err := collectFields(t, visiting, 0)
+	if err != nil {
+		return nil, err
+	}
+
 	properties := map[string]any{}
 	required := []string{}
-
-	for i := 0; i < t.NumField(); i++ {
-		f := t.Field(i)
-		if f.PkgPath != "" {
-			// unexported field
-			continue
-		}
-
-		name, omitempty, omitzero := parseJSONTag(f)
-		if name == "-" {
-			continue
-		}
-		if name == "" {
-			name = f.Name
-		}
-
-		fieldSchema, err := typeSchema(f.Type, visiting)
-		if err != nil {
-			return nil, fmt.Errorf("schema: field %s: %w", f.Name, err)
-		}
-
-		applyJSONSchemaTag(f, fieldSchema)
-
-		properties[name] = fieldSchema
-
-		if f.Type.Kind() != reflect.Ptr && !omitempty && !omitzero {
+	for name, fe := range fields {
+		properties[name] = fe.schema
+		if fe.required {
 			required = append(required, name)
 		}
 	}
@@ -84,6 +75,95 @@ func structSchema(t reflect.Type, visiting map[reflect.Type]bool) (map[string]an
 		"required":             required,
 		"additionalProperties": false,
 	}, nil
+}
+
+// collectFields walks t's fields, promoting fields from anonymous
+// (embedded) struct fields that carry no explicit json tag name into the
+// result at depth+1 -- mirroring encoding/json's flattening semantics.
+// Fields at a shallower depth win over deeper ones; a same-depth name
+// collision drops the conflicting entries entirely, matching
+// encoding/json's ambiguous-field behavior for the common one-level case.
+func collectFields(t reflect.Type, visiting map[reflect.Type]bool, depth int) (map[string]fieldEntry, error) {
+	result := map[string]fieldEntry{}
+
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+
+		name, omitempty, omitzero := parseJSONTag(f)
+		if name == "-" {
+			continue
+		}
+
+		if f.Anonymous && name == "" {
+			// Pure embedding (no explicit json tag name): promote the
+			// embedded struct's fields into this level, one depth deeper.
+			ft := f.Type
+			for ft.Kind() == reflect.Ptr {
+				ft = ft.Elem()
+			}
+			if ft.Kind() == reflect.Struct && ft != rawMessageType {
+				if visiting[ft] {
+					return nil, fmt.Errorf("schema: cycle detected involving type %s", ft)
+				}
+				visiting[ft] = true
+				sub, err := collectFields(ft, visiting, depth+1)
+				delete(visiting, ft)
+				if err != nil {
+					return nil, err
+				}
+				for subName, fe := range sub {
+					insertField(result, subName, fe)
+				}
+				continue
+			}
+			// Anonymous non-struct field: falls back to being a regular
+			// field named after its type, same as encoding/json. Unexported
+			// anonymous non-struct types cannot be marshaled by encoding/json.
+			if f.PkgPath != "" {
+				continue
+			}
+			name = f.Name
+		} else {
+			if f.PkgPath != "" {
+				// unexported, non-anonymous field
+				continue
+			}
+			if name == "" {
+				name = f.Name
+			}
+		}
+
+		fieldSchema, err := typeSchema(f.Type, visiting)
+		if err != nil {
+			return nil, fmt.Errorf("schema: field %s: %w", f.Name, err)
+		}
+
+		applyJSONSchemaTag(f, fieldSchema)
+
+		req := f.Type.Kind() != reflect.Ptr && !omitempty && !omitzero
+		insertField(result, name, fieldEntry{schema: fieldSchema, required: req, depth: depth})
+	}
+
+	return result, nil
+}
+
+// insertField adds fe under name, resolving collisions by depth: a
+// shallower entry wins over a deeper one; entries at equal depth are
+// ambiguous and are dropped, matching encoding/json's field resolution.
+func insertField(result map[string]fieldEntry, name string, fe fieldEntry) {
+	existing, ok := result[name]
+	if !ok {
+		result[name] = fe
+		return
+	}
+	switch {
+	case fe.depth < existing.depth:
+		result[name] = fe
+	case fe.depth == existing.depth:
+		delete(result, name)
+	default:
+		// existing is shallower; keep it, ignore fe
+	}
 }
 
 // typeSchema builds the schema fragment for an arbitrary Go type: scalars,

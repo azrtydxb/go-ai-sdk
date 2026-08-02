@@ -180,6 +180,144 @@ func TestForType_EscapedCommaInDescription(t *testing.T) {
 	}
 }
 
+// --- Embedded/anonymous struct field tests ---
+
+type Base struct {
+	ID string `json:"id"`
+}
+
+type withExportedEmbed struct {
+	Base
+	Name string `json:"name"`
+}
+
+func TestForType_ExportedEmbedPromotesFields(t *testing.T) {
+	raw, err := For[withExportedEmbed]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s map[string]any
+	if err := json.Unmarshal(raw, &s); err != nil {
+		t.Fatal(err)
+	}
+	props := s["properties"].(map[string]any)
+	if _, ok := props["Base"]; ok {
+		t.Fatal("embedded type name must not appear as a nested property")
+	}
+	id, ok := props["id"].(map[string]any)
+	if !ok || id["type"] != "string" {
+		t.Fatalf("promoted id field = %v", props["id"])
+	}
+	if props["name"].(map[string]any)["type"] != "string" {
+		t.Fatalf("name field = %v", props["name"])
+	}
+
+	req := s["required"].([]any)
+	want := map[string]bool{"id": true, "name": true}
+	if len(req) != len(want) {
+		t.Fatalf("required = %v", req)
+	}
+	for _, r := range req {
+		if !want[r.(string)] {
+			t.Fatalf("unexpected required %v", r)
+		}
+	}
+}
+
+type base struct {
+	ID     string `json:"id"`
+	hidden string
+}
+
+type withUnexportedEmbed struct {
+	base
+	Name string `json:"name"`
+}
+
+func TestForType_UnexportedEmbedPromotesExportedFields(t *testing.T) {
+	raw, err := For[withUnexportedEmbed]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s map[string]any
+	if err := json.Unmarshal(raw, &s); err != nil {
+		t.Fatal(err)
+	}
+	props := s["properties"].(map[string]any)
+	if _, ok := props["base"]; ok {
+		t.Fatal("embedded unexported type name must not appear as a nested property")
+	}
+	if props["id"] == nil {
+		t.Fatal("expected promoted id field from unexported embedded type")
+	}
+	if _, ok := props["hidden"]; ok {
+		t.Fatal("unexported field of embedded type must not be promoted")
+	}
+}
+
+type withTaggedEmbed struct {
+	Base `json:"base"`
+	Name string `json:"name"`
+}
+
+func TestForType_TaggedEmbedStaysNested(t *testing.T) {
+	raw, err := For[withTaggedEmbed]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s map[string]any
+	if err := json.Unmarshal(raw, &s); err != nil {
+		t.Fatal(err)
+	}
+	props := s["properties"].(map[string]any)
+	baseProp, ok := props["base"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected nested 'base' property, got %v", props)
+	}
+	if baseProp["type"] != "object" {
+		t.Fatalf("base property = %v", baseProp)
+	}
+	if _, ok := props["id"]; ok {
+		t.Fatal("tagged embed must not be flattened")
+	}
+}
+
+type withPointerEmbed struct {
+	*Base
+	Name string `json:"name"`
+}
+
+func TestForType_PointerEmbedPromotesFields(t *testing.T) {
+	raw, err := For[withPointerEmbed]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s map[string]any
+	if err := json.Unmarshal(raw, &s); err != nil {
+		t.Fatal(err)
+	}
+	props := s["properties"].(map[string]any)
+	if props["id"] == nil {
+		t.Fatalf("expected promoted id field from embedded *Base, got %v", props)
+	}
+	if _, ok := props["Base"]; ok {
+		t.Fatal("embedded pointer type name must not appear as a nested property")
+	}
+}
+
+type embedCycleA struct {
+	*embedCycleB
+}
+type embedCycleB struct {
+	*embedCycleA
+}
+
+func TestForType_EmbeddedCycleDetection(t *testing.T) {
+	if _, err := For[embedCycleA](); err == nil {
+		t.Fatal("want error for cyclic embedding")
+	}
+}
+
 func TestForType_NonStructError(t *testing.T) {
 	// sanity: error message should mention the type is not usable, not panic
 	_, err := For[[]string]()
