@@ -85,6 +85,18 @@ func writeException(t *testing.T, w io.Writer, excType, message string) {
 	}
 }
 
+func writeTransportError(t *testing.T, w io.Writer, code, message string) {
+	t.Helper()
+	frame := eventstream.Encode(map[string]string{
+		":message-type":  "error",
+		":error-code":    code,
+		":error-message": message,
+	}, nil)
+	if _, err := w.Write(frame); err != nil {
+		t.Fatalf("fixture: write error frame: %v", err)
+	}
+}
+
 func readBody(t *testing.T, r *http.Request) []byte {
 	t.Helper()
 	buf, err := io.ReadAll(r.Body)
@@ -182,6 +194,12 @@ func newFixtureServer(t *testing.T) (*httptest.Server, *fixtureState) {
 				writeEvent(t, w, "messageStart", eventMessageStart{Role: "assistant"})
 				writeEvent(t, w, "contentBlockDelta", eventContentBlockDelta{ContentBlockIndex: 0, Delta: eventDeltaUnion{Text: "oops"}})
 				writeException(t, w, "internalServerException", "something went wrong")
+				flusher.Flush()
+
+			case "stream error":
+				writeEvent(t, w, "messageStart", eventMessageStart{Role: "assistant"})
+				writeEvent(t, w, "contentBlockDelta", eventContentBlockDelta{ContentBlockIndex: 0, Delta: eventDeltaUnion{Text: "oops"}})
+				writeTransportError(t, w, "InternalServerException", "connection reset")
 				flusher.Flush()
 
 			default:
@@ -456,6 +474,43 @@ func TestStream_ExceptionFrame(t *testing.T) {
 	}
 	if !strings.Contains(sr.Err().Error(), "internalServerException") {
 		t.Errorf("Err() = %v, want it to mention the exception type", sr.Err())
+	}
+}
+
+// TestStream_TransportErrorFrame covers a ":message-type": "error" event
+// stream frame — a transport-level error distinct from the modeled
+// ":message-type": "exception" case — carrying its details in the
+// ":error-code" / ":error-message" headers rather than a JSON payload. Err()
+// must surface a descriptive error mentioning both, and iteration must stop
+// without emitting a FinishPart.
+func TestStream_TransportErrorFrame(t *testing.T) {
+	model, _ := newTestModel(t)
+
+	sr, err := model.Stream(context.Background(), provider.Call{
+		Messages: []provider.Message{provider.UserText("stream error")},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	defer sr.Close()
+
+	var finishes int
+	for part := range sr.Parts() {
+		if _, ok := part.(provider.FinishPart); ok {
+			finishes++
+		}
+	}
+	if finishes != 0 {
+		t.Errorf("got %d FinishPart(s) for a transport-error stream, want 0", finishes)
+	}
+	if sr.Err() == nil {
+		t.Fatal("Err() = nil, want the transport error surfaced via Err()")
+	}
+	if !strings.Contains(sr.Err().Error(), "InternalServerException") {
+		t.Errorf("Err() = %v, want it to mention the error code", sr.Err())
+	}
+	if !strings.Contains(sr.Err().Error(), "connection reset") {
+		t.Errorf("Err() = %v, want it to mention the error message", sr.Err())
 	}
 }
 

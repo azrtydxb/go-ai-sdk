@@ -199,6 +199,28 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 				return
 			}
 
+			// A ":message-type" of "error" is a transport-level event
+			// stream error (as opposed to "exception", a modeled
+			// application-level error): the connection is being
+			// terminated by the server, and the error details are carried
+			// in the ":error-code" / ":error-message" headers rather than
+			// a JSON payload.
+			if msg.Headers[":message-type"] == "error" {
+				code := msg.Headers[":error-code"]
+				message := msg.Headers[":error-message"]
+				switch {
+				case code != "" && message != "":
+					s.err = fmt.Errorf("bedrock: stream transport error %s: %s", code, message)
+				case code != "":
+					s.err = fmt.Errorf("bedrock: stream transport error %s", code)
+				case message != "":
+					s.err = fmt.Errorf("bedrock: stream transport error: %s", message)
+				default:
+					s.err = errors.New("bedrock: stream transport error")
+				}
+				return
+			}
+
 			switch msg.Headers[":event-type"] {
 			case "messageStart":
 				// No StreamPart emitted; role is always "assistant".
