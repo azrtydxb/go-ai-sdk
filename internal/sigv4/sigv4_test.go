@@ -156,14 +156,16 @@ func TestSign_VanillaGET(t *testing.T) {
 	}
 }
 
-// TestSign_MultiValueHeaderSortedBeforeJoin covers the SigV4 canonical-header
+// TestSign_MultiValueHeaderJoinedInWireOrder covers the SigV4 canonical-header
 // rule for a header with multiple values: each header's *values* must be
-// sorted before being joined with "," (this is distinct from and in addition
-// to sorting header *names*). A request built with the same multi-valued
-// header added in two different orders must therefore produce byte-identical
-// canonical headers, and hence identical signatures — the reverse of what
-// you'd get from a naive strings.Join(vals, ",") over insertion order.
-func TestSign_MultiValueHeaderSortedBeforeJoin(t *testing.T) {
+// joined with "," in the order they appear on the wire (this matches
+// aws-sdk-go-v2's and botocore's canonicalization) — NOT sorted. This is
+// distinct from, and in addition to, sorting header *names*. A request built
+// with the same multi-valued header added in two different orders must
+// therefore produce two DIFFERENT canonical header blocks, and hence two
+// DIFFERENT signatures, each matching an independently computed reference for
+// that specific order.
+func TestSign_MultiValueHeaderJoinedInWireOrder(t *testing.T) {
 	now := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
 	creds := Credentials{AccessKeyID: "AKID", SecretAccessKey: "secret"}
 
@@ -183,42 +185,84 @@ func TestSign_MultiValueHeaderSortedBeforeJoin(t *testing.T) {
 
 	auth1 := req1.Header.Get("Authorization")
 	auth2 := req2.Header.Get("Authorization")
-	if auth1 != auth2 {
-		t.Fatalf("signatures differ for a multi-valued header added in different orders:\n%q\n%q", auth1, auth2)
+	if auth1 == auth2 {
+		t.Fatalf("signatures identical for a multi-valued header added in different wire orders (want different, since canonicalization must preserve wire order):\n%q\n%q", auth1, auth2)
 	}
 
-	// Independently confirm the canonical form: values sorted ("a,b"), not
-	// insertion order ("b,a").
-	headerNames := []string{"host", "x-amz-content-sha256", "x-amz-date", "x-amz-meta"}
-	headerValues := map[string]string{
-		"host":                 "example.amazonaws.com",
-		"x-amz-content-sha256": sha256Hex(""),
-		"x-amz-date":           "20200101T000000Z",
-		"x-amz-meta":           "a,b",
+	wantAuth := func(joinedValue string) string {
+		headerNames := []string{"host", "x-amz-content-sha256", "x-amz-date", "x-amz-meta"}
+		headerValues := map[string]string{
+			"host":                 "example.amazonaws.com",
+			"x-amz-content-sha256": sha256Hex(""),
+			"x-amz-date":           "20200101T000000Z",
+			"x-amz-meta":           joinedValue,
+		}
+		var canonicalHeaders strings.Builder
+		for _, n := range headerNames {
+			canonicalHeaders.WriteString(n)
+			canonicalHeaders.WriteByte(':')
+			canonicalHeaders.WriteString(headerValues[n])
+			canonicalHeaders.WriteByte('\n')
+		}
+		signedHeaders := strings.Join(headerNames, ";")
+		canonicalRequest := strings.Join([]string{
+			http.MethodGet, "/path", "", canonicalHeaders.String(), signedHeaders, sha256Hex(""),
+		}, "\n")
+		hashedCanonical := sha256Hex(canonicalRequest)
+		credentialScope := "20200101/us-east-1/service/aws4_request"
+		stringToSign := strings.Join([]string{"AWS4-HMAC-SHA256", "20200101T000000Z", credentialScope, hashedCanonical}, "\n")
+		kDate := hmacSum([]byte("AWS4secret"), "20200101")
+		kRegion := hmacSum(kDate, "us-east-1")
+		kService := hmacSum(kRegion, "service")
+		kSigning := hmacSum(kService, "aws4_request")
+		wantSignature := hex.EncodeToString(hmacSum(kSigning, stringToSign))
+		return "AWS4-HMAC-SHA256 Credential=AKID/" + credentialScope + ", SignedHeaders=" + signedHeaders + ", Signature=" + wantSignature
 	}
-	var canonicalHeaders strings.Builder
-	for _, n := range headerNames {
-		canonicalHeaders.WriteString(n)
-		canonicalHeaders.WriteByte(':')
-		canonicalHeaders.WriteString(headerValues[n])
-		canonicalHeaders.WriteByte('\n')
-	}
-	signedHeaders := strings.Join(headerNames, ";")
-	canonicalRequest := strings.Join([]string{
-		http.MethodGet, "/path", "", canonicalHeaders.String(), signedHeaders, sha256Hex(""),
-	}, "\n")
-	hashedCanonical := sha256Hex(canonicalRequest)
-	credentialScope := "20200101/us-east-1/service/aws4_request"
-	stringToSign := strings.Join([]string{"AWS4-HMAC-SHA256", "20200101T000000Z", credentialScope, hashedCanonical}, "\n")
-	kDate := hmacSum([]byte("AWS4secret"), "20200101")
-	kRegion := hmacSum(kDate, "us-east-1")
-	kService := hmacSum(kRegion, "service")
-	kSigning := hmacSum(kService, "aws4_request")
-	wantSignature := hex.EncodeToString(hmacSum(kSigning, stringToSign))
-	wantAuth := "AWS4-HMAC-SHA256 Credential=AKID/" + credentialScope + ", SignedHeaders=" + signedHeaders + ", Signature=" + wantSignature
 
-	if auth1 != wantAuth {
-		t.Fatalf("Authorization = %q, want %q (sorted duplicate values)", auth1, wantAuth)
+	// req1 added "b" then "a": wire order join is "b,a".
+	if wantAuth1 := wantAuth("b,a"); auth1 != wantAuth1 {
+		t.Fatalf("Authorization (b,a order) = %q, want %q (wire-order join, not sorted)", auth1, wantAuth1)
+	}
+	// req2 added "a" then "b": wire order join is "a,b".
+	if wantAuth2 := wantAuth("a,b"); auth2 != wantAuth2 {
+		t.Fatalf("Authorization (a,b order) = %q, want %q (wire-order join, not sorted)", auth2, wantAuth2)
+	}
+}
+
+// TestSign_GoldenVector_BedrockConverse pins a botocore-derived golden
+// signature for a real Bedrock Converse request, verified byte-identical
+// against botocore for these exact inputs. It exists to catch any drift
+// between Sign's canonicalization and AWS's reference implementation that
+// the from-scratch reference computations elsewhere in this file might
+// share a bug with.
+func TestSign_GoldenVector_BedrockConverse(t *testing.T) {
+	const (
+		accessKey     = "AKIDEXAMPLE"
+		secretKey     = "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY"
+		sessionToken  = "THETOKEN"
+		region        = "us-east-1"
+		service       = "bedrock"
+		host          = "bedrock-runtime.us-east-1.amazonaws.com"
+		path          = "/model/anthropic.claude-3-sonnet-20240229-v1%3A0/converse"
+		body          = `{"messages":[{"role":"user","content":[{"text":"hi there"}]}]}`
+		wantSignature = "3154301a82f57bd83ac7d94bca9ed8920a2d1206d5571544c299039ac4d3ed09"
+	)
+	now := time.Date(2015, 8, 30, 12, 36, 0, 0, time.UTC)
+
+	req, err := http.NewRequest(http.MethodPost, "https://"+host+path, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	creds := Credentials{AccessKeyID: accessKey, SecretAccessKey: secretKey, SessionToken: sessionToken}
+	if err := Sign(req, []byte(body), creds, region, service, now); err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+
+	gotAuth := req.Header.Get("Authorization")
+	if !strings.Contains(gotAuth, "Signature="+wantSignature) {
+		t.Fatalf("Authorization = %q, want it to contain Signature=%s (botocore-derived golden vector)", gotAuth, wantSignature)
 	}
 }
 

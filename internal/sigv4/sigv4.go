@@ -58,13 +58,16 @@ func Sign(req *http.Request, body []byte, creds Credentials, region, service str
 	for name, vals := range req.Header {
 		lower := strings.ToLower(name)
 		if strings.HasPrefix(lower, "x-amz-") || lower == "content-type" {
-			// SigV4 requires duplicate header values to be sorted before
-			// joining with "," in the canonical request — not left in
-			// insertion order — so requests differing only in the order a
-			// multi-valued header was added still sign identically.
-			sortedVals := append([]string(nil), vals...)
-			sort.Strings(sortedVals)
-			headerValues[lower] = strings.Join(sortedVals, ",")
+			// SigV4 joins duplicate header values with "," in the order
+			// they appear on the wire (this matches aws-sdk-go-v2's and
+			// botocore's canonicalization) — NOT sorted. Each individual
+			// value is still trimmed/collapsed per canonicalHeaderValue
+			// before joining.
+			canonVals := make([]string, len(vals))
+			for i, v := range vals {
+				canonVals[i] = canonicalHeaderValue(v)
+			}
+			headerValues[lower] = strings.Join(canonVals, ",")
 		}
 	}
 
