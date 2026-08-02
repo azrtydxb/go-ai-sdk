@@ -148,12 +148,16 @@ func (s *ObjectStream[T]) Err() error { return s.err }
 // Final returns the last valid decode of the complete accumulated stream
 // text (fences stripped, not partialjson-repaired — the finished stream is
 // expected to be complete JSON). Valid only after Partials() has been
-// iterated to completion. Returns a *NoObjectGeneratedError if the
-// accumulated text never decoded successfully, or if Partials() was
-// abandoned (the caller stopped ranging over it) before the stream
-// finished — Final never silently reports a zero-value T as success in
-// that case.
+// iterated to completion. Returns a *NoObjectGeneratedError if: the
+// accumulated text never decoded successfully; Partials() was abandoned
+// (the caller stopped ranging over it) before the stream finished; or
+// Partials() was never called at all. Final never silently reports a
+// zero-value T as success in any of those cases.
 func (s *ObjectStream[T]) Final() (T, error) {
+	if !s.started {
+		var zero T
+		return zero, &NoObjectGeneratedError{Cause: errors.New("ai: stream not consumed")}
+	}
 	return s.final, s.finalErr
 }
 

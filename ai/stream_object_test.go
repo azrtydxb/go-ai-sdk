@@ -150,3 +150,27 @@ func TestStreamObjectFinalAbandoned(t *testing.T) {
 		t.Fatalf("want *NoObjectGeneratedError, got final=%+v err=%v", final, err)
 	}
 }
+
+// TestStreamObjectFinalNeverStarted verifies that calling Final() before
+// Partials() has ever been ranged over reports an error rather than
+// silently returning a zero-value T with a nil error — the same
+// false-success class as abandoning mid-iteration.
+func TestStreamObjectFinalNeverStarted(t *testing.T) {
+	m := &aitest.MockModel{
+		Caps: provider.Capabilities{NativeJSON: true},
+		Streams: [][]provider.StreamPart{{
+			provider.TextDelta{Text: `{"city":"Ghent","temp":21}`},
+			provider.FinishPart{Reason: provider.FinishStop},
+		}},
+	}
+	s, err := StreamObject[forecast](t.Context(), GenerateObjectOpts{Model: m, Prompt: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	final, err := s.Final()
+	var noge *NoObjectGeneratedError
+	if !errors.As(err, &noge) {
+		t.Fatalf("want *NoObjectGeneratedError, got final=%+v err=%v", final, err)
+	}
+}
