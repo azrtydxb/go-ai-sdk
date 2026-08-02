@@ -34,6 +34,10 @@ func (m *languageModel) Capabilities() provider.Capabilities {
 }
 
 func (m *languageModel) doRequest(ctx context.Context, req chatRequest) (*http.Response, error) {
+	if m.cfg.BaseURL == "" {
+		return nil, fmt.Errorf("%s: base URL not configured", m.cfg.Name)
+	}
+
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("openaicompat: marshal request: %w", err)
@@ -45,7 +49,7 @@ func (m *languageModel) doRequest(ctx context.Context, req chatRequest) (*http.R
 		return nil, fmt.Errorf("openaicompat: build request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+m.cfg.APIKey)
+	m.cfg.setAuthHeader(httpReq)
 
 	return m.cfg.client().Do(httpReq)
 }

@@ -109,9 +109,9 @@ type embeddingResponse struct {
 type Server struct {
 	*httptest.Server
 
-	mu          sync.Mutex
-	requests    [][]byte
-	authHeaders []string
+	mu       sync.Mutex
+	requests [][]byte
+	headers  []http.Header
 }
 
 // Requests returns the raw JSON bodies of every chat/embeddings request
@@ -128,18 +128,27 @@ func (s *Server) Requests() [][]byte {
 // chat/embeddings request received so far, in arrival order (one entry per
 // Requests() entry).
 func (s *Server) AuthHeaders() []string {
+	return s.HeaderValues("Authorization")
+}
+
+// HeaderValues returns the named header's value for every chat/embeddings
+// request received so far, in arrival order (one entry per Requests()
+// entry). Missing headers yield "" for that entry.
+func (s *Server) HeaderValues(name string) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]string, len(s.authHeaders))
-	copy(out, s.authHeaders)
+	out := make([]string, len(s.headers))
+	for i, h := range s.headers {
+		out[i] = h.Get(name)
+	}
 	return out
 }
 
-func (s *Server) record(raw []byte, auth string) {
+func (s *Server) record(raw []byte, header http.Header) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.requests = append(s.requests, raw)
-	s.authHeaders = append(s.authHeaders, auth)
+	s.headers = append(s.headers, header)
 }
 
 // readBody reads r's body, reporting via t.Errorf and writing a 500
@@ -204,7 +213,7 @@ func NewFixtureServer(t *testing.T, providerName string) *Server {
 			http.Error(w, msg, 500)
 			return
 		}
-		s.record(raw, r.Header.Get("Authorization"))
+		s.record(raw, r.Header.Clone())
 
 		text := lastUserText(req)
 
@@ -319,7 +328,7 @@ func NewFixtureServer(t *testing.T, providerName string) *Server {
 			http.Error(w, msg, 500)
 			return
 		}
-		s.record(raw, r.Header.Get("Authorization"))
+		s.record(raw, r.Header.Clone())
 
 		data := make([]embeddingData, len(req.Input))
 		total := 0

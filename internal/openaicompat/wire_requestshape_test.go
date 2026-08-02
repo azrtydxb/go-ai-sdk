@@ -262,6 +262,35 @@ func TestRequestShapeMaxTokensParam(t *testing.T) {
 	}
 }
 
+// TestRequestShapeAPIKeyHeader asserts that Config.APIKeyHeader selects the
+// HTTP header used to carry the API key: empty (default) sends
+// "Authorization: Bearer <key>", non-empty sends "<APIKeyHeader>: <key>"
+// (no Bearer prefix) and no Authorization header at all.
+func TestRequestShapeAPIKeyHeader(t *testing.T) {
+	srv := compattest.NewFixtureServer(t, "test")
+	defer srv.Close()
+	model := NewLanguageModel(Config{
+		Name:         "test",
+		APIKey:       "k",
+		BaseURL:      srv.URL,
+		APIKeyHeader: "api-key",
+	}, "test-model")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{provider.UserText("simple")},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	if got := srv.HeaderValues("api-key"); len(got) != 1 || got[0] != "k" {
+		t.Errorf("api-key header = %v, want [k]", got)
+	}
+	if got := srv.HeaderValues("Authorization"); len(got) != 1 || got[0] != "" {
+		t.Errorf("Authorization header = %v, want [\"\"]", got)
+	}
+}
+
 // TestRequestShapeJSONObjectOnly asserts that Config.JSONObjectOnly forces
 // response_format to {"type":"json_object"} even when a Schema is supplied,
 // dropping json_schema/schema entirely (DeepSeek rejects json_schema).

@@ -28,6 +28,10 @@ func (m *embeddingModel) ProviderName() string { return m.cfg.Name }
 func (m *embeddingModel) MaxBatchSize() int    { return m.cfg.EmbedBatch }
 
 func (m *embeddingModel) Embed(ctx context.Context, values []string) (*provider.EmbeddingResponse, error) {
+	if m.cfg.BaseURL == "" {
+		return nil, fmt.Errorf("%s: base URL not configured", m.cfg.Name)
+	}
+
 	reqBody, err := json.Marshal(embeddingRequest{Model: m.modelID, Input: values})
 	if err != nil {
 		return nil, fmt.Errorf("openaicompat: marshal embedding request: %w", err)
@@ -39,7 +43,7 @@ func (m *embeddingModel) Embed(ctx context.Context, values []string) (*provider.
 		return nil, fmt.Errorf("openaicompat: build embedding request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+m.cfg.APIKey)
+	m.cfg.setAuthHeader(httpReq)
 
 	resp, err := m.cfg.client().Do(httpReq)
 	if err != nil {

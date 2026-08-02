@@ -28,6 +28,12 @@ type Config struct {
 	// provided. Set this for providers whose response_format only accepts
 	// json_object (not json_schema) — e.g. DeepSeek.
 	JSONObjectOnly bool
+
+	// APIKeyHeader is the HTTP header used to send the API key. Empty
+	// (default) sends "Authorization: Bearer <APIKey>". Non-empty sends
+	// "<APIKeyHeader>: <APIKey>" instead, with no Bearer prefix and no
+	// Authorization header — e.g. Azure OpenAI's "api-key".
+	APIKeyHeader string
 }
 
 // client returns the configured *http.Client, falling back to
@@ -37,4 +43,13 @@ func (c Config) client() *http.Client {
 		return c.HTTPClient
 	}
 	return http.DefaultClient
+}
+
+// setAuthHeader sets the API key header on req per c.APIKeyHeader.
+func (c Config) setAuthHeader(req *http.Request) {
+	if c.APIKeyHeader != "" {
+		req.Header.Set(c.APIKeyHeader, c.APIKey)
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+c.APIKey)
 }
