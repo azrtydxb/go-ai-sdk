@@ -248,9 +248,10 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 				respContent = append(respContent, tc)
 			}
 			stepResp := &provider.Response{
-				Content:      respContent,
-				FinishReason: finish.Reason,
-				Usage:        finish.Usage,
+				Content:          respContent,
+				FinishReason:     finish.Reason,
+				Usage:            finish.Usage,
+				ProviderMetadata: finish.ProviderMetadata,
 			}
 
 			step := Step{

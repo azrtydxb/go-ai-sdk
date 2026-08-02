@@ -454,14 +454,30 @@ itself, `provider/message.go`):
 
 `provider.Response` gained `ProviderMetadata map[string]any` — the response
 analog of `Call.ProviderOptions`, namespaced by provider name, `nil` when a
-provider has nothing to report. Two providers populate it in this wave:
+provider has nothing to report. `provider.FinishPart` (the streaming
+terminal part) gained the same field, so the two `LanguageModel` methods
+stay symmetric: `Generate` returns it directly on the `*Response`; `Stream`
+surfaces it on the `FinishPart` observed at the end of `Parts()` iteration.
+`ai/stream_text.go`'s per-step `Response` assembly copies
+`FinishPart.ProviderMetadata` straight into the synthesized `stepResp`, so
+`ai.Step.Response.ProviderMetadata` (and therefore
+`result.Steps[i].Response.ProviderMetadata` after either `GenerateText` or
+`StreamText`) behaves identically regardless of which API produced the
+step. Two providers populate it in this wave, on both the `Generate` and
+`Stream` paths:
 
 - `anthropic`: `ProviderMetadata["anthropic"]["cache_creation_input_tokens"]`
-  when the Messages API usage block reports a non-zero
-  `cache_creation_input_tokens` (tokens newly written to the prompt cache,
-  as opposed to `Usage.CachedInputTokens`, which tracks cache *reads*).
+  when the usage block reports a non-zero `cache_creation_input_tokens`
+  (tokens newly written to the prompt cache, as opposed to
+  `Usage.CachedInputTokens`, which tracks cache *reads*) — on `Generate`,
+  from the non-streaming response's `usage`; on `Stream`, from the
+  `message_start` event's `usage` (the only place Anthropic's SSE stream
+  reports it).
 - `openaicompat` (every preset built on it): `ProviderMetadata["<cfg.Name>"]["system_fingerprint"]`
-  when the response carries a non-empty `system_fingerprint`.
+  when a non-empty `system_fingerprint` is present — on `Generate`, from the
+  response body; on `Stream`, from the first chunk that carries a non-empty
+  `system_fingerprint` (captured once; first non-empty wins, since later
+  chunks in practice repeat or omit it).
 
 ### Remaining gaps (explicitly out of scope)
 

@@ -215,7 +215,9 @@ Package `mcp` is a client for [MCP](https://modelcontextprotocol.io) servers,
 letting `GenerateText`/`StreamText` call tools an external process exposes.
 `mcp.NewClient(transport)` wraps either transport — `mcp.NewStdioTransport(cmd
 []string, env []string)` launches a child process and speaks
-newline-delimited JSON-RPC over its stdin/stdout, or
+newline-delimited JSON-RPC over its stdin/stdout (the child's stderr is
+passed through to this process's os.Stderr, so a misbehaving server's
+diagnostics aren't silently swallowed), or
 `mcp.NewStreamableHTTPTransport(url string, headers map[string]string)`
 speaks the MCP Streamable HTTP transport — then `Client.Initialize(ctx)`
 performs the handshake. `mcp.Tools(ctx, client)` lists the server's tools and

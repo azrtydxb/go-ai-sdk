@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/azrtydxb/go-ai-sdk/ai/aitest"
@@ -162,7 +163,7 @@ func TestExtractReasoningMiddleware_Stream(t *testing.T) {
 		t.Fatalf("parts = %#v, want %#v", parts, want)
 	}
 	for i := range want {
-		if parts[i] != want[i] {
+		if !reflect.DeepEqual(parts[i], want[i]) {
 			t.Errorf("parts[%d] = %#v, want %#v", i, parts[i], want[i])
 		}
 	}
@@ -200,7 +201,7 @@ func TestExtractReasoningMiddleware_Stream_TagSplitAcrossDeltas(t *testing.T) {
 		t.Fatalf("parts = %#v, want %#v", parts, want)
 	}
 	for i := range want {
-		if parts[i] != want[i] {
+		if !reflect.DeepEqual(parts[i], want[i]) {
 			t.Errorf("parts[%d] = %#v, want %#v", i, parts[i], want[i])
 		}
 	}
@@ -246,7 +247,7 @@ func TestExtractReasoningMiddleware_Stream_OrphanCloseTagIsInert(t *testing.T) {
 		t.Fatalf("parts = %#v, want %#v", parts, want)
 	}
 	for i := range want {
-		if parts[i] != want[i] {
+		if !reflect.DeepEqual(parts[i], want[i]) {
 			t.Errorf("parts[%d] = %#v, want %#v", i, parts[i], want[i])
 		}
 	}
@@ -287,7 +288,7 @@ func TestExtractReasoningMiddleware_Stream_StartWithReasoningIncremental(t *test
 		t.Fatalf("parts = %#v, want %#v", parts, want)
 	}
 	for i := range want {
-		if parts[i] != want[i] {
+		if !reflect.DeepEqual(parts[i], want[i]) {
 			t.Errorf("parts[%d] = %#v, want %#v", i, parts[i], want[i])
 		}
 	}
@@ -333,7 +334,7 @@ func TestExtractReasoningMiddleware_Stream_NoTag(t *testing.T) {
 		t.Fatalf("parts = %#v, want %#v", parts, want)
 	}
 	for i := range want {
-		if parts[i] != want[i] {
+		if !reflect.DeepEqual(parts[i], want[i]) {
 			t.Errorf("parts[%d] = %#v, want %#v", i, parts[i], want[i])
 		}
 	}
@@ -408,7 +409,7 @@ func TestSimulateStreamingMiddleware_ReplaysToolCallResponse(t *testing.T) {
 			}
 			continue
 		}
-		if parts[i] != want[i] {
+		if !reflect.DeepEqual(parts[i], want[i]) {
 			t.Errorf("parts[%d] = %#v, want %#v", i, parts[i], want[i])
 		}
 	}

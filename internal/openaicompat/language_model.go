@@ -111,7 +111,7 @@ func (m *languageModel) Stream(ctx context.Context, call provider.Call) (provide
 		return nil, apiError(resp, body)
 	}
 
-	return &streamResponse{body: resp.Body}, nil
+	return &streamResponse{body: resp.Body, providerName: m.cfg.Name}, nil
 }
 
 // ---- Streaming ----
@@ -123,10 +123,11 @@ type toolCallAccumulator struct {
 }
 
 type streamResponse struct {
-	body   io.ReadCloser
-	err    error
-	used   bool
-	closed bool
+	body         io.ReadCloser
+	providerName string
+	err          error
+	used         bool
+	closed       bool
 }
 
 func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
@@ -141,6 +142,7 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 		var finishReason provider.FinishReason
 		haveFinish := false
 		var usage provider.Usage
+		var systemFingerprint string
 
 		for ev, err := range sse.Scan(s.body) {
 			if err != nil {
@@ -157,7 +159,7 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 				if !haveFinish {
 					reason = provider.FinishOther
 				}
-				if !yield(provider.FinishPart{Reason: reason, Usage: usage}) {
+				if !yield(provider.FinishPart{Reason: reason, Usage: usage, ProviderMetadata: s.fingerprintMetadata(systemFingerprint)}) {
 					return
 				}
 				return
@@ -167,6 +169,9 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 				s.err = fmt.Errorf("openaicompat: decode stream chunk: %w", err)
 				return
+			}
+			if systemFingerprint == "" && chunk.SystemFingerprint != "" {
+				systemFingerprint = chunk.SystemFingerprint
 			}
 
 			if len(chunk.Choices) > 0 {
@@ -256,12 +261,28 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 		// "exactly ONE FinishPart" contract (zero is preferable to a
 		// fabricated one here).
 		if haveFinish {
-			if !yield(provider.FinishPart{Reason: finishReason, Usage: usage}) {
+			if !yield(provider.FinishPart{Reason: finishReason, Usage: usage, ProviderMetadata: s.fingerprintMetadata(systemFingerprint)}) {
 				return
 			}
 			return
 		}
 		s.err = errors.New("openaicompat: stream ended unexpectedly without [DONE]")
+	}
+}
+
+// fingerprintMetadata returns the ProviderMetadata map for a streamed
+// FinishPart when fp (the first non-empty system_fingerprint observed
+// across the stream's chunks) is non-empty, or nil otherwise — the
+// streaming analogue of convertResponse's non-streaming ProviderMetadata
+// population.
+func (s *streamResponse) fingerprintMetadata(fp string) map[string]any {
+	if fp == "" {
+		return nil
+	}
+	return map[string]any{
+		s.providerName: map[string]any{
+			"system_fingerprint": fp,
+		},
 	}
 }
 

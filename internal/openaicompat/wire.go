@@ -176,6 +176,10 @@ type wireCompletionTokensDetails struct {
 type chatStreamChunk struct {
 	Choices []chatStreamChoice `json:"choices"`
 	Usage   *wireUsage         `json:"usage"`
+	// SystemFingerprint mirrors chatResponse.SystemFingerprint on the
+	// streaming path; captured once (first non-empty chunk wins) and
+	// surfaced via FinishPart.ProviderMetadata.
+	SystemFingerprint string `json:"system_fingerprint,omitempty"`
 }
 
 type chatStreamChoice struct {

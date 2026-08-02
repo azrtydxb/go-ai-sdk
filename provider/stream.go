@@ -53,6 +53,12 @@ func (SourceEvent) isStreamPart() {}
 type FinishPart struct {
 	Reason FinishReason
 	Usage  Usage
+
+	// ProviderMetadata carries provider-specific response data that has no
+	// home in the fields above, namespaced by provider name — the streaming
+	// analogue of Response.ProviderMetadata (same convention as
+	// Call.ProviderOptions). nil when the provider has nothing to report.
+	ProviderMetadata map[string]any
 }
 
 func (FinishPart) isStreamPart() {}

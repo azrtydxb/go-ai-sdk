@@ -151,6 +151,7 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 		var stopReason string
 		haveStopReason := false
 		sawMessageStop := false
+		var cacheCreationInputTokens int
 
 		for ev, err := range sse.Scan(s.body) {
 			if err != nil {
@@ -174,6 +175,7 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 					usage.InputTokens = e.Message.Usage.InputTokens
 					usage.CachedInputTokens = e.Message.Usage.CacheReadInputTokens
 					usage.TotalTokens = usage.InputTokens + usage.OutputTokens
+					cacheCreationInputTokens = e.Message.Usage.CacheCreationInputTokens
 				}
 
 			case "content_block_start":
@@ -297,7 +299,7 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 				if haveStopReason {
 					reason = mapStopReason(stopReason)
 				}
-				if !yield(provider.FinishPart{Reason: reason, Usage: usage}) {
+				if !yield(provider.FinishPart{Reason: reason, Usage: usage, ProviderMetadata: cacheCreationMetadata(cacheCreationInputTokens)}) {
 					return
 				}
 				return
@@ -327,12 +329,27 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 		// truncated mid-response: no FinishPart is emitted and Err()
 		// reports it instead, per the "exactly ONE FinishPart" contract.
 		if haveStopReason {
-			if !yield(provider.FinishPart{Reason: mapStopReason(stopReason), Usage: usage}) {
+			if !yield(provider.FinishPart{Reason: mapStopReason(stopReason), Usage: usage, ProviderMetadata: cacheCreationMetadata(cacheCreationInputTokens)}) {
 				return
 			}
 			return
 		}
 		s.err = errors.New("anthropic: stream ended unexpectedly without message_stop")
+	}
+}
+
+// cacheCreationMetadata returns the ProviderMetadata map for a streamed
+// FinishPart when n (cache_creation_input_tokens, observed on message_start)
+// is non-zero, or nil otherwise — the streaming analogue of convertResponse's
+// non-streaming ProviderMetadata population.
+func cacheCreationMetadata(n int) map[string]any {
+	if n == 0 {
+		return nil
+	}
+	return map[string]any{
+		"anthropic": map[string]any{
+			"cache_creation_input_tokens": n,
+		},
 	}
 }
 
