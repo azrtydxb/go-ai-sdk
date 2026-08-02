@@ -96,7 +96,7 @@ func (m *embeddingModel) Embed(ctx context.Context, values []string) (*provider.
 	return m.EmbedCall(ctx, provider.EmbeddingCall{Values: values})
 }
 
-// EmbedCall implements provider.EmbeddingModelV2. ProviderOptions are
+// EmbedCall implements provider.EmbeddingModelWithOptions. ProviderOptions are
 // merged under the "vertex" key (see provider.Call.ProviderOptions for the
 // merge semantics).
 func (m *embeddingModel) EmbedCall(ctx context.Context, call provider.EmbeddingCall) (*provider.EmbeddingResponse, error) {

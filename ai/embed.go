@@ -20,7 +20,7 @@ type EmbedOpts struct {
 
 	// ProviderOptions follows provider.Call.ProviderOptions' merge
 	// semantics. It only has an effect when Model implements
-	// provider.EmbeddingModelV2; it is silently ignored otherwise.
+	// provider.EmbeddingModelWithOptions; it is silently ignored otherwise.
 	ProviderOptions map[string]any
 }
 
@@ -71,16 +71,16 @@ type EmbedManyOpts struct {
 
 	// ProviderOptions follows provider.Call.ProviderOptions' merge
 	// semantics. It only has an effect when Model implements
-	// provider.EmbeddingModelV2; it is silently ignored otherwise.
+	// provider.EmbeddingModelWithOptions; it is silently ignored otherwise.
 	ProviderOptions map[string]any
 }
 
 // embedCall calls model.Embed, or model.EmbedCall (with providerOptions)
-// when model implements provider.EmbeddingModelV2 and providerOptions is
+// when model implements provider.EmbeddingModelWithOptions and providerOptions is
 // non-empty.
 func embedCall(ctx context.Context, model provider.EmbeddingModel, values []string, providerOptions map[string]any) (*provider.EmbeddingResponse, error) {
 	if len(providerOptions) > 0 {
-		if m2, ok := model.(provider.EmbeddingModelV2); ok {
+		if m2, ok := model.(provider.EmbeddingModelWithOptions); ok {
 			return m2.EmbedCall(ctx, provider.EmbeddingCall{Values: values, ProviderOptions: providerOptions})
 		}
 	}

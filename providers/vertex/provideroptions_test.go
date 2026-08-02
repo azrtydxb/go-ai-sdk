@@ -34,9 +34,9 @@ func TestEmbeddingProviderOptionsOverridesAndPassthrough(t *testing.T) {
 	)
 	model := p.EmbeddingModel("text-embedding-test")
 
-	m2, ok := model.(provider.EmbeddingModelV2)
+	m2, ok := model.(provider.EmbeddingModelWithOptions)
 	if !ok {
-		t.Fatalf("vertex embeddingModel does not implement provider.EmbeddingModelV2")
+		t.Fatalf("vertex embeddingModel does not implement provider.EmbeddingModelWithOptions")
 	}
 
 	_, err := m2.EmbedCall(context.Background(), provider.EmbeddingCall{

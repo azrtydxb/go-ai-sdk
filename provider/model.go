@@ -26,7 +26,7 @@ type EmbeddingModel interface {
 	ProviderName() string
 }
 
-// EmbeddingCall is the input to EmbeddingModelV2.EmbedCall.
+// EmbeddingCall is the input to EmbeddingModelWithOptions.EmbedCall.
 type EmbeddingCall struct {
 	Values []string
 
@@ -36,13 +36,13 @@ type EmbeddingCall struct {
 	ProviderOptions map[string]any
 }
 
-// EmbeddingModelV2 is an optional extension of EmbeddingModel implemented by
+// EmbeddingModelWithOptions is an optional extension of EmbeddingModel implemented by
 // embedding models that support per-call ProviderOptions. It exists as a
 // separate interface (rather than changing EmbeddingModel.Embed's signature)
 // to keep the change additive; callers that want ProviderOptions support
 // should type-assert to this interface, falling back to plain Embed when a
 // model doesn't implement it.
-type EmbeddingModelV2 interface {
+type EmbeddingModelWithOptions interface {
 	EmbeddingModel
 	EmbedCall(ctx context.Context, call EmbeddingCall) (*EmbeddingResponse, error)
 }

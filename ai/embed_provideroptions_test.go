@@ -1,7 +1,7 @@
 package ai
 
 // Tests that Embed/EmbedMany thread EmbedOpts.ProviderOptions through to
-// provider.EmbeddingModelV2.EmbedCall when the model implements it, and
+// provider.EmbeddingModelWithOptions.EmbedCall when the model implements it, and
 // fall back to plain Embed (silently ignoring ProviderOptions) otherwise.
 
 import (
@@ -12,7 +12,7 @@ import (
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
-// v2MockEmbedder is a provider.EmbeddingModelV2 test double that records
+// v2MockEmbedder is a provider.EmbeddingModelWithOptions test double that records
 // the ProviderOptions passed to each EmbedCall.
 type v2MockEmbedder struct {
 	aitest.MockEmbedder
@@ -62,7 +62,7 @@ func TestEmbedFallsBackToPlainEmbedForNonV2Model(t *testing.T) {
 	m := &aitest.MockEmbedder{}
 	opts := map[string]any{"mock": map[string]any{"k": "v"}}
 
-	// aitest.MockEmbedder does not implement provider.EmbeddingModelV2;
+	// aitest.MockEmbedder does not implement provider.EmbeddingModelWithOptions;
 	// Embed must fall back to plain Embed (values still work; the
 	// ProviderOptions have no effect but must not error or panic).
 	res, err := Embed(t.Context(), EmbedOpts{Model: m, Value: "abc", ProviderOptions: opts})

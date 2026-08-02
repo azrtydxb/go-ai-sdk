@@ -210,9 +210,9 @@ func TestEmbeddingProviderOptionsOverridesAndPassthrough(t *testing.T) {
 	srv := compattest.NewFixtureServer(t, "test")
 	model := NewEmbeddingModel(Config{Name: "test", APIKey: "k", BaseURL: srv.URL, EmbedBatch: 100}, "text-embedding-3-small")
 
-	m2, ok := model.(provider.EmbeddingModelV2)
+	m2, ok := model.(provider.EmbeddingModelWithOptions)
 	if !ok {
-		t.Fatalf("openaicompat embeddingModel does not implement provider.EmbeddingModelV2")
+		t.Fatalf("openaicompat embeddingModel does not implement provider.EmbeddingModelWithOptions")
 	}
 
 	_, err := m2.EmbedCall(context.Background(), provider.EmbeddingCall{
