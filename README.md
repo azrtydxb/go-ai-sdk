@@ -108,6 +108,17 @@ result, err := ai.GenerateText(ctx, ai.GenerateTextOpts{
 })
 ```
 
+**These keys are the provider's raw wire fields, not Vercel AI SDK option
+names.** Each entry is merged verbatim into the JSON request body this SDK
+sends, using the field names the provider's HTTP API actually expects
+(typically `snake_case`) — not the typed, camelCase option names Vercel's AI
+SDK exposes for the same setting. There is no name translation layer: a
+camelCase key from a Vercel example is not recognized by the provider and
+goes out as an unknown field, silently ignored (or rejected) by the API. For
+example, Vercel's `anthropic.reasoningEffort` corresponds here to
+`ProviderOptions: map[string]any{"anthropic": map[string]any{"reasoning_effort": ...}}`
+— the wire field name, not the SDK option name.
+
 ### Reasoning / extended thinking
 
 Reasoning ("thinking") content surfaces uniformly as `provider.ReasoningPart`
@@ -180,7 +191,7 @@ result, err := ai.GenerateText(ctx, ai.GenerateTextOpts{
 evenly-sized pieces (word or line granularity) for a steadier UI cadence:
 
 ```go
-for part := range ai.SmoothStream(stream.Parts(), ai.SmoothOpts{Chunking: "word"}) {
+for part := range ai.SmoothStream(stream.Parts(), ai.SmoothOpts{Chunking: ai.ChunkingWord}) {
 	// ...
 }
 ```
