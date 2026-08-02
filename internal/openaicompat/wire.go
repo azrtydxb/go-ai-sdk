@@ -4,7 +4,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"mime"
 	"mime/multipart"
+	"strings"
 
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -389,6 +391,19 @@ func textContent(parts []provider.ContentPart) string {
 	return s
 }
 
+// isPDFMediaType reports whether mediaType names application/pdf, ignoring
+// case and any parameters (e.g. "Application/PDF" or
+// "application/pdf; name=x" both match) — mirrors how MIME type matching is
+// expected to behave per RFC 2045 rather than a strict string comparison
+// against the exact wire value.
+func isPDFMediaType(mediaType string) bool {
+	base, _, err := mime.ParseMediaType(mediaType)
+	if err != nil {
+		return strings.EqualFold(mediaType, "application/pdf")
+	}
+	return strings.EqualFold(base, "application/pdf")
+}
+
 // userContent builds the content field for a user message. Text-only
 // messages are sent as a plain JSON string; mixed content (images, or
 // multiple parts) is sent as a parts array.
@@ -421,7 +436,7 @@ func userContent(parts []provider.ContentPart) (json.RawMessage, error) {
 			}
 			wireParts = append(wireParts, wireContentPart{Type: "image_url", ImageURL: &wireImageURL{URL: url}})
 		case provider.FilePart:
-			if p.MediaType != "application/pdf" {
+			if !isPDFMediaType(p.MediaType) {
 				return nil, fmt.Errorf("openaicompat: unsupported content part %T with media type %q in user message (only application/pdf is supported)", part, p.MediaType)
 			}
 			filename := p.Filename

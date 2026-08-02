@@ -486,6 +486,9 @@ func TestRequestShapeUserMessageFilePartPDF(t *testing.T) {
 	if doc.Type != "document" {
 		t.Errorf("block.Type = %q, want document", doc.Type)
 	}
+	if doc.Title != "report.pdf" {
+		t.Errorf("block.Title = %q, want the FilePart's Filename %q", doc.Title, "report.pdf")
+	}
 	if doc.Source == nil {
 		t.Fatalf("block.Source = nil, want set")
 	}
@@ -498,6 +501,64 @@ func TestRequestShapeUserMessageFilePartPDF(t *testing.T) {
 	wantData := base64.StdEncoding.EncodeToString(pdfData)
 	if doc.Source.Data != wantData {
 		t.Errorf("Source.Data = %q, want %q", doc.Source.Data, wantData)
+	}
+}
+
+// TestRequestShapeUserMessageFilePartNoTitleWhenFilenameEmpty verifies the
+// document block's title is omitted (not sent as an empty string) when the
+// FilePart carries no Filename.
+func TestRequestShapeUserMessageFilePartNoTitleWhenFilenameEmpty(t *testing.T) {
+	srv, fs := newFixtureServer(t)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			{
+				Role: provider.RoleUser,
+				Content: []provider.ContentPart{
+					provider.TextPart{Text: "simple"},
+					provider.FilePart{Data: []byte("data"), MediaType: "application/pdf"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if got := fs.lastRequest.Messages[0].Content[1].Title; got != "" {
+		t.Errorf("block.Title = %q, want empty when Filename is unset", got)
+	}
+}
+
+// TestRequestShapeUserMessageFilePartMediaTypeMatchingIsLenient verifies PDF
+// media-type matching ignores case and strips MIME parameters (via
+// mime.ParseMediaType), per RFC 2045, rather than requiring an exact
+// "application/pdf" string match.
+func TestRequestShapeUserMessageFilePartMediaTypeMatchingIsLenient(t *testing.T) {
+	for _, mediaType := range []string{"Application/PDF", "application/pdf; name=x"} {
+		t.Run(mediaType, func(t *testing.T) {
+			srv, fs := newFixtureServer(t)
+			model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
+
+			_, err := model.Generate(context.Background(), provider.Call{
+				Messages: []provider.Message{
+					{
+						Role: provider.RoleUser,
+						Content: []provider.ContentPart{
+							provider.TextPart{Text: "simple"},
+							provider.FilePart{Data: []byte("data"), MediaType: mediaType},
+						},
+					},
+				},
+			})
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			blocks := fs.lastRequest.Messages[0].Content
+			if len(blocks) != 2 || blocks[1].Type != "document" {
+				t.Fatalf("blocks = %+v, want a text block followed by a document block", blocks)
+			}
+		})
 	}
 }
 

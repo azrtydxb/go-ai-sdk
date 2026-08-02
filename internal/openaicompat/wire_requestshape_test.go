@@ -165,6 +165,46 @@ func TestRequestShapeUserMessageFilePartDefaultFilename(t *testing.T) {
 	}
 }
 
+// TestRequestShapeUserMessageFilePartMediaTypeMatchingIsLenient verifies PDF
+// media-type matching ignores case and strips MIME parameters (via
+// mime.ParseMediaType), per RFC 2045, rather than requiring an exact
+// "application/pdf" string match.
+func TestRequestShapeUserMessageFilePartMediaTypeMatchingIsLenient(t *testing.T) {
+	for _, mediaType := range []string{"Application/PDF", "application/pdf; name=x"} {
+		t.Run(mediaType, func(t *testing.T) {
+			model, srv := newTestLanguageModel(t)
+
+			_, err := model.Generate(context.Background(), provider.Call{
+				Messages: []provider.Message{
+					provider.UserText("simple"),
+					{
+						Role: provider.RoleUser,
+						Content: []provider.ContentPart{
+							provider.TextPart{Text: "also text"},
+							provider.FilePart{Data: []byte("data"), MediaType: mediaType},
+						},
+					},
+				},
+			})
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+
+			var req chatRequest
+			if err := json.Unmarshal(lastRawBody(srv), &req); err != nil {
+				t.Fatalf("decode request: %v", err)
+			}
+			var parts []wireContentPart
+			if err := json.Unmarshal(req.Messages[1].Content, &parts); err != nil {
+				t.Fatalf("decode content parts: %v", err)
+			}
+			if len(parts) != 2 || parts[1].Type != "file" || parts[1].File == nil {
+				t.Fatalf("parts = %+v, want a text part followed by a file part", parts)
+			}
+		})
+	}
+}
+
 func TestRequestShapeUserMessageFilePartNonPDFErrors(t *testing.T) {
 	model, _ := newTestLanguageModel(t)
 

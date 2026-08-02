@@ -34,15 +34,26 @@ func (ImagePart) isContentPart() {}
 // (assistant-message FilePart is rejected by every provider).
 //
 // Support matrix:
-//   - anthropic: application/pdf only, sent as a "document" content block.
+//   - anthropic: application/pdf only, sent as a "document" content block
+//     (Filename, if set, becomes the block's title).
 //   - google, vertex (geminicompat): any MediaType, sent inline via
 //     inlineData (Gemini accepts PDFs, audio, and video inline).
 //   - openai and OpenAI-compatible providers (openaicompat): application/pdf
 //     only, sent as a "file" content part with a data: URL. Only OpenAI
 //     itself is known to accept this; other OpenAI-compatible servers may
 //     reject it — passthrough is correct behavior.
-//   - all other providers (cohere, mistral, bedrock, ...): unsupported;
-//     return a descriptive error.
+//   - bedrock: a fixed set of document formats recognized from MediaType
+//     (application/pdf, text/csv, text/html, text/plain, text/markdown,
+//     application/msword, the Office Open XML Word/Excel types), sent as a
+//     Converse "document" content block; any other MediaType is rejected.
+//   - all other providers (cohere, mistral, ...): unsupported; return a
+//     descriptive error.
+//
+// Where a provider is documented as matching a specific MediaType (e.g.
+// anthropic and openaicompat's application/pdf), the match is
+// case-insensitive and ignores any MIME parameters (via
+// mime.ParseMediaType) — "Application/PDF" and "application/pdf; name=x"
+// both match "application/pdf".
 type FilePart struct {
 	Data      []byte
 	MediaType string

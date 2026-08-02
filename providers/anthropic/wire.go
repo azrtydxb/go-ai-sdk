@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"mime"
 	"strings"
 
 	"github.com/azrtydxb/go-ai-sdk/provider"
@@ -39,6 +40,9 @@ type wireContentBlock struct {
 	ID    string          `json:"id,omitempty"`
 	Name  string          `json:"name,omitempty"`
 	Input json.RawMessage `json:"input,omitempty"`
+
+	// document
+	Title string `json:"title,omitempty"`
 
 	// tool_result
 	ToolUseID string `json:"tool_use_id,omitempty"`
@@ -282,6 +286,19 @@ func textContent(parts []provider.ContentPart) string {
 	return s
 }
 
+// isPDFMediaType reports whether mediaType names application/pdf, ignoring
+// case and any parameters (e.g. "Application/PDF" or
+// "application/pdf; charset=binary" both match) — mirrors how MIME type
+// matching is expected to behave per RFC 2045 rather than a strict string
+// comparison against the exact wire value.
+func isPDFMediaType(mediaType string) bool {
+	base, _, err := mime.ParseMediaType(mediaType)
+	if err != nil {
+		return strings.EqualFold(mediaType, "application/pdf")
+	}
+	return strings.EqualFold(base, "application/pdf")
+}
+
 func userBlocks(parts []provider.ContentPart) ([]wireContentBlock, error) {
 	var out []wireContentBlock
 	for _, part := range parts {
@@ -305,11 +322,12 @@ func userBlocks(parts []provider.ContentPart) ([]wireContentBlock, error) {
 			}
 			out = append(out, block)
 		case provider.FilePart:
-			if p.MediaType != "application/pdf" {
+			if !isPDFMediaType(p.MediaType) {
 				return nil, fmt.Errorf("anthropic: unsupported content part %T with media type %q in user message (only application/pdf is supported)", part, p.MediaType)
 			}
 			out = append(out, wireContentBlock{
-				Type: "document",
+				Type:  "document",
+				Title: p.Filename,
 				Source: &wireImageSource{
 					Type:      "base64",
 					MediaType: "application/pdf",
