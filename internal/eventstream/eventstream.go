@@ -10,8 +10,13 @@
 //
 //	[1B name length][name][1B value type][2B value length][value]
 //
-// Only string-typed header values (type 7) are decoded; other header value
-// types are skipped. CRC32 uses the IEEE polynomial.
+// Only string-typed header values (type 7) are decoded into Message.Headers.
+// Other header value types (0=bool-true, 1=bool-false, 2=byte, 3=int16,
+// 4=int32, 5=int64, 6=byte-array, 8=timestamp, 9=uuid) are recognized,
+// their payload bytes are read and discarded (skipped) using each type's
+// known or length-prefixed size, and parsing continues with the next
+// header — they do not appear in Message.Headers and do not desync the
+// parse of subsequent headers or frames. CRC32 uses the IEEE polynomial.
 package eventstream
 
 import (
@@ -117,6 +122,23 @@ func readMessage(r io.Reader) (Message, error) {
 	return Message{Headers: headers, Payload: payload}, nil
 }
 
+// Header value types, per the AWS event stream spec. Only type 7 (string)
+// is decoded into Message.Headers; the others are recognized only so their
+// payload length can be computed and skipped without desyncing the parse
+// of subsequent headers/frames.
+const (
+	headerTypeBoolTrue  = 0 // no payload
+	headerTypeBoolFalse = 1 // no payload
+	headerTypeByte      = 2 // 1 byte
+	headerTypeInt16     = 3 // 2 bytes
+	headerTypeInt32     = 4 // 4 bytes
+	headerTypeInt64     = 5 // 8 bytes
+	headerTypeByteArray = 6 // 2-byte length prefix
+	// headerTypeStr = 7 (declared above; 2-byte length prefix)
+	headerTypeTimestamp = 8 // 8 bytes
+	headerTypeUUID      = 9 // 16 bytes
+)
+
 func parseHeaders(b []byte) (map[string]string, error) {
 	headers := map[string]string{}
 	for len(b) > 0 {
@@ -134,7 +156,11 @@ func parseHeaders(b []byte) (map[string]string, error) {
 		b = b[1:]
 
 		switch valType {
-		case headerTypeStr:
+		case headerTypeStr, headerTypeByteArray:
+			// Both string and byte-array values share a 2-byte length
+			// prefix; only string (7) is surfaced in Message.Headers, but
+			// byte-array (6) must still be length-decoded and skipped so
+			// the parse doesn't desync.
 			if len(b) < 2 {
 				return nil, fmt.Errorf("eventstream: truncated header value length")
 			}
@@ -143,14 +169,46 @@ func parseHeaders(b []byte) (map[string]string, error) {
 			if len(b) < valLen {
 				return nil, fmt.Errorf("eventstream: truncated header value")
 			}
-			headers[name] = string(b[:valLen])
+			if valType == headerTypeStr {
+				headers[name] = string(b[:valLen])
+			}
 			b = b[valLen:]
+
+		case headerTypeBoolTrue, headerTypeBoolFalse:
+			// No payload bytes to skip.
+
+		case headerTypeByte:
+			if len(b) < 1 {
+				return nil, fmt.Errorf("eventstream: truncated header value (byte)")
+			}
+			b = b[1:]
+
+		case headerTypeInt16:
+			if len(b) < 2 {
+				return nil, fmt.Errorf("eventstream: truncated header value (int16)")
+			}
+			b = b[2:]
+
+		case headerTypeInt32:
+			if len(b) < 4 {
+				return nil, fmt.Errorf("eventstream: truncated header value (int32)")
+			}
+			b = b[4:]
+
+		case headerTypeInt64, headerTypeTimestamp:
+			if len(b) < 8 {
+				return nil, fmt.Errorf("eventstream: truncated header value (int64/timestamp)")
+			}
+			b = b[8:]
+
+		case headerTypeUUID:
+			if len(b) < 16 {
+				return nil, fmt.Errorf("eventstream: truncated header value (uuid)")
+			}
+			b = b[16:]
+
 		default:
-			// Skip non-string header values; we don't know their encoded
-			// length ahead of time for most types, so treat any header
-			// stream containing them as unsupported for this minimal
-			// reader.
-			return nil, fmt.Errorf("eventstream: unsupported header value type %d for header %q", valType, name)
+			return nil, fmt.Errorf("eventstream: unknown header value type %d for header %q", valType, name)
 		}
 	}
 	return headers, nil

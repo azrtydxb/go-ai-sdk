@@ -225,3 +225,110 @@ func TestSign_QueryStringSortedAndEncoded(t *testing.T) {
 		t.Errorf("signatures differ for reordered but equivalent query strings:\n%q\n%q", req.Header.Get("Authorization"), req2.Header.Get("Authorization"))
 	}
 }
+
+// TestSign_DoubleEncodesReservedPathCharacters is the classic SigV4
+// "double-encoding" case: for all services other than S3, the canonical URI
+// must be the *already-escaped* wire path with each segment URI-encoded
+// AGAIN, so a literal ':' that is already percent-encoded once (%3A) on the
+// wire becomes %253A in the canonical request (the '%' from the first
+// encoding gets escaped to %25 by the second pass). Bedrock model IDs
+// routinely contain ':' (e.g. "anthropic.claude-3:1"), so getting this
+// wrong breaks every Bedrock request whose model ID isn't colon-free.
+//
+// The request path below is built with the colon already percent-encoded
+// (%3A), mirroring what providers/bedrock's escapeModelID produces and what
+// actually goes out on the wire (net/url's default path escaping leaves ':'
+// unescaped, so callers must pre-encode it themselves). The reference
+// computation independently re-derives the doubly-encoded canonical URI,
+// the canonical request hash, the string-to-sign, and the final signature,
+// and checks Sign's Authorization header against it.
+func TestSign_DoubleEncodesReservedPathCharacters(t *testing.T) {
+	const (
+		accessKey = "AKIDEXAMPLE"
+		secretKey = "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY"
+		region    = "us-east-1"
+		service   = "bedrock"
+		host      = "bedrock-runtime.us-east-1.amazonaws.com"
+		// The colon is pre-escaped to %3A, as providers/bedrock's
+		// escapeModelID does for Bedrock model IDs.
+		wirePath = "/model/anthropic.claude-3%3A1/converse"
+		// Per SigV4's double-encoding rule, the canonical URI re-encodes the
+		// already-escaped path: '%' (from %3A) itself becomes %25, so %3A
+		// becomes %253A in the canonical request.
+		wantCanonicalURI = "/model/anthropic.claude-3%253A1/converse"
+	)
+	now := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
+	amzDate := "20240601T000000Z"
+	dateStamp := "20240601"
+
+	body := []byte(`{"messages":[]}`)
+	payloadHash := sha256Hex(string(body))
+
+	req, err := http.NewRequest(http.MethodPost, "https://"+host+wirePath, strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	// Sanity check on the premise: Go's URL parsing must actually preserve
+	// the pre-escaped ':' as %3A (not silently unescape it) for this test
+	// to be meaningful.
+	if got := req.URL.EscapedPath(); got != wirePath {
+		t.Fatalf("premise check: req.URL.EscapedPath() = %q, want %q (unescaped)", got, wirePath)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	creds := Credentials{AccessKeyID: accessKey, SecretAccessKey: secretKey}
+	if err := Sign(req, body, creds, region, service, now); err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+
+	// Independently recompute the whole chain, starting from the expected
+	// doubly-encoded canonical URI.
+	headerNames := []string{"content-type", "host", "x-amz-content-sha256", "x-amz-date"}
+	headerValues := map[string]string{
+		"content-type":         "application/json",
+		"host":                 host,
+		"x-amz-content-sha256": payloadHash,
+		"x-amz-date":           amzDate,
+	}
+	var canonicalHeaders strings.Builder
+	for _, n := range headerNames {
+		canonicalHeaders.WriteString(n)
+		canonicalHeaders.WriteByte(':')
+		canonicalHeaders.WriteString(headerValues[n])
+		canonicalHeaders.WriteByte('\n')
+	}
+	signedHeaders := strings.Join(headerNames, ";")
+
+	canonicalRequest := strings.Join([]string{
+		http.MethodPost,
+		wantCanonicalURI,
+		"",
+		canonicalHeaders.String(),
+		signedHeaders,
+		payloadHash,
+	}, "\n")
+	hashedCanonical := sha256Hex(canonicalRequest)
+
+	credentialScope := dateStamp + "/" + region + "/" + service + "/aws4_request"
+	stringToSign := strings.Join([]string{
+		"AWS4-HMAC-SHA256",
+		amzDate,
+		credentialScope,
+		hashedCanonical,
+	}, "\n")
+
+	kDate := hmacSum([]byte("AWS4"+secretKey), dateStamp)
+	kRegion := hmacSum(kDate, region)
+	kService := hmacSum(kRegion, service)
+	kSigning := hmacSum(kService, "aws4_request")
+	wantSignature := hex.EncodeToString(hmacSum(kSigning, stringToSign))
+
+	wantAuth := "AWS4-HMAC-SHA256 Credential=" + accessKey + "/" + credentialScope +
+		", SignedHeaders=" + signedHeaders + ", Signature=" + wantSignature
+
+	gotAuth := req.Header.Get("Authorization")
+	if gotAuth != wantAuth {
+		t.Fatalf("Authorization = %q, want %q\n(hashed canonical request = %q, string-to-sign = %q, signature = %q)",
+			gotAuth, wantAuth, hashedCanonical, stringToSign, wantSignature)
+	}
+}

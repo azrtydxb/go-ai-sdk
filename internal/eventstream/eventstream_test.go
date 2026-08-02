@@ -4,8 +4,61 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"hash/crc32"
 	"testing"
 )
+
+// rawHeader is a single (name, type, encoded value bytes) header tuple used
+// by buildFrame to construct frames containing non-string header types,
+// which the public Encode function (string headers only) cannot produce.
+type rawHeader struct {
+	name    string
+	valType byte
+	value   []byte // pre-encoded value bytes (not including any length prefix)
+}
+
+// buildFrame constructs a raw event stream frame directly from a set of
+// typed headers and a payload, mirroring Encode's framing but allowing
+// header value types other than 7 (string). Headers with valType 6 or 7 get
+// a 2-byte big-endian length prefix written automatically; other types are
+// written as fixed-size payloads with no prefix, per the AWS event stream
+// header encoding.
+func buildFrame(t *testing.T, headers []rawHeader, payload []byte) []byte {
+	t.Helper()
+	var headerBuf bytes.Buffer
+	for _, h := range headers {
+		headerBuf.WriteByte(byte(len(h.name)))
+		headerBuf.WriteString(h.name)
+		headerBuf.WriteByte(h.valType)
+		switch h.valType {
+		case headerTypeStr, headerTypeByteArray:
+			var lenBuf [2]byte
+			binary.BigEndian.PutUint16(lenBuf[:], uint16(len(h.value)))
+			headerBuf.Write(lenBuf[:])
+			headerBuf.Write(h.value)
+		default:
+			headerBuf.Write(h.value)
+		}
+	}
+	headerBytes := headerBuf.Bytes()
+
+	totalLen := preludeLen + crcLen + len(headerBytes) + len(payload) + crcLen
+	buf := make([]byte, 0, totalLen)
+	var tmp [4]byte
+	binary.BigEndian.PutUint32(tmp[:], uint32(totalLen))
+	buf = append(buf, tmp[:]...)
+	binary.BigEndian.PutUint32(tmp[:], uint32(len(headerBytes)))
+	buf = append(buf, tmp[:]...)
+	preludeCRC := crc32.ChecksumIEEE(buf)
+	binary.BigEndian.PutUint32(tmp[:], preludeCRC)
+	buf = append(buf, tmp[:]...)
+	buf = append(buf, headerBytes...)
+	buf = append(buf, payload...)
+	messageCRC := crc32.ChecksumIEEE(buf)
+	binary.BigEndian.PutUint32(tmp[:], messageCRC)
+	buf = append(buf, tmp[:]...)
+	return buf
+}
 
 func TestRoundTrip_SingleMessage(t *testing.T) {
 	headers := map[string]string{
@@ -146,6 +199,51 @@ func TestScan_TruncatedPrelude(t *testing.T) {
 	}
 	if gotErr == nil {
 		t.Fatal("Scan: want error for truncated prelude, got nil")
+	}
+}
+
+// TestScan_SkipsNonStringHeaderWithoutDesync covers the fix for parseHeaders
+// treating non-string header types as a hard error: a well-formed
+// int32-typed header must be silently skipped (not surfaced in
+// Message.Headers, no error), and the string header that follows it in the
+// same frame must still decode correctly, AND a subsequent frame in the
+// same stream must still parse cleanly (proving the int32's 4-byte payload
+// was consumed correctly rather than desyncing the header cursor).
+func TestScan_SkipsNonStringHeaderWithoutDesync(t *testing.T) {
+	frame1 := buildFrame(t, []rawHeader{
+		{name: "count", valType: headerTypeInt32, value: []byte{0x00, 0x00, 0x00, 0x2A}}, // int32 = 42
+		{name: ":event-type", valType: headerTypeStr, value: []byte("contentBlockDelta")},
+	}, []byte(`{"delta":{"text":"a"}}`))
+
+	frame2 := Encode(map[string]string{":event-type": "messageStop"}, []byte(`{"stopReason":"end_turn"}`))
+
+	var buf bytes.Buffer
+	buf.Write(frame1)
+	buf.Write(frame2)
+
+	var got []Message
+	for msg, err := range Scan(&buf) {
+		if err != nil {
+			t.Fatalf("Scan: unexpected error: %v", err)
+		}
+		got = append(got, msg)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d messages, want 2 (no desync)", len(got))
+	}
+
+	if _, present := got[0].Headers["count"]; present {
+		t.Errorf("Headers contains skipped int32 header %q, want it absent", "count")
+	}
+	if got[0].Headers[":event-type"] != "contentBlockDelta" {
+		t.Errorf("frame1 :event-type = %q, want contentBlockDelta", got[0].Headers[":event-type"])
+	}
+	if string(got[0].Payload) != `{"delta":{"text":"a"}}` {
+		t.Errorf("frame1 Payload = %q, want the original JSON payload", got[0].Payload)
+	}
+
+	if got[1].Headers[":event-type"] != "messageStop" {
+		t.Errorf("frame2 :event-type = %q, want messageStop (proves no desync from frame1)", got[1].Headers[":event-type"])
 	}
 }
 
