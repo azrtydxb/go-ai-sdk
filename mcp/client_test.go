@@ -166,6 +166,37 @@ func TestInitializeHandshake(t *testing.T) {
 	}
 }
 
+func TestInitializeRejectsUnsupportedProtocolVersion(t *testing.T) {
+	client, server := newPipePair()
+	c := NewClient(client)
+	defer c.Close()
+
+	done := make(chan error, 1)
+	go func() { done <- c.Initialize(context.Background()) }()
+
+	req := recvRequest(t, server)
+	sendResult(t, server, *req.ID, map[string]any{
+		"protocolVersion": "2024-11-05",
+		"capabilities":    map[string]any{},
+	})
+
+	err := <-done
+	if err == nil {
+		t.Fatal("Initialize: want error for unsupported protocol version, got nil")
+	}
+	if !strings.Contains(err.Error(), `unsupported protocol version "2024-11-05"`) {
+		t.Fatalf("err = %v, want it to name the rejected version", err)
+	}
+
+	// The client must not proceed to notifications/initialized after
+	// rejecting the version.
+	shortCtx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := server.Receive(shortCtx); err == nil {
+		t.Fatal("server received a further message after version mismatch, want none")
+	}
+}
+
 func TestListToolsPagination(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
@@ -442,7 +473,7 @@ func TestUnknownIDIsDroppedSilently(t *testing.T) {
 	}()
 
 	req := recvRequest(t, server)
-	sendResult(t, server, *req.ID, map[string]any{})
+	sendResult(t, server, *req.ID, map[string]any{"protocolVersion": "2025-03-26"})
 	recvRequest(t, server) // notifications/initialized
 
 	if err := <-results; err != nil {

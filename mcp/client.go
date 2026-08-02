@@ -21,15 +21,31 @@ type initializeParams struct {
 	Capabilities    struct{}   `json:"capabilities"`
 }
 
+// initializeResult is the subset of the "initialize" response this client
+// inspects: the server's negotiated protocol version.
+type initializeResult struct {
+	ProtocolVersion string `json:"protocolVersion"`
+}
+
 // Initialize performs the MCP handshake: an "initialize" request, followed
-// by a "notifications/initialized" notification once the server replies.
+// by a "notifications/initialized" notification once the server replies. It
+// rejects the handshake if the server's negotiated protocolVersion isn't
+// the one this client speaks (protocolVersion, "2025-03-26").
 func (c *Client) Initialize(ctx context.Context) error {
 	params := initializeParams{
 		ProtocolVersion: protocolVersion,
 		ClientInfo:      clientInfo{Name: "go-ai-sdk", Version: "0.1"},
 	}
-	if _, err := c.call(ctx, "initialize", params); err != nil {
+	raw, err := c.call(ctx, "initialize", params)
+	if err != nil {
 		return fmt.Errorf("mcp: initialize: %w", err)
+	}
+	var res initializeResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return fmt.Errorf("mcp: decode initialize result: %w", err)
+	}
+	if res.ProtocolVersion != protocolVersion {
+		return fmt.Errorf("mcp: server negotiated unsupported protocol version %q", res.ProtocolVersion)
 	}
 	if err := c.notify(ctx, "notifications/initialized", nil); err != nil {
 		return fmt.Errorf("mcp: notifications/initialized: %w", err)
