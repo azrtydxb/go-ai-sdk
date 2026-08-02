@@ -158,6 +158,52 @@ func TestImageModel_SizeUnsupported(t *testing.T) {
 	}
 }
 
+func TestImageModel_EmptyBytesBase64Encoded(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"predictions":[{"bytesBase64Encoded":"","mimeType":"image/png"}]}`))
+	}))
+	defer srv.Close()
+
+	cfg := Config{
+		Name:        "google",
+		EndpointFor: func(modelID, method string) string { return srv.URL },
+		Authorize:   func(ctx context.Context, req *http.Request) error { return nil },
+	}
+	model := NewImageModel(cfg, "imagen-3.0-generate-002")
+
+	_, err := model.GenerateImages(context.Background(), provider.ImageCall{Prompt: "a cat"})
+	if err == nil {
+		t.Fatal("GenerateImages: want error when bytesBase64Encoded is empty, got nil")
+	}
+	if err.Error() != "google: image response missing image data" {
+		t.Errorf("error = %q, want %q", err.Error(), "google: image response missing image data")
+	}
+}
+
+func TestImageModel_InvalidBase64(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"predictions":[{"bytesBase64Encoded":"!!!","mimeType":"image/png"}]}`))
+	}))
+	defer srv.Close()
+
+	cfg := Config{
+		Name:        "google",
+		EndpointFor: func(modelID, method string) string { return srv.URL },
+		Authorize:   func(ctx context.Context, req *http.Request) error { return nil },
+	}
+	model := NewImageModel(cfg, "imagen-3.0-generate-002")
+
+	_, err := model.GenerateImages(context.Background(), provider.ImageCall{Prompt: "a cat"})
+	if err == nil {
+		t.Fatal("GenerateImages: want error when bytesBase64Encoded is invalid base64, got nil")
+	}
+	if !strings.Contains(err.Error(), "decode image bytesBase64Encoded") {
+		t.Errorf("error = %q, want it to mention decode failure", err.Error())
+	}
+}
+
 func TestImageModel_APIError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

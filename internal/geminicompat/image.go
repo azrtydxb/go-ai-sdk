@@ -109,6 +109,9 @@ func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall
 
 	images := make([]provider.GeneratedImage, len(wr.Predictions))
 	for i, p := range wr.Predictions {
+		if p.BytesBase64Encoded == "" {
+			return nil, fmt.Errorf("%s: image response missing image data", m.cfg.Name)
+		}
 		data, err := base64.StdEncoding.DecodeString(p.BytesBase64Encoded)
 		if err != nil {
 			return nil, fmt.Errorf("%s: decode image bytesBase64Encoded: %w", m.cfg.Name, err)
