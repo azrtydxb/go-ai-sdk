@@ -70,15 +70,13 @@ func Scan(r io.Reader) iter.Seq2[Event, error] {
 			}
 		}
 
-		// Check for scan error
+		// Check for scan error. Do not yield partial events after read error.
 		if err := scanner.Err(); err != nil {
 			yield(Event{}, err)
+			return
 		}
 
-		// Yield any remaining event at EOF (if data exists)
-		if len(dataLines) > 0 || currentEvent.Event != "" {
-			currentEvent.Data = strings.Join(dataLines, "\n")
-			yield(currentEvent, nil)
-		}
+		// Per SSE spec, events are only dispatched on blank line.
+		// Do not flush trailing unterminated events at EOF.
 	}
 }
