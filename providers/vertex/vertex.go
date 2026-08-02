@@ -159,3 +159,9 @@ func (p *Provider) Model(id string) provider.LanguageModel {
 func (p *Provider) EmbeddingModel(id string) provider.EmbeddingModel {
 	return newEmbeddingModel(p, id)
 }
+
+// ImageModel returns a provider.ImageModel for the given Imagen model ID
+// hosted on Vertex AI, e.g. "imagen-3.0-generate-002".
+func (p *Provider) ImageModel(id string) provider.ImageModel {
+	return geminicompat.NewImageModel(p.config(), id)
+}

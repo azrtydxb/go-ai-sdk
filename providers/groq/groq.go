@@ -53,3 +53,15 @@ func (p *Provider) Model(id string) provider.LanguageModel {
 		NativeJSON: true,
 	}, id)
 }
+
+// TranscriptionModel returns a provider.TranscriptionModel for the given
+// Groq transcription model ID, e.g. "whisper-large-v3".
+func (p *Provider) TranscriptionModel(id string) provider.TranscriptionModel {
+	return openaicompat.NewTranscriptionModel(openaicompat.Config{
+		Name:       "groq",
+		APIKey:     p.apiKey,
+		BaseURL:    p.baseURL,
+		HTTPClient: p.httpClient,
+		NativeJSON: true,
+	}, id)
+}

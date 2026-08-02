@@ -52,3 +52,15 @@ func (p *Provider) Model(id string) provider.LanguageModel {
 		NativeJSON: true,
 	}, id)
 }
+
+// ImageModel returns a provider.ImageModel for the given X.AI image model
+// ID, e.g. "grok-2-image".
+func (p *Provider) ImageModel(id string) provider.ImageModel {
+	return openaicompat.NewImageModel(openaicompat.Config{
+		Name:       "xai",
+		APIKey:     p.apiKey,
+		BaseURL:    p.baseURL,
+		HTTPClient: p.httpClient,
+		NativeJSON: true,
+	}, id)
+}
