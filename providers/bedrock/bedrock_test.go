@@ -386,6 +386,25 @@ func TestRequestShape_ToolChoiceNoneOmitsToolConfig(t *testing.T) {
 	}
 }
 
+// TestRequestShape_ToolChoiceWithoutToolsErrors covers the guard against a
+// toolChoice-only toolConfig: Bedrock rejects a toolConfig that carries a
+// toolChoice but no tools, so buildConverseRequest (via Generate) must fail
+// fast with a descriptive error instead of sending that request.
+func TestRequestShape_ToolChoiceWithoutToolsErrors(t *testing.T) {
+	model, _ := newTestModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages:   []provider.Message{provider.UserText("simple")},
+		ToolChoice: &provider.ToolChoice{Mode: provider.ToolChoiceAuto},
+	})
+	if err == nil {
+		t.Fatal("Generate: want error for ToolChoice set without Tools, got nil")
+	}
+	if !strings.Contains(err.Error(), "tool choice requires at least one tool") {
+		t.Errorf("Generate error = %v, want it to mention tool choice requiring at least one tool", err)
+	}
+}
+
 func TestRequestShape_ToolResultErrorStatus(t *testing.T) {
 	model, fs := newTestModel(t)
 

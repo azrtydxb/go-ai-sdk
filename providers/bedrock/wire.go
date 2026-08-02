@@ -3,6 +3,7 @@ package bedrock
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/azrtydxb/go-ai-sdk/provider"
@@ -212,6 +213,12 @@ func buildConverseRequest(call provider.Call) (converseRequest, error) {
 	// ToolChoiceNone means: omit toolConfig entirely (Bedrock has no "none"
 	// tool choice value).
 	omitTools := call.ToolChoice != nil && call.ToolChoice.Mode == provider.ToolChoiceNone
+	if !omitTools && call.ToolChoice != nil && len(call.Tools) == 0 {
+		// A toolChoice-only toolConfig (no tools) is rejected by Bedrock;
+		// fail fast with a descriptive error instead of sending a request
+		// that the API will bounce.
+		return converseRequest{}, errors.New("bedrock: tool choice requires at least one tool")
+	}
 	if !omitTools && (len(call.Tools) > 0 || call.ToolChoice != nil) {
 		tc := &wireToolConfig{}
 		if len(call.Tools) > 0 {
