@@ -9,6 +9,9 @@ import (
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
+// ErrModelRequired is returned when Model is nil in Embed or EmbedMany options.
+var ErrModelRequired = errors.New("ai: model is required")
+
 // EmbedOpts options for the Embed function.
 type EmbedOpts struct {
 	Model      provider.EmbeddingModel
@@ -26,7 +29,7 @@ type EmbedResult struct {
 // It wraps the call in retry logic (default maxRetries = 2).
 func Embed(ctx context.Context, opts EmbedOpts) (*EmbedResult, error) {
 	if opts.Model == nil {
-		return nil, fmt.Errorf("Model must not be nil")
+		return nil, ErrModelRequired
 	}
 
 	maxRetries := defaultMaxRetries
@@ -43,6 +46,10 @@ func Embed(ctx context.Context, opts EmbedOpts) (*EmbedResult, error) {
 			return nil, &RetryError{Attempts: exhausted.Attempts, LastErr: exhausted.LastErr}
 		}
 		return nil, err
+	}
+
+	if len(resp.Embeddings) < 1 {
+		return nil, fmt.Errorf("ai: embedding model returned %d embeddings for 1 value", len(resp.Embeddings))
 	}
 
 	return &EmbedResult{
@@ -70,7 +77,7 @@ type EmbedManyResult struct {
 // If Values is empty, returns empty result without calling the model.
 func EmbedMany(ctx context.Context, opts EmbedManyOpts) (*EmbedManyResult, error) {
 	if opts.Model == nil {
-		return nil, fmt.Errorf("Model must not be nil")
+		return nil, ErrModelRequired
 	}
 
 	if len(opts.Values) == 0 {
@@ -86,6 +93,11 @@ func EmbedMany(ctx context.Context, opts EmbedManyOpts) (*EmbedManyResult, error
 	}
 
 	batchSize := opts.Model.MaxBatchSize()
+	// Guard against zero or negative batch sizes to prevent infinite loops or panics
+	if batchSize <= 0 {
+		batchSize = 1
+	}
+
 	var allEmbeddings [][]float64
 	var totalUsage provider.Usage
 
@@ -106,6 +118,11 @@ func EmbedMany(ctx context.Context, opts EmbedManyOpts) (*EmbedManyResult, error
 				return nil, &RetryError{Attempts: exhausted.Attempts, LastErr: exhausted.LastErr}
 			}
 			return nil, err
+		}
+
+		// Validate that the model returned the expected number of embeddings
+		if len(resp.Embeddings) != len(batch) {
+			return nil, fmt.Errorf("ai: embedding model returned %d embeddings for %d values", len(resp.Embeddings), len(batch))
 		}
 
 		allEmbeddings = append(allEmbeddings, resp.Embeddings...)
