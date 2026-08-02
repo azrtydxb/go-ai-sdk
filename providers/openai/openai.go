@@ -78,3 +78,21 @@ func (p *Provider) Model(id string) provider.LanguageModel {
 func (p *Provider) EmbeddingModel(id string) provider.EmbeddingModel {
 	return openaicompat.NewEmbeddingModel(p.config(), id)
 }
+
+// ImageModel returns a provider.ImageModel for the given OpenAI image model
+// ID, e.g. "gpt-image-1" or "dall-e-3".
+func (p *Provider) ImageModel(id string) provider.ImageModel {
+	return openaicompat.NewImageModel(p.config(), id)
+}
+
+// SpeechModel returns a provider.SpeechModel for the given OpenAI
+// text-to-speech model ID, e.g. "gpt-4o-mini-tts" or "tts-1".
+func (p *Provider) SpeechModel(id string) provider.SpeechModel {
+	return openaicompat.NewSpeechModel(p.config(), id)
+}
+
+// TranscriptionModel returns a provider.TranscriptionModel for the given
+// OpenAI transcription model ID, e.g. "gpt-4o-transcribe" or "whisper-1".
+func (p *Provider) TranscriptionModel(id string) provider.TranscriptionModel {
+	return openaicompat.NewTranscriptionModel(p.config(), id)
+}

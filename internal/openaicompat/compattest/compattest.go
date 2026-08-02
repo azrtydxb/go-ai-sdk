@@ -20,6 +20,15 @@ import (
 	"testing"
 )
 
+// onePixelPNGBase64 is a 1x1 transparent PNG, base64-encoded — used as the
+// canned response for the /images/generations fixture.
+const onePixelPNGBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+
+// OnePixelPNGBase64 returns the base64-encoded 1x1 PNG the
+// /images/generations fixture responds with, so callers can assert on the
+// decoded bytes.
+func OnePixelPNGBase64() string { return onePixelPNGBase64 }
+
 // ---- wire types (request side, just enough to decode) ----
 
 type wireMessage struct {
@@ -346,6 +355,43 @@ func NewFixtureServer(t *testing.T, providerName string) *Server {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
+	})
+
+	mux.HandleFunc("/images/generations", func(w http.ResponseWriter, r *http.Request) {
+		raw, ok := readBody(t, w, r)
+		if !ok {
+			return
+		}
+		s.record(raw, r.Header.Clone())
+
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"data":[{"b64_json":%q}]}`, onePixelPNGBase64)
+	})
+
+	mux.HandleFunc("/audio/speech", func(w http.ResponseWriter, r *http.Request) {
+		raw, ok := readBody(t, w, r)
+		if !ok {
+			return
+		}
+		s.record(raw, r.Header.Clone())
+
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Write([]byte("FAKEAUDIO"))
+	})
+
+	mux.HandleFunc("/audio/transcriptions", func(w http.ResponseWriter, r *http.Request) {
+		raw, ok := readBody(t, w, r)
+		if !ok {
+			return
+		}
+		// Record the raw multipart body along with the Content-Type header
+		// (which carries the boundary) so tests can re-parse it with
+		// mime/multipart.
+		s.record(raw, r.Header.Clone())
+
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"text":"hello world","language":"en","duration":1.5,`+
+			`"segments":[{"text":"hello","start":0,"end":0.5},{"text":"world","start":0.5,"end":1.5}]}`)
 	})
 
 	srv := httptest.NewServer(mux)
