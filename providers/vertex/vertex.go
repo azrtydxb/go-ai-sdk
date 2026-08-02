@@ -109,6 +109,12 @@ func (p *Provider) resolvedBaseURL() string {
 	if p.baseURL != "" {
 		return p.baseURL
 	}
+	if p.location == "global" {
+		// The "global" location has no regional prefix: it is served from
+		// aiplatform.googleapis.com directly, not
+		// global-aiplatform.googleapis.com (which does not exist).
+		return "https://aiplatform.googleapis.com/v1"
+	}
 	return "https://" + p.location + "-aiplatform.googleapis.com/v1"
 }
 

@@ -302,6 +302,30 @@ func TestDefaultLocation(t *testing.T) {
 	}
 }
 
+// TestResolvedBaseURL_GlobalLocation covers the "global" Vertex AI location,
+// which is served from aiplatform.googleapis.com directly (no regional
+// prefix) rather than the "{location}-aiplatform.googleapis.com" pattern
+// used by every other location — "global-aiplatform.googleapis.com" does
+// not exist.
+func TestResolvedBaseURL_GlobalLocation(t *testing.T) {
+	p := New(WithProject(testProject), WithLocation("global"))
+	const want = "https://aiplatform.googleapis.com/v1"
+	if got := p.resolvedBaseURL(); got != want {
+		t.Errorf("resolvedBaseURL() = %q, want %q", got, want)
+	}
+}
+
+// TestResolvedBaseURL_RegionalLocation is the control case: a normal
+// regional location still uses the "{location}-aiplatform.googleapis.com"
+// pattern.
+func TestResolvedBaseURL_RegionalLocation(t *testing.T) {
+	p := New(WithProject(testProject), WithLocation(testLocation))
+	want := "https://" + testLocation + "-aiplatform.googleapis.com/v1"
+	if got := p.resolvedBaseURL(); got != want {
+		t.Errorf("resolvedBaseURL() = %q, want %q", got, want)
+	}
+}
+
 func TestNoCredentialsConfigured(t *testing.T) {
 	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "")
 	p := New(WithProject(testProject), WithLocation(testLocation), WithBaseURL("http://example.invalid"))
