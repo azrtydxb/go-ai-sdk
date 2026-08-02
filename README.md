@@ -84,32 +84,33 @@ guarded by an API-key env check, and each is compiled by CI.
 
 ## Features
 
-Wave 1 (v0.1) providers, by capability:
+All supported providers, by capability:
 
-| Capability | OpenAI | Anthropic | Google (Gemini) |
-|---|---|---|---|
-| `GenerateText` | ✅ | ✅ | ✅ |
-| `StreamText` | ✅ | ✅ | ✅ |
-| Tool calling | ✅ | ✅ | ✅ |
-| `GenerateObject` / `StreamObject` | ✅ native JSON | ✅ tool-mode | ✅ native JSON |
-| `Embed` / `EmbedMany` | ✅ | — (no embeddings API) | ✅ |
+| Capability | OpenAI | Anthropic | Google | Groq | xAI | DeepSeek | Together | Fireworks | Cerebras | Perplexity¹ | Mistral² | Cohere |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| `GenerateText` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `StreamText` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Tool calling | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ |
+| `GenerateObject` / `StreamObject` | ✅ native | ✅ tool-mode | ✅ native | ✅ native | ✅ native | ✅ native | ✅ native | ✅ native | ✅ native | ✅ native | ✅ native | ✅ native |
+| `Embed` / `EmbedMany` | ✅ | — | ✅ | — | — | — | ✅ | ✅ | — | — | ✅ | ✅ |
 
-"Native JSON" means the provider supports schema-constrained JSON output
-directly; providers without it (Anthropic) get structured output for free
-via an automatically injected, forced tool call — the same `GenerateObject[T]`
-call works identically either way.
+**Structured output notes:**
+- "Native" means the provider supports schema-constrained JSON output directly via native JSON mode.
+- "Tool-mode" (Anthropic) uses an automatically injected, forced tool call — the same `GenerateObject[T]` call works identically either way.
+- ¹ Perplexity: no tool-calling support in the live API; `Tools` in a `Call` are serialized but may be rejected or ignored.
+- ² Mistral: `GenerateObject` uses `json_object` mode only; schema is not sent on the wire but enforced by the core-side decode step.
 
 ## Provider roadmap
 
-Wave 1 ships in v0.1. Later waves are tracked but not yet implemented:
+Wave 1 ships in v0.1; Wave 2 shipped in v0.2. Later waves are tracked but not yet implemented:
 
-| Wave | Providers | Notes |
+| Wave | Providers | Status |
 |---|---|---|
-| 1 (v0.1, shipped) | OpenAI, Anthropic, Google (Gemini) | Three distinct wire formats prove the abstraction |
-| 2 | Groq, xAI, DeepSeek, Together, Fireworks, Cerebras, Perplexity | Thin presets over the OpenAI-compatible base |
-| 2 | Mistral, Cohere | Own APIs, full provider implementations |
-| 3 | Azure OpenAI, Vertex AI, Amazon Bedrock | Platform auth; candidates for nested submodules |
-| later | Image/speech/transcription providers | Requires new model capability interfaces |
+| 1 (v0.1) | OpenAI, Anthropic, Google (Gemini) | Shipped — three distinct wire formats prove the abstraction |
+| 2 (v0.2, shipped) | Groq, xAI, DeepSeek, Together, Fireworks, Cerebras, Perplexity | Thin presets over the OpenAI-compatible base |
+| 2 (v0.2, shipped) | Mistral, Cohere | Own APIs, full provider implementations |
+| 3 | Azure OpenAI, Vertex AI, Amazon Bedrock | Planned — platform auth; candidates for nested submodules |
+| later | Image/speech/transcription providers | Out of scope for v1 — requires new model capability interfaces |
 
 See the [design spec](docs/superpowers/specs/2026-08-02-go-ai-sdk-design.md)
 for architecture, package layout, and the full decisions log.
