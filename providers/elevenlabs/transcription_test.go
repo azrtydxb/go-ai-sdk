@@ -21,14 +21,18 @@ func TestTranscribe_HappyPath(t *testing.T) {
 		gotContentType = r.Header.Get("Content-Type")
 
 		if err := r.ParseMultipartForm(10 << 20); err != nil {
-			t.Fatalf("ParseMultipartForm: %v", err)
+			t.Errorf("ParseMultipartForm: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
 		gotModelID = r.FormValue("model_id")
 		gotLanguageCode = r.FormValue("language_code")
 
 		file, header, err := r.FormFile("file")
 		if err != nil {
-			t.Fatalf("FormFile: %v", err)
+			t.Errorf("FormFile: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
 		defer file.Close()
 		gotFileContentType = header.Header.Get("Content-Type")
@@ -104,7 +108,9 @@ func TestTranscribe_HappyPath(t *testing.T) {
 func TestTranscribe_NoLanguageOmitsField(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseMultipartForm(10 << 20); err != nil {
-			t.Fatalf("ParseMultipartForm: %v", err)
+			t.Errorf("ParseMultipartForm: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
 		if _, ok := r.MultipartForm.Value["language_code"]; ok {
 			t.Error("language_code should not be present when Language is empty")

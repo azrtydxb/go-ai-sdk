@@ -2,12 +2,11 @@ package elevenlabs
 
 import (
 	"net/http"
-	"os"
 	"testing"
 )
 
 func TestNewDefaults(t *testing.T) {
-	os.Unsetenv("ELEVENLABS_API_KEY")
+	t.Setenv("ELEVENLABS_API_KEY", "")
 	p := New()
 	if p.baseURL != defaultBaseURL {
 		t.Errorf("baseURL = %q, want %q", p.baseURL, defaultBaseURL)
