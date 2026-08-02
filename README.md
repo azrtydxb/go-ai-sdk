@@ -145,9 +145,9 @@ Supported providers for image generation, speech synthesis, and transcription:
 
 | Capability | OpenAI | Google | Vertex AI | xAI | ElevenLabs | Groq |
 |---|---|---|---|---|---|---|
-| `GenerateImage` | ✅ gpt-image-1 | ✅ imagen-3 | ✅ imagen-3 | ✅ grok-vision-beta | — | — |
-| `GenerateSpeech` | ✅ gpt-4o-mini-tts | — | — | — | ✅ eleven-turbo-v2 | — |
-| `Transcribe` | ✅ whisper-1 | — | — | — | ✅ eleven-turbo-v2 | ✅ whisper-large-v3-turbo |
+| `GenerateImage` | ✅ gpt-image-1 | ✅ imagen-3.0-generate-002 | ✅ imagen-3.0-generate-002 | ✅ grok-2-image | — | — |
+| `GenerateSpeech` | ✅ gpt-4o-mini-tts | — | — | — | ✅ eleven_multilingual_v2 | — |
+| `Transcribe` | ✅ whisper-1 | — | — | — | ✅ scribe_v1 | ✅ whisper-large-v3-turbo |
 
 **Note:** Other Vercel-supported media providers (Fal, Replicate, Luma, Deepgram, LMNT, Hume) are not yet included. The provider interface makes them straightforward follow-ups.
 
