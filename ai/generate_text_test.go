@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -38,6 +39,57 @@ func TestGenerateTextSimplePrompt(t *testing.T) {
 	}
 	if call.Messages[1].Role != provider.RoleUser {
 		t.Fatal("user message missing")
+	}
+}
+
+func TestGenerateTextReasoningText(t *testing.T) {
+	m := &aitest.MockModel{Responses: []*provider.Response{{
+		Content: []provider.ContentPart{
+			provider.ReasoningPart{Text: "let me think... "},
+			provider.TextPart{Text: "hello"},
+			provider.ReasoningPart{Text: "done."},
+		},
+		FinishReason: provider.FinishStop,
+		Usage:        provider.Usage{InputTokens: 3, OutputTokens: 1, TotalTokens: 4},
+	}}}
+	res, err := GenerateText(t.Context(), GenerateTextOpts{Model: m, Prompt: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.ReasoningText != "let me think... done." {
+		t.Fatalf("ReasoningText = %q, want %q", res.ReasoningText, "let me think... done.")
+	}
+	if res.Text != "hello" {
+		t.Fatalf("Text = %q, want %q (reasoning must not leak)", res.Text, "hello")
+	}
+	if res.Steps[0].ReasoningText != "let me think... done." {
+		t.Fatalf("Steps[0].ReasoningText = %q", res.Steps[0].ReasoningText)
+	}
+}
+
+func TestGenerateTextUsageDetailsSummedAcrossSteps(t *testing.T) {
+	m := &aitest.MockModel{Responses: []*provider.Response{
+		{
+			Content:      []provider.ContentPart{provider.ToolCallPart{ID: "1", Name: "t", Args: []byte(`{}`)}},
+			FinishReason: provider.FinishToolCalls,
+			Usage:        provider.Usage{InputTokens: 5, OutputTokens: 2, TotalTokens: 7, CachedInputTokens: 1, ReasoningTokens: 1},
+		},
+		{
+			Content:      []provider.ContentPart{provider.TextPart{Text: "done"}},
+			FinishReason: provider.FinishStop,
+			Usage:        provider.Usage{InputTokens: 6, OutputTokens: 3, TotalTokens: 9, CachedInputTokens: 2, ReasoningTokens: 2},
+		},
+	}}
+	type args struct{}
+	res, err := GenerateText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "hi", MaxSteps: 2,
+		Tools: []Tool{NewTool("t", "", func(ctx context.Context, a args) (any, error) { return "ok", nil })},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Usage.CachedInputTokens != 3 || res.Usage.ReasoningTokens != 3 {
+		t.Fatalf("Usage = %+v, want CachedInputTokens=3 ReasoningTokens=3", res.Usage)
 	}
 }
 

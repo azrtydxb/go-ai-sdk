@@ -25,10 +25,11 @@ type TextStream struct {
 	closed  bool
 	err     error
 
-	steps      []Step
-	totalUsage provider.Usage
-	lastText   string
-	lastFinish provider.FinishReason
+	steps         []Step
+	totalUsage    provider.Usage
+	lastText      string
+	lastReasoning string
+	lastFinish    provider.FinishReason
 }
 
 // StreamText starts the first model call (retried like GenerateText) and
@@ -104,6 +105,8 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 			}
 
 			var text string
+			var reasoningText string
+			var reasoningParts []provider.ReasoningPart
 			var toolCalls []provider.ToolCallPart
 			type pendingCall struct {
 				name string
@@ -118,6 +121,10 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 				switch part := p.(type) {
 				case provider.TextDelta:
 					text += part.Text
+				case provider.ReasoningDelta:
+					reasoningText += part.Text
+				case provider.ReasoningEnd:
+					reasoningParts = append(reasoningParts, part.Part)
 				case provider.ToolCallDelta:
 					pc, ok := argsByID[part.ID]
 					if !ok {
@@ -168,10 +175,39 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 				toolCalls = append(toolCalls, provider.ToolCallPart{ID: id, Name: pc.name, Args: pc.args})
 			}
 
-			step := Step{
-				Text:         text,
+			// Assemble the step's Response content, mirroring how tool
+			// calls are assembled from ToolCallEnd/deltas above:
+			// providers that emit a fully assembled ReasoningEnd (e.g.
+			// Anthropic, carrying a signature) supply reasoningParts
+			// directly; providers that only ever emit ReasoningDelta text
+			// (e.g. openaicompat reasoning_content) get a single
+			// synthesized ReasoningPart from the accumulated text.
+			var respContent []provider.ContentPart
+			if len(reasoningParts) > 0 {
+				for _, rp := range reasoningParts {
+					respContent = append(respContent, rp)
+				}
+			} else if reasoningText != "" {
+				respContent = append(respContent, provider.ReasoningPart{Text: reasoningText})
+			}
+			if text != "" {
+				respContent = append(respContent, provider.TextPart{Text: text})
+			}
+			for _, tc := range toolCalls {
+				respContent = append(respContent, tc)
+			}
+			stepResp := &provider.Response{
+				Content:      respContent,
 				FinishReason: finish.Reason,
 				Usage:        finish.Usage,
+			}
+
+			step := Step{
+				Text:          text,
+				ReasoningText: stepResp.ReasoningText(),
+				FinishReason:  finish.Reason,
+				Usage:         finish.Usage,
+				Response:      stepResp,
 			}
 			for _, tc := range toolCalls {
 				step.ToolCalls = append(step.ToolCalls, ToolCallRecord{ID: tc.ID, Name: tc.Name, Args: tc.Args})
@@ -180,12 +216,15 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 			s.totalUsage.InputTokens += finish.Usage.InputTokens
 			s.totalUsage.OutputTokens += finish.Usage.OutputTokens
 			s.totalUsage.TotalTokens += finish.Usage.TotalTokens
+			s.totalUsage.CachedInputTokens += finish.Usage.CachedInputTokens
+			s.totalUsage.ReasoningTokens += finish.Usage.ReasoningTokens
 			s.lastText = text
+			s.lastReasoning = step.ReasoningText
 			if gotFinish {
 				s.lastFinish = finish.Reason
 			}
 
-			s.messages = append(s.messages, provider.Message{Role: provider.RoleAssistant, Content: assistantContent(text, toolCalls)})
+			s.messages = append(s.messages, provider.Message{Role: provider.RoleAssistant, Content: assistantContent(respContent)})
 
 			hasToolCalls := len(toolCalls) > 0
 
@@ -236,17 +275,14 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 	}
 }
 
-// assistantContent converts an assembled step's text and tool calls into
-// content parts for the assistant message appended to the conversation.
-func assistantContent(text string, toolCalls []provider.ToolCallPart) []provider.ContentPart {
-	var parts []provider.ContentPart
-	if text != "" {
-		parts = append(parts, provider.TextPart{Text: text})
+// assistantContent returns a defensive copy of an assembled step's content
+// parts (reasoning, text, tool calls, in that order) for the assistant
+// message appended to the conversation.
+func assistantContent(respContent []provider.ContentPart) []provider.ContentPart {
+	if len(respContent) == 0 {
+		return nil
 	}
-	for _, tc := range toolCalls {
-		parts = append(parts, tc)
-	}
-	return parts
+	return append([]provider.ContentPart(nil), respContent...)
 }
 
 // Err returns the error, if any, that ended iteration abnormally: a
@@ -257,6 +293,9 @@ func (s *TextStream) Err() error { return s.err }
 
 // Text returns the accumulated text of the final step.
 func (s *TextStream) Text() string { return s.lastText }
+
+// ReasoningText returns the accumulated reasoning text of the final step.
+func (s *TextStream) ReasoningText() string { return s.lastReasoning }
 
 // Steps returns the steps executed so far. If iteration stopped because of a
 // *NoSuchToolError (an unknown tool was requested), the step in which that

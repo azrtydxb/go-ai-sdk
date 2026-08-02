@@ -107,11 +107,29 @@ func (m *languageModel) Stream(ctx context.Context, call provider.Call) (provide
 
 // ---- Streaming ----
 
+// blockKind identifies which wire content-block shape a streamed content
+// block accumulator is tracking.
+type blockKind int
+
+const (
+	blockKindOther blockKind = iota
+	blockKindTool
+	blockKindThinking
+	blockKindRedactedThinking
+)
+
 type toolBlockAccumulator struct {
+	kind blockKind
+
+	// tool_use
 	id      string
 	name    string
-	isTool  bool
 	partial strings.Builder
+
+	// thinking / redacted_thinking
+	thinkingText strings.Builder
+	signature    string
+	redactedData string
 }
 
 type streamResponse struct {
@@ -154,6 +172,7 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 				}
 				if e.Message.Usage != nil {
 					usage.InputTokens = e.Message.Usage.InputTokens
+					usage.CachedInputTokens = e.Message.Usage.CacheReadInputTokens
 					usage.TotalTokens = usage.InputTokens + usage.OutputTokens
 				}
 
@@ -163,11 +182,19 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 					s.err = fmt.Errorf("anthropic: decode content_block_start: %w", err)
 					return
 				}
-				if e.ContentBlock.Type == "tool_use" {
+				switch e.ContentBlock.Type {
+				case "tool_use":
 					blocks[e.Index] = &toolBlockAccumulator{
-						id:     e.ContentBlock.ID,
-						name:   e.ContentBlock.Name,
-						isTool: true,
+						kind: blockKindTool,
+						id:   e.ContentBlock.ID,
+						name: e.ContentBlock.Name,
+					}
+				case "thinking":
+					blocks[e.Index] = &toolBlockAccumulator{kind: blockKindThinking}
+				case "redacted_thinking":
+					blocks[e.Index] = &toolBlockAccumulator{
+						kind:         blockKindRedactedThinking,
+						redactedData: e.ContentBlock.Data,
 					}
 				}
 
@@ -196,6 +223,20 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 					}) {
 						return
 					}
+				case "thinking_delta":
+					if acc := blocks[e.Index]; acc != nil {
+						acc.thinkingText.WriteString(e.Delta.Thinking)
+					}
+					if !yield(provider.ReasoningDelta{Text: e.Delta.Thinking}) {
+						return
+					}
+				case "signature_delta":
+					// No stream part of its own: accumulated into the
+					// block's final ReasoningPart, emitted as a
+					// ReasoningEnd at content_block_stop.
+					if acc := blocks[e.Index]; acc != nil {
+						acc.signature += e.Delta.Signature
+					}
 				}
 
 			case "content_block_stop":
@@ -204,17 +245,34 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 					s.err = fmt.Errorf("anthropic: decode content_block_stop: %w", err)
 					return
 				}
-				if acc, ok := blocks[e.Index]; ok && acc.isTool {
-					args := acc.partial.String()
-					if args == "" {
-						args = "{}"
-					}
-					if !yield(provider.ToolCallEnd{Call: provider.ToolCallPart{
-						ID:   acc.id,
-						Name: acc.name,
-						Args: json.RawMessage(args),
-					}}) {
-						return
+				if acc, ok := blocks[e.Index]; ok {
+					switch acc.kind {
+					case blockKindTool:
+						args := acc.partial.String()
+						if args == "" {
+							args = "{}"
+						}
+						if !yield(provider.ToolCallEnd{Call: provider.ToolCallPart{
+							ID:   acc.id,
+							Name: acc.name,
+							Args: json.RawMessage(args),
+						}}) {
+							return
+						}
+					case blockKindThinking:
+						if !yield(provider.ReasoningEnd{Part: provider.ReasoningPart{
+							Text:      acc.thinkingText.String(),
+							Signature: acc.signature,
+						}}) {
+							return
+						}
+					case blockKindRedactedThinking:
+						if !yield(provider.ReasoningEnd{Part: provider.ReasoningPart{
+							Redacted: true,
+							Text:     acc.redactedData,
+						}}) {
+							return
+						}
 					}
 				}
 

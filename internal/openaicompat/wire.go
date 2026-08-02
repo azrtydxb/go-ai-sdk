@@ -140,12 +140,24 @@ type chatResponseChoice struct {
 type chatResponseMessage struct {
 	Content   *string        `json:"content"`
 	ToolCalls []wireToolCall `json:"tool_calls"`
+	// ReasoningContent is DeepSeek-R1-style reasoning output.
+	ReasoningContent string `json:"reasoning_content,omitempty"`
 }
 
 type wireUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens            int                          `json:"prompt_tokens"`
+	CompletionTokens        int                          `json:"completion_tokens"`
+	TotalTokens             int                          `json:"total_tokens"`
+	PromptTokensDetails     *wirePromptTokensDetails     `json:"prompt_tokens_details,omitempty"`
+	CompletionTokensDetails *wireCompletionTokensDetails `json:"completion_tokens_details,omitempty"`
+}
+
+type wirePromptTokensDetails struct {
+	CachedTokens int `json:"cached_tokens,omitempty"`
+}
+
+type wireCompletionTokensDetails struct {
+	ReasoningTokens int `json:"reasoning_tokens,omitempty"`
 }
 
 // ---- Streaming wire types ----
@@ -163,6 +175,8 @@ type chatStreamChoice struct {
 type chatStreamDelta struct {
 	Content   string              `json:"content"`
 	ToolCalls []wireToolCallDelta `json:"tool_calls"`
+	// ReasoningContent is DeepSeek-R1-style streamed reasoning text.
+	ReasoningContent string `json:"reasoning_content,omitempty"`
 }
 
 type wireToolCallDelta struct {
@@ -288,6 +302,11 @@ func convertMessages(msgs []provider.Message) ([]wireMessage, error) {
 			var haveText bool
 			for _, part := range m.Content {
 				switch p := part.(type) {
+				case provider.ReasoningPart:
+					// Not round-tripped: the OpenAI-compatible chat
+					// history has no reasoning_content field on request
+					// messages (DeepSeek-R1 and compatible APIs expect it
+					// dropped from prior turns).
 				case provider.TextPart:
 					text += p.Text
 					haveText = true
@@ -470,13 +489,20 @@ func mapFinishReason(reason string) provider.FinishReason {
 }
 
 func convertResponse(wr chatResponse, raw []byte) *provider.Response {
+	usage := provider.Usage{
+		InputTokens:  wr.Usage.PromptTokens,
+		OutputTokens: wr.Usage.CompletionTokens,
+		TotalTokens:  wr.Usage.TotalTokens,
+	}
+	if wr.Usage.PromptTokensDetails != nil {
+		usage.CachedInputTokens = wr.Usage.PromptTokensDetails.CachedTokens
+	}
+	if wr.Usage.CompletionTokensDetails != nil {
+		usage.ReasoningTokens = wr.Usage.CompletionTokensDetails.ReasoningTokens
+	}
 	resp := &provider.Response{
-		Raw: json.RawMessage(raw),
-		Usage: provider.Usage{
-			InputTokens:  wr.Usage.PromptTokens,
-			OutputTokens: wr.Usage.CompletionTokens,
-			TotalTokens:  wr.Usage.TotalTokens,
-		},
+		Raw:   json.RawMessage(raw),
+		Usage: usage,
 	}
 
 	if len(wr.Choices) == 0 {
@@ -485,6 +511,9 @@ func convertResponse(wr chatResponse, raw []byte) *provider.Response {
 	choice := wr.Choices[0]
 	resp.FinishReason = mapFinishReason(choice.FinishReason)
 
+	if choice.Message.ReasoningContent != "" {
+		resp.Content = append(resp.Content, provider.ReasoningPart{Text: choice.Message.ReasoningContent})
+	}
 	if choice.Message.Content != nil && *choice.Message.Content != "" {
 		resp.Content = append(resp.Content, provider.TextPart{Text: *choice.Message.Content})
 	}

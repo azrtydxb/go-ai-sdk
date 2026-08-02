@@ -40,6 +40,111 @@ func TestStreamTextYieldsDeltasAndAccumulates(t *testing.T) {
 	}
 }
 
+// TestStreamTextReasoningDeltaOnly covers a provider that only ever emits
+// ReasoningDelta (no ReasoningEnd) — e.g. openaicompat reasoning_content:
+// the accumulated text becomes both TextStream.ReasoningText() and a single
+// synthesized ReasoningPart in the step's Response, and must not leak into
+// Text().
+func TestStreamTextReasoningDeltaOnly(t *testing.T) {
+	m := &aitest.MockModel{Streams: [][]provider.StreamPart{{
+		provider.ReasoningDelta{Text: "let me "},
+		provider.ReasoningDelta{Text: "think..."},
+		provider.TextDelta{Text: "42"},
+		provider.FinishPart{Reason: provider.FinishStop, Usage: provider.Usage{TotalTokens: 4}},
+	}}}
+	s, err := StreamText(t.Context(), GenerateTextOpts{Model: m, Prompt: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reasoningDeltas string
+	for p := range s.Parts() {
+		if d, ok := p.(provider.ReasoningDelta); ok {
+			reasoningDeltas += d.Text
+		}
+	}
+	if s.Err() != nil {
+		t.Fatal(s.Err())
+	}
+	if reasoningDeltas != "let me think..." {
+		t.Fatalf("streamed ReasoningDelta text = %q", reasoningDeltas)
+	}
+	if s.ReasoningText() != "let me think..." {
+		t.Fatalf("ReasoningText() = %q, want %q", s.ReasoningText(), "let me think...")
+	}
+	if s.Text() != "42" {
+		t.Fatalf("Text() = %q, want %q (reasoning must not leak)", s.Text(), "42")
+	}
+
+	steps := s.Steps()
+	if len(steps) != 1 {
+		t.Fatalf("Steps = %d, want 1", len(steps))
+	}
+	if steps[0].ReasoningText != "let me think..." {
+		t.Fatalf("Steps[0].ReasoningText = %q", steps[0].ReasoningText)
+	}
+	if steps[0].Response == nil {
+		t.Fatal("Steps[0].Response = nil, want assembled Response")
+	}
+	if got := steps[0].Response.ReasoningText(); got != "let me think..." {
+		t.Fatalf("Steps[0].Response.ReasoningText() = %q", got)
+	}
+	if got := steps[0].Response.Text(); got != "42" {
+		t.Fatalf("Steps[0].Response.Text() = %q, want 42", got)
+	}
+}
+
+// TestStreamTextReasoningEndCarriesSignature covers a provider that emits a
+// fully assembled ReasoningEnd (Anthropic thinking blocks, with a
+// signature) — the signature must survive into the step's Response content
+// so it can round-trip on a later turn.
+func TestStreamTextReasoningEndCarriesSignature(t *testing.T) {
+	m := &aitest.MockModel{Streams: [][]provider.StreamPart{{
+		provider.ReasoningDelta{Text: "thinking"},
+		provider.ReasoningEnd{Part: provider.ReasoningPart{Text: "thinking", Signature: "sig-1"}},
+		provider.TextDelta{Text: "answer"},
+		provider.FinishPart{Reason: provider.FinishStop},
+	}}}
+	s, err := StreamText(t.Context(), GenerateTextOpts{Model: m, Prompt: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+	}
+	if s.Err() != nil {
+		t.Fatal(s.Err())
+	}
+
+	steps := s.Steps()
+	if len(steps) != 1 || steps[0].Response == nil {
+		t.Fatalf("Steps = %#v", steps)
+	}
+	var found bool
+	for _, part := range steps[0].Response.Content {
+		if rp, ok := part.(provider.ReasoningPart); ok {
+			found = true
+			if rp.Signature != "sig-1" {
+				t.Fatalf("ReasoningPart.Signature = %q, want sig-1", rp.Signature)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no ReasoningPart found in Steps[0].Response.Content")
+	}
+
+	// The assembled assistant message appended to Messages() must also
+	// carry the reasoning part first (Anthropic wire round-trip ordering
+	// is enforced in the provider, but the ai layer must at least preserve
+	// it in the message content it hands back).
+	msgs := s.Messages()
+	last := msgs[len(msgs)-1]
+	if last.Role != provider.RoleAssistant {
+		t.Fatalf("last message role = %q, want assistant", last.Role)
+	}
+	if _, ok := last.Content[0].(provider.ReasoningPart); !ok {
+		t.Fatalf("last message Content[0] = %T, want ReasoningPart first", last.Content[0])
+	}
+}
+
 func TestStreamTextToolLoop(t *testing.T) {
 	m := &aitest.MockModel{Streams: [][]provider.StreamPart{
 		{

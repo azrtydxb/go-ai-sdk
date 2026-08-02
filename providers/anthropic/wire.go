@@ -44,6 +44,13 @@ type wireContentBlock struct {
 	ToolUseID string `json:"tool_use_id,omitempty"`
 	Content   string `json:"content,omitempty"`
 	IsError   *bool  `json:"is_error,omitempty"`
+
+	// thinking
+	Thinking  string `json:"thinking,omitempty"`
+	Signature string `json:"signature,omitempty"`
+
+	// redacted_thinking
+	Data string `json:"data,omitempty"`
 }
 
 type wireTool struct {
@@ -74,8 +81,9 @@ type messageResponse struct {
 }
 
 type wireUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	InputTokens          int `json:"input_tokens"`
+	OutputTokens         int `json:"output_tokens"`
+	CacheReadInputTokens int `json:"cache_read_input_tokens,omitempty"`
 }
 
 // ---- Streaming wire types ----
@@ -84,6 +92,14 @@ type streamContentBlock struct {
 	Type string `json:"type"`
 	ID   string `json:"id,omitempty"`
 	Name string `json:"name,omitempty"`
+
+	// thinking (rarely non-empty at start; thinking text normally arrives
+	// via thinking_delta instead)
+	Thinking string `json:"thinking,omitempty"`
+
+	// redacted_thinking: the full opaque payload, delivered whole at
+	// content_block_start (redacted_thinking blocks have no deltas)
+	Data string `json:"data,omitempty"`
 }
 
 type contentBlockStartEvent struct {
@@ -95,6 +111,12 @@ type streamDelta struct {
 	Type        string `json:"type"`
 	Text        string `json:"text,omitempty"`
 	PartialJSON string `json:"partial_json,omitempty"`
+
+	// thinking_delta
+	Thinking string `json:"thinking,omitempty"`
+
+	// signature_delta
+	Signature string `json:"signature,omitempty"`
 }
 
 type contentBlockDeltaEvent struct {
@@ -124,7 +146,8 @@ type messageStartEvent struct {
 }
 
 type messageStartUsage struct {
-	InputTokens int `json:"input_tokens"`
+	InputTokens          int `json:"input_tokens"`
+	CacheReadInputTokens int `json:"cache_read_input_tokens,omitempty"`
 }
 
 // ---- Error wire type ----
@@ -281,18 +304,29 @@ func userBlocks(parts []provider.ContentPart) ([]wireContentBlock, error) {
 	return out, nil
 }
 
+// assistantBlocks converts an assistant message's content parts into wire
+// blocks. Reasoning parts are emitted first, before any other block type —
+// the Messages API requires thinking/redacted_thinking blocks to lead an
+// assistant turn when thinking is enabled.
 func assistantBlocks(parts []provider.ContentPart) ([]wireContentBlock, error) {
-	var out []wireContentBlock
+	var reasoning []wireContentBlock
+	var rest []wireContentBlock
 	for _, part := range parts {
 		switch p := part.(type) {
+		case provider.ReasoningPart:
+			if p.Redacted {
+				reasoning = append(reasoning, wireContentBlock{Type: "redacted_thinking", Data: p.Text})
+			} else {
+				reasoning = append(reasoning, wireContentBlock{Type: "thinking", Thinking: p.Text, Signature: p.Signature})
+			}
 		case provider.TextPart:
-			out = append(out, wireContentBlock{Type: "text", Text: p.Text})
+			rest = append(rest, wireContentBlock{Type: "text", Text: p.Text})
 		case provider.ToolCallPart:
 			input, err := parsedArgs(p.Args)
 			if err != nil {
 				return nil, fmt.Errorf("anthropic: parse tool call args: %w", err)
 			}
-			out = append(out, wireContentBlock{
+			rest = append(rest, wireContentBlock{
 				Type:  "tool_use",
 				ID:    p.ID,
 				Name:  p.Name,
@@ -302,7 +336,7 @@ func assistantBlocks(parts []provider.ContentPart) ([]wireContentBlock, error) {
 			return nil, fmt.Errorf("anthropic: unsupported content part %T in assistant message", part)
 		}
 	}
-	return out, nil
+	return append(reasoning, rest...), nil
 }
 
 // parsedArgs unmarshals raw tool-call args JSON into a generic value and
@@ -389,9 +423,10 @@ func convertResponse(wr messageResponse, raw []byte) *provider.Response {
 		Raw:          json.RawMessage(raw),
 		FinishReason: mapStopReason(wr.StopReason),
 		Usage: provider.Usage{
-			InputTokens:  wr.Usage.InputTokens,
-			OutputTokens: wr.Usage.OutputTokens,
-			TotalTokens:  wr.Usage.InputTokens + wr.Usage.OutputTokens,
+			InputTokens:       wr.Usage.InputTokens,
+			OutputTokens:      wr.Usage.OutputTokens,
+			TotalTokens:       wr.Usage.InputTokens + wr.Usage.OutputTokens,
+			CachedInputTokens: wr.Usage.CacheReadInputTokens,
 		},
 	}
 
@@ -409,6 +444,10 @@ func convertResponse(wr messageResponse, raw []byte) *provider.Response {
 				Name: block.Name,
 				Args: args,
 			})
+		case "thinking":
+			resp.Content = append(resp.Content, provider.ReasoningPart{Text: block.Thinking, Signature: block.Signature})
+		case "redacted_thinking":
+			resp.Content = append(resp.Content, provider.ReasoningPart{Redacted: true, Text: block.Data})
 		}
 	}
 	return resp

@@ -22,6 +22,26 @@ type ToolCallEnd struct{ Call ToolCallPart } // complete, args fully assembled
 
 func (ToolCallEnd) isStreamPart() {}
 
+// ReasoningDelta is a fragment of reasoning/thinking text. Providers that
+// also attach a cryptographic signature to the finished reasoning block
+// (Anthropic) accumulate it internally and surface it only in the final
+// assembled ReasoningPart of the step's Response — there is no dedicated
+// stream part for the signature.
+type ReasoningDelta struct{ Text string }
+
+func (ReasoningDelta) isStreamPart() {}
+
+// ReasoningEnd carries a fully assembled reasoning block once the provider
+// stream finishes emitting it — the reasoning analogue of ToolCallEnd. This
+// is where a signed/redacted thinking block's Signature or Redacted data
+// (which never arrives piecemeal as ReasoningDelta text) is delivered.
+// Providers with no such assembled shape (e.g. plain reasoning_content
+// text) may omit ReasoningEnd entirely; consumers fall back to the
+// ReasoningDelta-accumulated text in that case.
+type ReasoningEnd struct{ Part ReasoningPart }
+
+func (ReasoningEnd) isStreamPart() {}
+
 type FinishPart struct {
 	Reason FinishReason
 	Usage  Usage

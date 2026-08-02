@@ -29,23 +29,25 @@ type ToolResultRecord struct {
 
 // Step captures the result of a single model call within a GenerateText run.
 type Step struct {
-	Text         string
-	ToolCalls    []ToolCallRecord
-	ToolResults  []ToolResultRecord
-	FinishReason provider.FinishReason
-	Usage        provider.Usage
-	Response     *provider.Response
+	Text          string
+	ReasoningText string // concatenated ReasoningParts of this step's Response
+	ToolCalls     []ToolCallRecord
+	ToolResults   []ToolResultRecord
+	FinishReason  provider.FinishReason
+	Usage         provider.Usage
+	Response      *provider.Response
 }
 
 // GenerateTextResult is the outcome of a GenerateText call.
 type GenerateTextResult struct {
-	Text         string // last step's text
-	Steps        []Step
-	ToolCalls    []ToolCallRecord   // last step's
-	ToolResults  []ToolResultRecord // last step's
-	FinishReason provider.FinishReason
-	Usage        provider.Usage     // summed over steps
-	Messages     []provider.Message // full final conversation incl. tool msgs
+	Text          string // last step's text
+	ReasoningText string // last step's reasoning text
+	Steps         []Step
+	ToolCalls     []ToolCallRecord   // last step's
+	ToolResults   []ToolResultRecord // last step's
+	FinishReason  provider.FinishReason
+	Usage         provider.Usage     // summed over steps
+	Messages      []provider.Message // full final conversation incl. tool msgs
 }
 
 // GenerateText calls opts.Model (through retry), running a multi-step
@@ -97,6 +99,8 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 		totalUsage.InputTokens += resp.Usage.InputTokens
 		totalUsage.OutputTokens += resp.Usage.OutputTokens
 		totalUsage.TotalTokens += resp.Usage.TotalTokens
+		totalUsage.CachedInputTokens += resp.Usage.CachedInputTokens
+		totalUsage.ReasoningTokens += resp.Usage.ReasoningTokens
 
 		messages = append(messages, provider.Message{Role: provider.RoleAssistant, Content: resp.Content})
 
@@ -132,13 +136,14 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 	last := steps[len(steps)-1]
 
 	return &GenerateTextResult{
-		Text:         last.Text,
-		Steps:        steps,
-		ToolCalls:    last.ToolCalls,
-		ToolResults:  last.ToolResults,
-		FinishReason: last.FinishReason,
-		Usage:        totalUsage,
-		Messages:     messages,
+		Text:          last.Text,
+		ReasoningText: last.ReasoningText,
+		Steps:         steps,
+		ToolCalls:     last.ToolCalls,
+		ToolResults:   last.ToolResults,
+		FinishReason:  last.FinishReason,
+		Usage:         totalUsage,
+		Messages:      messages,
 	}, nil
 }
 
@@ -195,11 +200,12 @@ func buildStep(resp *provider.Response) Step {
 		})
 	}
 	return Step{
-		Text:         resp.Text(),
-		ToolCalls:    toolCalls,
-		FinishReason: resp.FinishReason,
-		Usage:        resp.Usage,
-		Response:     resp,
+		Text:          resp.Text(),
+		ReasoningText: resp.ReasoningText(),
+		ToolCalls:     toolCalls,
+		FinishReason:  resp.FinishReason,
+		Usage:         resp.Usage,
+		Response:      resp,
 	}
 }
 

@@ -172,6 +172,12 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 			if len(chunk.Choices) > 0 {
 				choice := chunk.Choices[0]
 
+				if choice.Delta.ReasoningContent != "" {
+					if !yield(provider.ReasoningDelta{Text: choice.Delta.ReasoningContent}) {
+						return
+					}
+				}
+
 				if choice.Delta.Content != "" {
 					if !yield(provider.TextDelta{Text: choice.Delta.Content}) {
 						return
@@ -229,6 +235,12 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 					InputTokens:  chunk.Usage.PromptTokens,
 					OutputTokens: chunk.Usage.CompletionTokens,
 					TotalTokens:  chunk.Usage.TotalTokens,
+				}
+				if chunk.Usage.PromptTokensDetails != nil {
+					usage.CachedInputTokens = chunk.Usage.PromptTokensDetails.CachedTokens
+				}
+				if chunk.Usage.CompletionTokensDetails != nil {
+					usage.ReasoningTokens = chunk.Usage.CompletionTokensDetails.ReasoningTokens
 				}
 			}
 		}

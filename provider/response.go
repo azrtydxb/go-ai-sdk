@@ -20,6 +20,17 @@ type Usage struct {
 	InputTokens  int
 	OutputTokens int
 	TotalTokens  int
+
+	// CachedInputTokens is the portion of InputTokens served from a
+	// provider-side prompt cache (Anthropic cache_read_input_tokens,
+	// OpenAI-compatible usage.prompt_tokens_details.cached_tokens). Zero
+	// when the provider doesn't report it or no cache was used.
+	CachedInputTokens int
+	// ReasoningTokens is the portion of OutputTokens spent on reasoning/
+	// thinking content (OpenAI-compatible
+	// usage.completion_tokens_details.reasoning_tokens). Zero when the
+	// provider doesn't report it.
+	ReasoningTokens int
 }
 
 type Response struct {
@@ -35,6 +46,17 @@ func (r *Response) Text() string {
 	for _, part := range r.Content {
 		if tp, ok := part.(TextPart); ok {
 			sb.WriteString(tp.Text)
+		}
+	}
+	return sb.String()
+}
+
+// ReasoningText concatenates all ReasoningParts in the response.
+func (r *Response) ReasoningText() string {
+	var sb strings.Builder
+	for _, part := range r.Content {
+		if rp, ok := part.(ReasoningPart); ok {
+			sb.WriteString(rp.Text)
 		}
 	}
 	return sb.String()

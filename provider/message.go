@@ -57,6 +57,20 @@ type ToolResultPart struct {
 
 func (ToolResultPart) isContentPart() {}
 
+// ReasoningPart is a reasoning/thinking content part. Signature and
+// Redacted are Anthropic-specific fields: Signature preserves the
+// cryptographic signature Anthropic attaches to a visible thinking block,
+// required to round-trip the block back to the API in a later request; a
+// redacted_thinking block sets Redacted true and Text holds the opaque
+// encrypted data rather than readable reasoning text.
+type ReasoningPart struct {
+	Text      string
+	Redacted  bool
+	Signature string
+}
+
+func (ReasoningPart) isContentPart() {}
+
 // Helper functions
 func UserText(text string) Message {
 	return Message{

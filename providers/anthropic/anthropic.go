@@ -3,6 +3,22 @@
 //
 // Anthropic has no embeddings API, so this package intentionally does not
 // implement provider.EmbeddingModel — matching the TS AI SDK.
+//
+// # Extended thinking
+//
+// Extended thinking (Anthropic's "thinking" content blocks) is enabled per
+// call via provider.Call.ProviderOptions, not a typed option — set
+// ProviderOptions["anthropic"]["thinking"] to
+// map[string]any{"type": "enabled", "budget_tokens": N}. When enabled, the
+// response's thinking/redacted_thinking blocks surface as
+// provider.ReasoningPart content parts (redacted_thinking sets
+// ReasoningPart.Redacted and puts the opaque payload in Text; a regular
+// thinking block sets Signature). Streaming surfaces the thinking text as
+// provider.ReasoningDelta and the finished block (including any signature)
+// as provider.ReasoningEnd. When an assistant message containing
+// ReasoningParts is sent back to the API on a later turn, this package
+// automatically reorders them to lead the message content, as the Messages
+// API requires.
 package anthropic
 
 import (
