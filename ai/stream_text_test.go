@@ -95,6 +95,44 @@ func TestStreamTextEarlyBreakCloses(t *testing.T) {
 	}
 }
 
+// TestStreamTextToolLoopDeltaOnlyToolCall verifies that when a provider
+// streams a tool call purely as ToolCallDelta parts (name arriving once on
+// the first delta, args streamed across further deltas) without ever
+// emitting a ToolCallEnd, the assembled fallback ToolCallPart still carries
+// the tool Name so the registered tool is found and executed.
+func TestStreamTextToolLoopDeltaOnlyToolCall(t *testing.T) {
+	m := &aitest.MockModel{Streams: [][]provider.StreamPart{
+		{
+			provider.ToolCallDelta{ID: "c1", Name: "t", ArgsDelta: `{"city":`},
+			provider.ToolCallDelta{ID: "c1", ArgsDelta: `"Ghent"}`},
+			provider.FinishPart{Reason: provider.FinishToolCalls},
+		},
+		{
+			provider.TextDelta{Text: "sunny"},
+			provider.FinishPart{Reason: provider.FinishStop},
+		},
+	}}
+	tool := NewTool("t", "", func(_ context.Context, a weatherArgs) (any, error) { return "sunny", nil })
+	s, err := StreamText(t.Context(), GenerateTextOpts{Model: m, Prompt: "x", Tools: []Tool{tool}, MaxSteps: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+	}
+	if s.Err() != nil {
+		t.Fatal(s.Err())
+	}
+	if len(s.Steps()) != 2 {
+		t.Fatalf("steps = %d, want 2", len(s.Steps()))
+	}
+	if len(s.Steps()[0].ToolResults) != 1 || s.Steps()[0].ToolResults[0].Result != "sunny" {
+		t.Fatalf("tool result missing or wrong: %+v", s.Steps()[0].ToolResults)
+	}
+	if s.Steps()[0].ToolResults[0].Err != nil {
+		t.Fatalf("unexpected tool error: %v", s.Steps()[0].ToolResults[0].Err)
+	}
+}
+
 // TestStreamTextMidStreamErrorSurfaces verifies that an error surfaced by the
 // provider stream mid-iteration (via StreamResponse.Err()) is exposed through
 // TextStream.Err() and stops the loop cleanly without retrying.

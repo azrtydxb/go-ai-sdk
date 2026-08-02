@@ -104,7 +104,11 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 
 			var text string
 			var toolCalls []provider.ToolCallPart
-			argsByID := map[string]*[]byte{}
+			type pendingCall struct {
+				name string
+				args []byte
+			}
+			argsByID := map[string]*pendingCall{}
 			var finish provider.FinishPart
 			var gotFinish bool
 			abandoned := false
@@ -114,13 +118,15 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 				case provider.TextDelta:
 					text += part.Text
 				case provider.ToolCallDelta:
-					buf, ok := argsByID[part.ID]
+					pc, ok := argsByID[part.ID]
 					if !ok {
-						b := []byte{}
-						buf = &b
-						argsByID[part.ID] = buf
+						pc = &pendingCall{}
+						argsByID[part.ID] = pc
 					}
-					*buf = append(*buf, part.ArgsDelta...)
+					if part.Name != "" {
+						pc.name = part.Name
+					}
+					pc.args = append(pc.args, part.ArgsDelta...)
 				case provider.ToolCallEnd:
 					toolCalls = append(toolCalls, part.Call)
 				case provider.FinishPart:
@@ -154,11 +160,11 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 			for _, tc := range toolCalls {
 				seen[tc.ID] = true
 			}
-			for id, buf := range argsByID {
+			for id, pc := range argsByID {
 				if seen[id] {
 					continue
 				}
-				toolCalls = append(toolCalls, provider.ToolCallPart{ID: id, Args: *buf})
+				toolCalls = append(toolCalls, provider.ToolCallPart{ID: id, Name: pc.name, Args: pc.args})
 			}
 
 			step := Step{
@@ -251,7 +257,11 @@ func (s *TextStream) Err() error { return s.err }
 // Text returns the accumulated text of the final step.
 func (s *TextStream) Text() string { return s.lastText }
 
-// Steps returns the steps executed so far.
+// Steps returns the steps executed so far. If iteration stopped because of a
+// *NoSuchToolError (an unknown tool was requested), the step in which that
+// happened is still appended, with its ToolCalls populated but ToolResults
+// nil (execution never ran) — check Err() to detect this case rather than
+// assuming every step in Steps() completed successfully.
 func (s *TextStream) Steps() []Step { return s.steps }
 
 // Usage returns the summed usage across all steps.
