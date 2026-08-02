@@ -89,7 +89,11 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 
 	call, err := buildCall(opts)
 	if err != nil {
-		return fail(err)
+		// Argument-validation errors are reported solely via the returned
+		// error, not OnError — this mirrors StreamText, which never reaches
+		// the point of returning a *TextStream (and thus never has an
+		// OnError-bearing call site to fire) when buildCall fails.
+		return nil, err
 	}
 
 	maxRetries := defaultMaxRetries

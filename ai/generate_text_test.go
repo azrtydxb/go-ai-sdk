@@ -159,6 +159,28 @@ func TestGenerateTextValidation(t *testing.T) {
 	}
 }
 
+// TestGenerateTextOnErrorNotCalledForValidationError verifies OnError does
+// NOT fire for a buildCall argument-validation error (nil Model here) — only
+// the error is returned. This mirrors StreamText, which never reaches a
+// call site capable of invoking OnError when its own equivalent validation
+// fails (there is no started call yet for OnError to describe).
+func TestGenerateTextOnErrorNotCalledForValidationError(t *testing.T) {
+	onErrorCalled := false
+	_, err := GenerateText(t.Context(), GenerateTextOpts{
+		// Model is nil: buildCall fails before any model interaction.
+		Prompt: "hi",
+		OnError: func(e error) {
+			onErrorCalled = true
+		},
+	})
+	if err == nil {
+		t.Fatal("want error when Model is nil")
+	}
+	if onErrorCalled {
+		t.Fatal("OnError must not be called for an argument-validation error")
+	}
+}
+
 func TestGenerateTextRetriesThenWrapsError(t *testing.T) {
 	m := &aitest.MockModel{Err: NewAPICallError(500, "https://x", "", "boom")}
 	_, err := GenerateText(t.Context(), GenerateTextOpts{Model: m, Prompt: "hi"})

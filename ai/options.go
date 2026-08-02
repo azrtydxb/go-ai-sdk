@@ -85,6 +85,15 @@ type GenerateTextOpts struct {
 	// failure to the caller; OnError additionally fires with that same
 	// error for symmetry with StreamText, so code that wires up both APIs
 	// through one callback doesn't have to special-case GenerateText.
+	//
+	// OnError is not invoked for argument-validation errors (nil model,
+	// prompt/messages misuse) — those are reported solely via the returned
+	// error, in both APIs. This mirrors StreamText, which never reaches a
+	// call site capable of invoking OnError when that validation fails
+	// (buildCall runs before the first model call, so there's no started
+	// call for OnError to describe); GenerateText applies the same
+	// exclusion for consistency, even though it could technically fire
+	// OnError there.
 	OnError func(err error)
 
 	// ProviderOptions carries provider-specific escape-hatch parameters. It
