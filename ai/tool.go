@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/schema"
@@ -81,6 +82,15 @@ func (t *tool) Execute(ctx context.Context, args json.RawMessage) (any, error) {
 			ToolName: t.name,
 			Args:     args,
 			Cause:    err,
+		}
+	}
+
+	// Check for trailing content after the JSON value
+	if decoder.More() {
+		return nil, &InvalidToolArgumentsError{
+			ToolName: t.name,
+			Args:     args,
+			Cause:    fmt.Errorf("trailing content after JSON value"),
 		}
 	}
 

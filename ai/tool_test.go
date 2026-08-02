@@ -45,3 +45,12 @@ func TestNewToolWrapsExecutionError(t *testing.T) {
 		t.Fatalf("err = %v; want ToolExecutionError wrapping boom", err)
 	}
 }
+
+func TestNewToolRejectsTrailingGarbage(t *testing.T) {
+	tool := NewTool("t", "", func(_ context.Context, a weatherArgs) (any, error) { return nil, nil })
+	_, err := tool.Execute(t.Context(), json.RawMessage(`{"city":"Ghent"}garbage`))
+	var iae *InvalidToolArgumentsError
+	if !errors.As(err, &iae) || iae.ToolName != "t" {
+		t.Fatalf("err = %v; want InvalidToolArgumentsError", err)
+	}
+}
