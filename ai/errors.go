@@ -1,0 +1,113 @@
+package ai
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+// APICallError represents an error from an AI provider API call.
+type APICallError struct {
+	StatusCode   int
+	URL          string
+	ResponseBody string
+	Retryable    bool
+	Message      string
+}
+
+// Error implements the error interface.
+func (e *APICallError) Error() string {
+	return fmt.Sprintf("ai: API call to %s failed: status %d: %s", e.URL, e.StatusCode, e.Message)
+}
+
+// IsRetryable implements the retry.Retryable interface.
+func (e *APICallError) IsRetryable() bool {
+	return e.Retryable
+}
+
+// NewAPICallError creates a new APICallError with Retryable set based on status code.
+// Retryable is true for status codes: 429, 408, or >= 500.
+func NewAPICallError(statusCode int, url, body, message string) *APICallError {
+	retryable := statusCode == 429 || statusCode == 408 || statusCode >= 500
+	return &APICallError{
+		StatusCode:   statusCode,
+		URL:          url,
+		ResponseBody: body,
+		Retryable:    retryable,
+		Message:      message,
+	}
+}
+
+// NoObjectGeneratedError is returned when an LLM fails to generate a valid object.
+type NoObjectGeneratedError struct {
+	RawText string
+	Cause   error
+}
+
+// Error implements the error interface.
+func (e *NoObjectGeneratedError) Error() string {
+	return fmt.Sprintf("no object generated: %v", e.Cause)
+}
+
+// Unwrap implements the error unwrapping interface.
+func (e *NoObjectGeneratedError) Unwrap() error {
+	return e.Cause
+}
+
+// NoSuchToolError is returned when a tool is not found.
+type NoSuchToolError struct {
+	ToolName string
+}
+
+// Error implements the error interface.
+func (e *NoSuchToolError) Error() string {
+	return fmt.Sprintf("no such tool: %s", e.ToolName)
+}
+
+// InvalidToolArgumentsError is returned when tool arguments are invalid.
+type InvalidToolArgumentsError struct {
+	ToolName string
+	Args     json.RawMessage
+	Cause    error
+}
+
+// Error implements the error interface.
+func (e *InvalidToolArgumentsError) Error() string {
+	return fmt.Sprintf("invalid arguments for tool %s: %v", e.ToolName, e.Cause)
+}
+
+// Unwrap implements the error unwrapping interface.
+func (e *InvalidToolArgumentsError) Unwrap() error {
+	return e.Cause
+}
+
+// ToolExecutionError is returned when tool execution fails.
+type ToolExecutionError struct {
+	ToolName string
+	Cause    error
+}
+
+// Error implements the error interface.
+func (e *ToolExecutionError) Error() string {
+	return fmt.Sprintf("tool execution error in %s: %v", e.ToolName, e.Cause)
+}
+
+// Unwrap implements the error unwrapping interface.
+func (e *ToolExecutionError) Unwrap() error {
+	return e.Cause
+}
+
+// RetryError is returned when retries are exhausted.
+type RetryError struct {
+	Attempts int
+	LastErr  error
+}
+
+// Error implements the error interface.
+func (e *RetryError) Error() string {
+	return fmt.Sprintf("retries exhausted after %d attempts: %v", e.Attempts, e.LastErr)
+}
+
+// Unwrap implements the error unwrapping interface.
+func (e *RetryError) Unwrap() error {
+	return e.LastErr
+}
