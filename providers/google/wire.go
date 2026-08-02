@@ -291,6 +291,16 @@ func parsedArgs(raw json.RawMessage) (json.RawMessage, error) {
 	return json.Marshal(v)
 }
 
+// toolResultParts converts ToolResultParts into Gemini's functionResponse
+// wire shape. Unlike Anthropic/OpenAI, Gemini's functionResponse identifies
+// the call it answers by tool NAME, not by call ID, so trp.Name — not
+// trp.ToolCallID — is what ends up on the wire; callers must populate
+// ToolResultPart.Name (Gemini requires it, and there is no ID fallback).
+//
+// trp.IsError is intentionally not encoded: Gemini's functionResponse has
+// no dedicated error slot — the response content is always plain JSON
+// regardless of whether the tool call succeeded or failed (mirrors
+// providers/openai/wire.go's handling of the "tool" message content).
 func toolResultParts(parts []provider.ContentPart) ([]wirePart, error) {
 	var out []wirePart
 	for _, part := range parts {

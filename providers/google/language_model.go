@@ -124,6 +124,15 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 		var finishReason provider.FinishReason
 		haveFinish := false
 		sawFunctionCall := false
+		// toolCallIndex is a monotonically increasing counter used to
+		// synthesize tool-call IDs across the WHOLE stream, not per SSE
+		// chunk. Gemini's functionCall parts carry no ID of their own, and
+		// resetting the counter per chunk (e.g. using the part's index
+		// within cand.Content.Parts) would produce colliding IDs whenever
+		// two separate calls to the same tool name arrive in different
+		// chunks (both indexed 0), breaking ID-based tool-call/result
+		// correlation downstream.
+		toolCallIndex := 0
 
 		for ev, err := range sse.Scan(s.body) {
 			if err != nil {
@@ -155,7 +164,7 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 			}
 			cand := chunk.Candidates[0]
 
-			for i, part := range cand.Content.Parts {
+			for _, part := range cand.Content.Parts {
 				switch {
 				case part.FunctionCall != nil:
 					sawFunctionCall = true
@@ -164,10 +173,11 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 						args = json.RawMessage("{}")
 					}
 					call := provider.ToolCallPart{
-						ID:   fmt.Sprintf("call_%s_%d", part.FunctionCall.Name, i),
+						ID:   fmt.Sprintf("call_%s_%d", part.FunctionCall.Name, toolCallIndex),
 						Name: part.FunctionCall.Name,
 						Args: args,
 					}
+					toolCallIndex++
 					if !yield(provider.ToolCallDelta{ID: call.ID, Name: call.Name, ArgsDelta: string(args)}) {
 						return
 					}

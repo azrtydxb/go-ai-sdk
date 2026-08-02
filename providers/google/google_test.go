@@ -564,6 +564,54 @@ func streamSSEServer(t *testing.T, chunks []generateContentResponse) *httptest.S
 	return srv
 }
 
+// TestStreamToolCallIDsAreDistinctAcrossChunks covers two calls to the SAME
+// tool name arriving in two SEPARATE SSE chunks. The synthesized ID must be
+// unique per call (a counter across the whole stream), not reset to 0 for
+// each chunk's parts slice — otherwise both calls would collide on
+// "call_get_weather_0", breaking ID-based tool-call/result correlation.
+func TestStreamToolCallIDsAreDistinctAcrossChunks(t *testing.T) {
+	srv := streamSSEServer(t, []generateContentResponse{
+		{Candidates: []wireCandidate{{Content: wireContent{Parts: []wirePart{{
+			FunctionCall: &wireFunctionCall{Name: "get_weather", Args: json.RawMessage(`{"city":"Ghent"}`)},
+		}}}}}},
+		{
+			Candidates: []wireCandidate{{
+				Content: wireContent{Parts: []wirePart{{
+					FunctionCall: &wireFunctionCall{Name: "get_weather", Args: json.RawMessage(`{"city":"Bruges"}`)},
+				}}},
+				FinishReason: "STOP",
+			}},
+			UsageMetadata: &wireUsageMetadata{PromptTokenCount: 6, CandidatesTokenCount: 4, TotalTokenCount: 10},
+		},
+	})
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("gemini-test")
+
+	sr, err := model.Stream(context.Background(), provider.Call{
+		Messages: []provider.Message{provider.UserText("anything")},
+		Tools:    []provider.ToolDef{{Name: "get_weather", Schema: json.RawMessage(`{"type":"object"}`)}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	defer sr.Close()
+
+	var ends []provider.ToolCallEnd
+	for part := range sr.Parts() {
+		if end, ok := part.(provider.ToolCallEnd); ok {
+			ends = append(ends, end)
+		}
+	}
+	if err := sr.Err(); err != nil {
+		t.Fatalf("Err() = %v, want nil", err)
+	}
+	if len(ends) != 2 {
+		t.Fatalf("got %d ToolCallEnd part(s), want exactly 2: %+v", len(ends), ends)
+	}
+	if ends[0].Call.ID == ends[1].Call.ID {
+		t.Errorf("ToolCallEnd IDs collide: both %q (must be distinct across chunks)", ends[0].Call.ID)
+	}
+}
+
 // TestStreamEndsWithFinishReasonSeen covers the case where the connection
 // closes right after a chunk carrying a finishReason (Gemini has no
 // [DONE]/message_stop sentinel — natural EOF is the only signal). This must
