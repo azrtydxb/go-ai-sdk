@@ -148,3 +148,75 @@ func (m *MockEmbedder) ModelID() string { return "mock-embedder" }
 
 // ProviderName implements provider.EmbeddingModel.
 func (m *MockEmbedder) ProviderName() string { return "aitest" }
+
+// MockImageModel is a provider.ImageModel test double that returns a
+// scripted response or fails every call with Err if set.
+type MockImageModel struct {
+	Response *provider.ImageResponse
+	Err      error                // if set, every call fails with it
+	Calls    []provider.ImageCall // records every GenerateImages call
+}
+
+// GenerateImages implements provider.ImageModel. It records the call, then
+// returns Err if set, otherwise Response.
+func (m *MockImageModel) GenerateImages(ctx context.Context, call provider.ImageCall) (*provider.ImageResponse, error) {
+	m.Calls = append(m.Calls, call)
+	if m.Err != nil {
+		return nil, m.Err
+	}
+	return m.Response, nil
+}
+
+// ModelID implements provider.ImageModel.
+func (m *MockImageModel) ModelID() string { return "mock" }
+
+// ProviderName implements provider.ImageModel.
+func (m *MockImageModel) ProviderName() string { return "aitest" }
+
+// MockSpeechModel is a provider.SpeechModel test double that returns a
+// scripted response or fails every call with Err if set.
+type MockSpeechModel struct {
+	Response *provider.SpeechResponse
+	Err      error                 // if set, every call fails with it
+	Calls    []provider.SpeechCall // records every GenerateSpeech call
+}
+
+// GenerateSpeech implements provider.SpeechModel. It records the call, then
+// returns Err if set, otherwise Response.
+func (m *MockSpeechModel) GenerateSpeech(ctx context.Context, call provider.SpeechCall) (*provider.SpeechResponse, error) {
+	m.Calls = append(m.Calls, call)
+	if m.Err != nil {
+		return nil, m.Err
+	}
+	return m.Response, nil
+}
+
+// ModelID implements provider.SpeechModel.
+func (m *MockSpeechModel) ModelID() string { return "mock" }
+
+// ProviderName implements provider.SpeechModel.
+func (m *MockSpeechModel) ProviderName() string { return "aitest" }
+
+// MockTranscriptionModel is a provider.TranscriptionModel test double that
+// returns a scripted response or fails every call with Err if set.
+type MockTranscriptionModel struct {
+	Response *provider.TranscriptionResponse
+	Err      error                        // if set, every call fails with it
+	Calls    []provider.TranscriptionCall // records every Transcribe call
+}
+
+// Transcribe implements provider.TranscriptionModel. It records the call,
+// then returns Err if set, otherwise Response.
+func (m *MockTranscriptionModel) Transcribe(ctx context.Context, call provider.TranscriptionCall) (*provider.TranscriptionResponse, error) {
+	m.Calls = append(m.Calls, call)
+	if m.Err != nil {
+		return nil, m.Err
+	}
+	return m.Response, nil
+}
+
+// ModelID implements provider.TranscriptionModel.
+func (m *MockTranscriptionModel) ModelID() string { return "mock" }
+
+// ProviderName implements provider.TranscriptionModel.
+func (m *MockTranscriptionModel) ProviderName() string { return "aitest" }
