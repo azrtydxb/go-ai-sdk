@@ -281,7 +281,7 @@ func convertMessages(msgs []provider.Message) ([]wireMessage, error) {
 			for _, part := range m.Content {
 				trp, ok := part.(provider.ToolResultPart)
 				if !ok {
-					continue
+					return nil, fmt.Errorf("openaicompat: unsupported content part %T in tool message", part)
 				}
 				resultJSON, err := json.Marshal(trp.Result)
 				if err != nil {

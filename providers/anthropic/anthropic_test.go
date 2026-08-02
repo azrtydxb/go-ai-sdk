@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -425,6 +426,30 @@ func TestRequestShapeToolResultBlock(t *testing.T) {
 	json.Unmarshal(lastMsg["content"], &blocks)
 	if _, ok := blocks[0]["is_error"]; !ok {
 		t.Errorf("raw tool_result block missing is_error key: %s", blocks[0])
+	}
+}
+
+func TestRequestShapeToolMessageFilePartErrors(t *testing.T) {
+	srv, _ := newFixtureServer(t)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			provider.UserText("simple"),
+			{
+				Role: provider.RoleTool,
+				Content: []provider.ContentPart{provider.FilePart{
+					Data:      []byte("data"),
+					MediaType: "application/pdf",
+				}},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("Generate: want error for FilePart in tool message, got nil")
+	}
+	if !strings.Contains(err.Error(), "FilePart") {
+		t.Errorf("error = %q, want it to mention FilePart", err.Error())
 	}
 }
 

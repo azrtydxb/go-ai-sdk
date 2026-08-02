@@ -305,7 +305,7 @@ func toolResultBlocks(parts []provider.ContentPart) ([]wireContentBlock, error) 
 	for _, part := range parts {
 		trp, ok := part.(provider.ToolResultPart)
 		if !ok {
-			continue
+			return nil, fmt.Errorf("anthropic: unsupported content part %T in tool message", part)
 		}
 		resultJSON, err := json.Marshal(trp.Result)
 		if err != nil {

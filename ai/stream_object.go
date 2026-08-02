@@ -170,7 +170,8 @@ func (s *ObjectStream[T]) Usage() provider.Usage { return s.usage }
 // been ranged over (the caller decided not to consume the stream, so the
 // HTTP body would otherwise leak), after Partials() has been fully iterated
 // or abandoned (Partials() already closes the stream itself in both cases,
-// so Close() is then a no-op), or mid-iteration.
+// so Close() is then a no-op), or mid-iteration. Close is not safe for
+// concurrent use with Parts().
 func (s *ObjectStream[T]) Close() error {
 	if s.closed {
 		return nil

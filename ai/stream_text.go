@@ -283,7 +283,8 @@ func (s *TextStream) Messages() []provider.Message { return s.messages }
 // ranged over (the caller decided not to consume the stream, so the HTTP
 // body would otherwise leak), after Parts() has been fully iterated or
 // abandoned (Parts() already closes the stream itself in both cases, so
-// Close() is then a no-op), or mid-iteration.
+// Close() is then a no-op), or mid-iteration. Close is not safe for
+// concurrent use with Parts().
 func (s *TextStream) Close() error {
 	if s.closed {
 		return nil

@@ -30,6 +30,8 @@ type ImagePart struct {
 
 func (ImagePart) isContentPart() {}
 
+// FilePart is a file/attachment content part. Note: no built-in provider
+// currently supports FilePart; providers return a descriptive error.
 type FilePart struct {
 	Data      []byte
 	MediaType string

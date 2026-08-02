@@ -47,6 +47,7 @@ type chatRequest struct {
 	Model          string        `json:"model"`
 	Messages       []wireMessage `json:"messages"`
 	Tools          []wireTool    `json:"tools,omitempty"`
+	ToolChoice     string        `json:"tool_choice,omitempty"`
 	ResponseFormat any           `json:"response_format,omitempty"`
 	MaxTokens      *int          `json:"max_tokens,omitempty"`
 	Temperature    *float64      `json:"temperature,omitempty"`
@@ -161,26 +162,34 @@ func buildChatRequest(modelID string, call provider.Call, stream bool) (chatRequ
 
 	switch {
 	case call.ToolChoice != nil && call.ToolChoice.Mode == provider.ToolChoiceNone:
-		// ToolChoiceNone: omit tools entirely. Cohere v2 has no tool_choice
-		// field at all, so the only way to express "don't call tools" is to
-		// not send any tool definitions.
+		// ToolChoiceNone: omit tools entirely. Cohere v2 has no way to
+		// force "don't call tools" other than omitting tool definitions.
 	case call.ToolChoice != nil && call.ToolChoice.Mode == provider.ToolChoiceTool:
-		// ToolChoiceTool: send ONLY that one tool's definition. This is the
-		// closest expressible semantics — Cohere v2 has no per-request
-		// "force this tool" flag, but restricting the tools list to a
-		// single definition steers the model toward it.
+		// ToolChoiceTool: send ONLY that one tool's definition plus
+		// tool_choice:"REQUIRED" so Cohere must call a tool from the
+		// (single-entry) list.
+		var found bool
 		for _, t := range call.Tools {
 			if t.Name == call.ToolChoice.ToolName {
 				req.Tools = convertTools([]provider.ToolDef{t})
+				req.ToolChoice = "REQUIRED"
+				found = true
 				break
 			}
 		}
+		if !found {
+			return chatRequest{}, fmt.Errorf("cohere: tool choice %q not in provided tools", call.ToolChoice.ToolName)
+		}
+	case call.ToolChoice != nil && call.ToolChoice.Mode == provider.ToolChoiceRequired:
+		// ToolChoiceRequired: Cohere v2's native tool_choice:"REQUIRED"
+		// forces a tool call from the full tool list.
+		if len(call.Tools) > 0 {
+			req.Tools = convertTools(call.Tools)
+		}
+		req.ToolChoice = "REQUIRED"
 	default:
-		// ToolChoiceAuto (Cohere's default; no field sent) and
-		// ToolChoiceRequired (Cohere v2 has no force-flag, so "required" is
-		// approximated by sending the tools as-is and letting Cohere
-		// decide whether to call one) both reduce to just sending the
-		// tools list when present.
+		// ToolChoiceAuto (Cohere's default; no field sent): just send the
+		// tools list when present and let Cohere decide.
 		if len(call.Tools) > 0 {
 			req.Tools = convertTools(call.Tools)
 		}
@@ -251,7 +260,7 @@ func convertMessages(msgs []provider.Message) ([]wireMessage, error) {
 			for _, part := range m.Content {
 				trp, ok := part.(provider.ToolResultPart)
 				if !ok {
-					continue
+					return nil, fmt.Errorf("cohere: unsupported content part %T in tool message", part)
 				}
 				resultJSON, err := json.Marshal(trp.Result)
 				if err != nil {

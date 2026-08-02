@@ -306,7 +306,7 @@ func toolResultParts(parts []provider.ContentPart) ([]wirePart, error) {
 	for _, part := range parts {
 		trp, ok := part.(provider.ToolResultPart)
 		if !ok {
-			continue
+			return nil, fmt.Errorf("google: unsupported content part %T in tool message", part)
 		}
 		out = append(out, wirePart{FunctionResponse: &wireFunctionResponse{
 			Name: trp.Name,

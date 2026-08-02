@@ -232,4 +232,15 @@ func Run(t *testing.T, cfg Config) {
 			t.Fatalf("error = %v, want context.Canceled (via errors.Is)", err)
 		}
 	})
+
+	t.Run("Cancel/Stream", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err := cfg.Model.Stream(ctx, provider.Call{
+			Messages: []provider.Message{provider.UserText("stream simple")},
+		})
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("error = %v, want context.Canceled (via errors.Is)", err)
+		}
+	})
 }

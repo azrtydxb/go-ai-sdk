@@ -142,13 +142,21 @@ func (s *Server) record(raw []byte, auth string) {
 	s.authHeaders = append(s.authHeaders, auth)
 }
 
-func readBody(t *testing.T, r *http.Request) []byte {
+// readBody reads r's body, reporting via t.Errorf and writing a 500
+// response on failure. It returns ok=false when the caller (a handler
+// running on its own goroutine) should stop processing the request; t.Fatalf
+// is not goroutine-safe per the testing docs, so handler code must use this
+// pattern instead of failing the test directly.
+func readBody(t *testing.T, w http.ResponseWriter, r *http.Request) (buf []byte, ok bool) {
 	t.Helper()
 	buf, err := io.ReadAll(r.Body)
 	if err != nil {
-		t.Fatalf("compattest: read body: %v", err)
+		msg := fmt.Sprintf("compattest: read body: %v", err)
+		t.Errorf("%s", msg)
+		http.Error(w, msg, 500)
+		return nil, false
 	}
-	return buf
+	return buf, true
 }
 
 // lastUserText extracts the text of the last user message's Content field,
@@ -186,9 +194,15 @@ func NewFixtureServer(t *testing.T, providerName string) *Server {
 
 	mux.HandleFunc("/chat/completions", func(w http.ResponseWriter, r *http.Request) {
 		var req chatRequest
-		raw := readBody(t, r)
+		raw, ok := readBody(t, w, r)
+		if !ok {
+			return
+		}
 		if err := json.Unmarshal(raw, &req); err != nil {
-			t.Fatalf("compattest: decode request: %v", err)
+			msg := fmt.Sprintf("compattest: decode request: %v", err)
+			t.Errorf("%s", msg)
+			http.Error(w, msg, 500)
+			return
 		}
 		s.record(raw, r.Header.Get("Authorization"))
 
@@ -208,9 +222,12 @@ func NewFixtureServer(t *testing.T, providerName string) *Server {
 		}
 
 		if req.Stream {
-			flusher, ok := w.(http.Flusher)
-			if !ok {
-				t.Fatalf("compattest: ResponseWriter does not support flushing")
+			flusher, flushOK := w.(http.Flusher)
+			if !flushOK {
+				msg := "compattest: ResponseWriter does not support flushing"
+				t.Errorf("%s", msg)
+				http.Error(w, msg, 500)
+				return
 			}
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.WriteHeader(http.StatusOK)
@@ -240,7 +257,14 @@ func NewFixtureServer(t *testing.T, providerName string) *Server {
 				fmt.Fprint(w, "data: [DONE]\n\n")
 				flusher.Flush()
 			default:
-				t.Fatalf("compattest: unknown streaming scenario %q", text)
+				// Response headers (200 OK, text/event-stream) are already
+				// flushed by this point, so we can't switch to a 500; just
+				// report the failure and write an SSE comment so the client
+				// gets a deterministic (if wrong) response instead of a
+				// hang.
+				t.Errorf("compattest: unknown streaming scenario %q", text)
+				fmt.Fprintf(w, ": compattest: unknown streaming scenario %q\n\n", text)
+				flusher.Flush()
 			}
 			return
 		}
@@ -277,15 +301,23 @@ func NewFixtureServer(t *testing.T, providerName string) *Server {
 			}
 			json.NewEncoder(w).Encode(resp)
 		default:
-			t.Fatalf("compattest: unknown scenario %q", text)
+			msg := fmt.Sprintf("compattest: unknown scenario %q", text)
+			t.Errorf("%s", msg)
+			http.Error(w, msg, 500)
 		}
 	})
 
 	mux.HandleFunc("/embeddings", func(w http.ResponseWriter, r *http.Request) {
 		var req embeddingRequest
-		raw := readBody(t, r)
+		raw, ok := readBody(t, w, r)
+		if !ok {
+			return
+		}
 		if err := json.Unmarshal(raw, &req); err != nil {
-			t.Fatalf("compattest: decode embedding request: %v", err)
+			msg := fmt.Sprintf("compattest: decode embedding request: %v", err)
+			t.Errorf("%s", msg)
+			http.Error(w, msg, 500)
+			return
 		}
 		s.record(raw, r.Header.Get("Authorization"))
 

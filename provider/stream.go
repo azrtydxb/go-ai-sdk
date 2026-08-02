@@ -9,7 +9,9 @@ type TextDelta struct{ Text string }
 func (TextDelta) isStreamPart() {}
 
 type ToolCallDelta struct {
-	ID        string
+	ID string
+	// Name may be repeated on every fragment for a given ID; consumers
+	// must treat repeats as idempotent.
 	Name      string
 	ArgsDelta string
 }

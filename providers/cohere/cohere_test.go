@@ -290,6 +290,30 @@ func TestRequestShapeUnsupportedResponseFormatType(t *testing.T) {
 	}
 }
 
+func TestRequestShapeToolMessageFilePartErrors(t *testing.T) {
+	srv, _ := newFixtureServer(t)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("cohere-test")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			provider.UserText("simple"),
+			{
+				Role: provider.RoleTool,
+				Content: []provider.ContentPart{provider.FilePart{
+					Data:      []byte("data"),
+					MediaType: "application/pdf",
+				}},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("Generate: want error for FilePart in tool message, got nil")
+	}
+	if !strings.Contains(err.Error(), "FilePart") {
+		t.Errorf("error = %q, want it to mention FilePart", err.Error())
+	}
+}
+
 func TestRequestShapeToolResultOneMessagePerPart(t *testing.T) {
 	srv, fs := newFixtureServer(t)
 	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("cohere-test")
@@ -348,6 +372,9 @@ func TestRequestShapeToolChoiceToolSendsOnlyThatTool(t *testing.T) {
 	if req.Tools[0].Function.Name != "get_weather" {
 		t.Errorf("Tools[0].Function.Name = %q, want get_weather", req.Tools[0].Function.Name)
 	}
+	if req.ToolChoice != "REQUIRED" {
+		t.Errorf("ToolChoice = %q, want REQUIRED", req.ToolChoice)
+	}
 }
 
 func TestRequestShapeToolChoiceNoneOmitsTools(t *testing.T) {
@@ -369,28 +396,64 @@ func TestRequestShapeToolChoiceNoneOmitsTools(t *testing.T) {
 	}
 }
 
-func TestRequestShapeToolChoiceAutoAndRequiredSendToolsAsIs(t *testing.T) {
+func TestRequestShapeToolChoiceAutoSendsToolsAsIsNoField(t *testing.T) {
 	srv, fs := newFixtureServer(t)
 	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("cohere-test")
 
-	for _, mode := range []provider.ToolChoiceMode{provider.ToolChoiceAuto, provider.ToolChoiceRequired} {
-		_, err := model.Generate(context.Background(), provider.Call{
-			Messages:   []provider.Message{provider.UserText("simple")},
-			Tools:      []provider.ToolDef{{Name: "get_weather", Schema: json.RawMessage(`{"type":"object"}`)}},
-			ToolChoice: &provider.ToolChoice{Mode: mode},
-		})
-		if err != nil {
-			t.Fatalf("Generate mode %v: %v", mode, err)
-		}
-		req := fs.request()
-		if len(req.Tools) != 1 {
-			t.Errorf("mode %v: Tools = %d, want 1 (sent as-is)", mode, len(req.Tools))
-		}
-		var raw map[string]json.RawMessage
-		json.Unmarshal(fs.rawBody(), &raw)
-		if _, ok := raw["tool_choice"]; ok {
-			t.Errorf("mode %v: request has tool_choice field, want none (Cohere v2 has no such field)", mode)
-		}
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages:   []provider.Message{provider.UserText("simple")},
+		Tools:      []provider.ToolDef{{Name: "get_weather", Schema: json.RawMessage(`{"type":"object"}`)}},
+		ToolChoice: &provider.ToolChoice{Mode: provider.ToolChoiceAuto},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	req := fs.request()
+	if len(req.Tools) != 1 {
+		t.Errorf("Tools = %d, want 1 (sent as-is)", len(req.Tools))
+	}
+	var raw map[string]json.RawMessage
+	json.Unmarshal(fs.rawBody(), &raw)
+	if _, ok := raw["tool_choice"]; ok {
+		t.Errorf("request has tool_choice field, want none for auto mode")
+	}
+}
+
+func TestRequestShapeToolChoiceRequiredSendsREQUIRED(t *testing.T) {
+	srv, fs := newFixtureServer(t)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("cohere-test")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages:   []provider.Message{provider.UserText("simple")},
+		Tools:      []provider.ToolDef{{Name: "get_weather", Schema: json.RawMessage(`{"type":"object"}`)}},
+		ToolChoice: &provider.ToolChoice{Mode: provider.ToolChoiceRequired},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	req := fs.request()
+	if len(req.Tools) != 1 {
+		t.Errorf("Tools = %d, want 1 (sent as-is)", len(req.Tools))
+	}
+	if req.ToolChoice != "REQUIRED" {
+		t.Errorf("ToolChoice = %q, want REQUIRED", req.ToolChoice)
+	}
+}
+
+func TestRequestShapeToolChoiceToolUnmatchedNameErrors(t *testing.T) {
+	srv, _ := newFixtureServer(t)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("cohere-test")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages:   []provider.Message{provider.UserText("simple")},
+		Tools:      []provider.ToolDef{{Name: "get_weather", Schema: json.RawMessage(`{"type":"object"}`)}},
+		ToolChoice: &provider.ToolChoice{Mode: provider.ToolChoiceTool, ToolName: "does_not_exist"},
+	})
+	if err == nil {
+		t.Fatal("Generate: want error for unmatched tool choice name, got nil")
+	}
+	if !strings.Contains(err.Error(), `"does_not_exist"`) {
+		t.Errorf("error = %q, want it to mention the unmatched tool name", err.Error())
 	}
 }
 

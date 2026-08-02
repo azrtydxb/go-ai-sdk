@@ -68,6 +68,11 @@ func (m *embeddingModel) Embed(ctx context.Context, values []string) (*provider.
 		}
 		embeddings[d.Index] = d.Embedding
 	}
+	for i, e := range embeddings {
+		if e == nil {
+			return nil, fmt.Errorf("openaicompat: embedding response missing index %d", i)
+		}
+	}
 
 	return &provider.EmbeddingResponse{
 		Embeddings: embeddings,
