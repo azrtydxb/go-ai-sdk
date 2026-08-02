@@ -71,9 +71,14 @@ func TestTranscribeRetriesOnRetryableError(t *testing.T) {
 }
 
 func TestTranscribeEmptyText(t *testing.T) {
+	// An empty transcript is a legitimate successful result (e.g. silent or
+	// non-speech audio) — it must not be treated as an error.
 	m := &aitest.MockTranscriptionModel{Response: &provider.TranscriptionResponse{Text: ""}}
-	_, err := Transcribe(t.Context(), TranscribeOpts{Model: m, Audio: []byte("x")})
-	if err == nil {
-		t.Fatal("want error when model returns no text")
+	res, err := Transcribe(t.Context(), TranscribeOpts{Model: m, Audio: []byte("x")})
+	if err != nil {
+		t.Fatalf("err = %v, want nil for empty transcript text", err)
+	}
+	if res.Text != "" {
+		t.Fatalf("Text = %q, want empty", res.Text)
 	}
 }

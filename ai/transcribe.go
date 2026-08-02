@@ -3,7 +3,6 @@ package ai
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/retry"
 	"github.com/azrtydxb/go-ai-sdk/provider"
@@ -63,10 +62,6 @@ func Transcribe(ctx context.Context, opts TranscribeOpts) (*TranscribeResult, er
 			return nil, &RetryError{Attempts: exhausted.Attempts, LastErr: exhausted.LastErr}
 		}
 		return nil, err
-	}
-
-	if resp.Text == "" {
-		return nil, fmt.Errorf("ai: transcription model returned no text")
 	}
 
 	return &TranscribeResult{
