@@ -54,6 +54,9 @@ func TestRepairEdgeCases(t *testing.T) {
 		{"number at top level partial", `12`},
 		{"string at top level partial", `"hel`},
 		{"escaped backslash before cut", `{"a":"x\\`},
+		{"trailing comma then object close", `{"a":1,}`},
+		{"trailing comma then array close", `[1,]`},
+		{"nested trailing comma then close, then more", `{"a":[1,],"b":2`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -73,6 +76,9 @@ func TestRepairSpecificValues(t *testing.T) {
 		{`{"a":"x\"`, `{"a":"x\""}`},
 		{`{"a":"\u12`, `{"a":""}`},
 		{`{"a":1e`, `{"a":1}`}, // trim invalid exponent tail, keep valid number prefix... see impl
+		{`{"a":1,}`, `{"a":1}`},
+		{`[1,]`, `[1]`},
+		{`{"a":[1,],"b":2`, `{"a":[1],"b":2}`},
 	}
 	for _, c := range cases {
 		got, ok := Repair(c.in)

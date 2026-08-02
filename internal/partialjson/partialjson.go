@@ -103,6 +103,9 @@ skipAndDispatch:
 				stack = append(stack, frame{kind: frameArray, entryStart: len(out)})
 				st = stateValue
 			case c == ']' && len(stack) > 0 && stack[len(stack)-1].kind == frameArray:
+				// Closing with no element started for this entry: drop any
+				// dangling trailing comma that put us here (e.g. "[1,]").
+				out = out[:stack[len(stack)-1].entryStart]
 				out = append(out, c)
 				i++
 				stack = stack[:len(stack)-1]
@@ -141,6 +144,9 @@ skipAndDispatch:
 				isKey = true
 				st = stateString
 			case '}':
+				// Closing with no key started for this entry: drop any
+				// dangling trailing comma that put us here (e.g. `{"a":1,}`).
+				out = out[:stack[len(stack)-1].entryStart]
 				out = append(out, c)
 				i++
 				stack = stack[:len(stack)-1]
