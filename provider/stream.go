@@ -42,6 +42,14 @@ type ReasoningEnd struct{ Part ReasoningPart }
 
 func (ReasoningEnd) isStreamPart() {}
 
+// SourceEvent carries a whole SourcePart discovered mid-stream. Unlike
+// TextDelta/ReasoningDelta, sources arrive complete — there is no
+// incremental "SourceDelta" — so this stream part is emitted once per
+// source rather than accumulated by the consumer.
+type SourceEvent struct{ Source SourcePart }
+
+func (SourceEvent) isStreamPart() {}
+
 type FinishPart struct {
 	Reason FinishReason
 	Usage  Usage

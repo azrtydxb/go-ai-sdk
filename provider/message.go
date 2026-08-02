@@ -71,6 +71,20 @@ type ReasoningPart struct {
 
 func (ReasoningPart) isContentPart() {}
 
+// SourcePart is a citation/grounding source content part: a URL (and
+// optional title) the model consulted or cited while producing its
+// response. Currently only geminicompat populates this, from Google's
+// groundingMetadata.groundingChunks (see internal/geminicompat/wire.go).
+// Anthropic's citations are documented as future work, not covered in this
+// wave.
+type SourcePart struct {
+	ID    string
+	URL   string
+	Title string
+}
+
+func (SourcePart) isContentPart() {}
+
 // Helper functions
 func UserText(text string) Message {
 	return Message{

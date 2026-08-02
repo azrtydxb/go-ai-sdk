@@ -77,3 +77,14 @@ func (r *Response) ToolCalls() []ToolCallPart {
 	}
 	return calls
 }
+
+// SourceParts returns all SourceParts in the response.
+func (r *Response) SourceParts() []SourcePart {
+	var sources []SourcePart
+	for _, part := range r.Content {
+		if sp, ok := part.(SourcePart); ok {
+			sources = append(sources, sp)
+		}
+	}
+	return sources
+}

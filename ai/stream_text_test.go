@@ -97,6 +97,55 @@ func TestStreamTextReasoningDeltaOnly(t *testing.T) {
 // fully assembled ReasoningEnd (Anthropic thinking blocks, with a
 // signature) — the signature must survive into the step's Response content
 // so it can round-trip on a later turn.
+// TestStreamTextSourceEventAccumulates covers a stream emitting
+// SourceEvents: they must accumulate into TextStream.Sources(),
+// Step.Sources, and the assembled step Response's SourceParts(), mirroring
+// how ReasoningEnd accumulates into ReasoningText.
+func TestStreamTextSourceEventAccumulates(t *testing.T) {
+	m := &aitest.MockModel{Streams: [][]provider.StreamPart{{
+		provider.TextDelta{Text: "The sky "},
+		provider.SourceEvent{Source: provider.SourcePart{ID: "source_0", URL: "https://example.com/sky", Title: "Sky Facts"}},
+		provider.TextDelta{Text: "is blue."},
+		provider.SourceEvent{Source: provider.SourcePart{ID: "source_1", URL: "https://example.com/color", Title: "Color Facts"}},
+		provider.FinishPart{Reason: provider.FinishStop, Usage: provider.Usage{TotalTokens: 4}},
+	}}}
+	s, err := StreamText(t.Context(), GenerateTextOpts{Model: m, Prompt: "why is the sky blue"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var events []provider.SourceEvent
+	for p := range s.Parts() {
+		if ev, ok := p.(provider.SourceEvent); ok {
+			events = append(events, ev)
+		}
+	}
+	if s.Err() != nil {
+		t.Fatal(s.Err())
+	}
+	if len(events) != 2 {
+		t.Fatalf("streamed SourceEvent count = %d, want 2", len(events))
+	}
+
+	sources := s.Sources()
+	if len(sources) != 2 || sources[0].ID != "source_0" || sources[1].ID != "source_1" {
+		t.Fatalf("Sources() = %#v", sources)
+	}
+	if s.Text() != "The sky is blue." {
+		t.Fatalf("Text() = %q", s.Text())
+	}
+
+	steps := s.Steps()
+	if len(steps) != 1 {
+		t.Fatalf("Steps = %d, want 1", len(steps))
+	}
+	if len(steps[0].Sources) != 2 || steps[0].Sources[0].Title != "Sky Facts" {
+		t.Fatalf("Steps[0].Sources = %#v", steps[0].Sources)
+	}
+	if got := steps[0].Response.SourceParts(); len(got) != 2 {
+		t.Fatalf("Steps[0].Response.SourceParts() = %#v", got)
+	}
+}
+
 func TestStreamTextReasoningEndCarriesSignature(t *testing.T) {
 	m := &aitest.MockModel{Streams: [][]provider.StreamPart{{
 		provider.ReasoningDelta{Text: "thinking"},

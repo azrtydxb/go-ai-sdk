@@ -29,6 +29,7 @@ type TextStream struct {
 	totalUsage    provider.Usage
 	lastText      string
 	lastReasoning string
+	lastSources   []provider.SourcePart
 	lastFinish    provider.FinishReason
 }
 
@@ -116,6 +117,7 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 			var text string
 			var reasoningText string
 			var reasoningParts []provider.ReasoningPart
+			var sources []provider.SourcePart
 			var toolCalls []provider.ToolCallPart
 			type pendingCall struct {
 				name string
@@ -134,6 +136,8 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 					reasoningText += part.Text
 				case provider.ReasoningEnd:
 					reasoningParts = append(reasoningParts, part.Part)
+				case provider.SourceEvent:
+					sources = append(sources, part.Source)
 				case provider.ToolCallDelta:
 					pc, ok := argsByID[part.ID]
 					if !ok {
@@ -202,6 +206,9 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 			if text != "" {
 				respContent = append(respContent, provider.TextPart{Text: text})
 			}
+			for _, sp := range sources {
+				respContent = append(respContent, sp)
+			}
 			for _, tc := range toolCalls {
 				respContent = append(respContent, tc)
 			}
@@ -214,6 +221,7 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 			step := Step{
 				Text:          text,
 				ReasoningText: stepResp.ReasoningText(),
+				Sources:       stepResp.SourceParts(),
 				FinishReason:  finish.Reason,
 				Usage:         finish.Usage,
 				Response:      stepResp,
@@ -229,6 +237,7 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 			s.totalUsage.ReasoningTokens += finish.Usage.ReasoningTokens
 			s.lastText = text
 			s.lastReasoning = step.ReasoningText
+			s.lastSources = step.Sources
 			if gotFinish {
 				s.lastFinish = finish.Reason
 			}
@@ -323,6 +332,10 @@ func (s *TextStream) Text() string { return s.lastText }
 
 // ReasoningText returns the accumulated reasoning text of the final step.
 func (s *TextStream) ReasoningText() string { return s.lastReasoning }
+
+// Sources returns the SourceParts accumulated (via SourceEvent stream
+// parts) during the final step.
+func (s *TextStream) Sources() []provider.SourcePart { return s.lastSources }
 
 // Steps returns the steps executed so far. If iteration stopped because of a
 // *NoSuchToolError (an unknown tool was requested), the step in which that

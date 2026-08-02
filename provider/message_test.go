@@ -66,6 +66,29 @@ func TestReasoningPartIsContentPart(t *testing.T) {
 	var _ ContentPart = ReasoningPart{Text: "x", Redacted: true, Signature: "sig"}
 }
 
+func TestSourcePartIsContentPart(t *testing.T) {
+	var _ ContentPart = SourcePart{ID: "source_0", URL: "https://example.com", Title: "Example"}
+}
+
+func TestResponseSourcePartsFilters(t *testing.T) {
+	r := &Response{Content: []ContentPart{
+		TextPart{"a"},
+		SourcePart{ID: "source_0", URL: "https://example.com/1", Title: "One"},
+		ToolCallPart{ID: "1"},
+		SourcePart{ID: "source_1", URL: "https://example.com/2", Title: "Two"},
+	}}
+	sources := r.SourceParts()
+	if len(sources) != 2 {
+		t.Fatalf("SourceParts() len = %d, want 2: %#v", len(sources), sources)
+	}
+	if sources[0].ID != "source_0" || sources[0].URL != "https://example.com/1" || sources[0].Title != "One" {
+		t.Fatalf("SourceParts()[0] = %#v", sources[0])
+	}
+	if sources[1].ID != "source_1" {
+		t.Fatalf("SourceParts()[1] = %#v", sources[1])
+	}
+}
+
 func TestUsageDetailFields(t *testing.T) {
 	u := Usage{InputTokens: 100, OutputTokens: 50, CachedInputTokens: 20, ReasoningTokens: 10}
 	if u.CachedInputTokens != 20 || u.ReasoningTokens != 10 {

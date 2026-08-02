@@ -104,6 +104,26 @@ func TestGenerateTextReasoningTextSkipsRedacted(t *testing.T) {
 	}
 }
 
+func TestGenerateTextSources(t *testing.T) {
+	m := &aitest.MockModel{Responses: []*provider.Response{{
+		Content: []provider.ContentPart{
+			provider.TextPart{Text: "The sky is blue."},
+			provider.SourcePart{ID: "source_0", URL: "https://example.com/sky", Title: "Sky Facts"},
+		},
+		FinishReason: provider.FinishStop,
+	}}}
+	res, err := GenerateText(t.Context(), GenerateTextOpts{Model: m, Prompt: "why is the sky blue"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Sources) != 1 || res.Sources[0].ID != "source_0" || res.Sources[0].URL != "https://example.com/sky" {
+		t.Fatalf("Sources = %#v", res.Sources)
+	}
+	if len(res.Steps[0].Sources) != 1 || res.Steps[0].Sources[0].Title != "Sky Facts" {
+		t.Fatalf("Steps[0].Sources = %#v", res.Steps[0].Sources)
+	}
+}
+
 func TestGenerateTextUsageDetailsSummedAcrossSteps(t *testing.T) {
 	m := &aitest.MockModel{Responses: []*provider.Response{
 		{

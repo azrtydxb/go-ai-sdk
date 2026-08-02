@@ -34,7 +34,8 @@ type ToolResultRecord struct {
 // Step captures the result of a single model call within a GenerateText run.
 type Step struct {
 	Text          string
-	ReasoningText string // concatenated ReasoningParts of this step's Response
+	ReasoningText string                // concatenated ReasoningParts of this step's Response
+	Sources       []provider.SourcePart // this step's Response.SourceParts()
 	ToolCalls     []ToolCallRecord
 	ToolResults   []ToolResultRecord
 	FinishReason  provider.FinishReason
@@ -44,8 +45,9 @@ type Step struct {
 
 // GenerateTextResult is the outcome of a GenerateText call.
 type GenerateTextResult struct {
-	Text          string // last step's text
-	ReasoningText string // last step's reasoning text
+	Text          string                // last step's text
+	ReasoningText string                // last step's reasoning text
+	Sources       []provider.SourcePart // last step's sources
 	Steps         []Step
 	ToolCalls     []ToolCallRecord   // last step's
 	ToolResults   []ToolResultRecord // last step's
@@ -161,6 +163,7 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 	return &GenerateTextResult{
 		Text:          last.Text,
 		ReasoningText: last.ReasoningText,
+		Sources:       last.Sources,
 		Steps:         steps,
 		ToolCalls:     last.ToolCalls,
 		ToolResults:   last.ToolResults,
@@ -225,6 +228,7 @@ func buildStep(resp *provider.Response) Step {
 	return Step{
 		Text:          resp.Text(),
 		ReasoningText: resp.ReasoningText(),
+		Sources:       resp.SourceParts(),
 		ToolCalls:     toolCalls,
 		FinishReason:  resp.FinishReason,
 		Usage:         resp.Usage,

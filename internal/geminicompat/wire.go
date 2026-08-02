@@ -87,8 +87,25 @@ type generateContentResponse struct {
 }
 
 type wireCandidate struct {
-	Content      wireContent `json:"content"`
-	FinishReason string      `json:"finishReason,omitempty"`
+	Content           wireContent        `json:"content"`
+	FinishReason      string             `json:"finishReason,omitempty"`
+	GroundingMetadata *wireGroundingMeta `json:"groundingMetadata,omitempty"`
+}
+
+// wireGroundingMeta is Google's Grounding with Google Search metadata:
+// candidates[0].groundingMetadata.groundingChunks[].web{uri,title}. Each
+// chunk becomes a provider.SourcePart (see groundingSources).
+type wireGroundingMeta struct {
+	GroundingChunks []wireGroundingChunk `json:"groundingChunks,omitempty"`
+}
+
+type wireGroundingChunk struct {
+	Web *wireGroundingWeb `json:"web,omitempty"`
+}
+
+type wireGroundingWeb struct {
+	URI   string `json:"uri,omitempty"`
+	Title string `json:"title,omitempty"`
 }
 
 type wireUsageMetadata struct {
@@ -461,6 +478,32 @@ func convertResponse(wr generateContentResponse, raw []byte) *provider.Response 
 		}
 	}
 
+	for _, sp := range groundingSources(cand.GroundingMetadata) {
+		resp.Content = append(resp.Content, sp)
+	}
+
 	resp.FinishReason = mapFinishReason(cand.FinishReason, hasFunctionCall)
 	return resp
+}
+
+// groundingSources converts a candidate's groundingMetadata.groundingChunks
+// into provider.SourceParts, one per chunk that carries a web citation.
+// IDs are "source_<index>" where index is the chunk's position within
+// GroundingChunks (not a global counter), matching the brief's spec.
+func groundingSources(gm *wireGroundingMeta) []provider.SourcePart {
+	if gm == nil {
+		return nil
+	}
+	var out []provider.SourcePart
+	for i, chunk := range gm.GroundingChunks {
+		if chunk.Web == nil {
+			continue
+		}
+		out = append(out, provider.SourcePart{
+			ID:    fmt.Sprintf("source_%d", i),
+			URL:   chunk.Web.URI,
+			Title: chunk.Web.Title,
+		})
+	}
+	return out
 }

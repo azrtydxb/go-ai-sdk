@@ -209,6 +209,12 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 				}
 			}
 
+			for _, sp := range groundingSources(cand.GroundingMetadata) {
+				if !yield(provider.SourceEvent{Source: sp}) {
+					return
+				}
+			}
+
 			if cand.FinishReason != "" {
 				finishReason = mapFinishReason(cand.FinishReason, sawFunctionCall)
 				haveFinish = true
