@@ -314,10 +314,16 @@ func assistantBlocks(parts []provider.ContentPart) ([]wireContentBlock, error) {
 	for _, part := range parts {
 		switch p := part.(type) {
 		case provider.ReasoningPart:
-			if p.Redacted {
+			switch {
+			case p.Redacted:
 				reasoning = append(reasoning, wireContentBlock{Type: "redacted_thinking", Data: p.Text})
-			} else {
+			case p.Signature != "":
 				reasoning = append(reasoning, wireContentBlock{Type: "thinking", Thinking: p.Text, Signature: p.Signature})
+			default:
+				// A non-redacted ReasoningPart with no signature cannot form
+				// a valid thinking block (the Messages API requires a
+				// signature on replayed thinking blocks) — informational,
+				// not replayable — skip, same convention as SourcePart.
 			}
 		case provider.TextPart:
 			rest = append(rest, wireContentBlock{Type: "text", Text: p.Text})

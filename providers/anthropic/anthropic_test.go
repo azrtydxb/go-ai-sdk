@@ -811,6 +811,39 @@ func TestAssistantRoundTripRedactedThinkingFirst(t *testing.T) {
 	}
 }
 
+// TestAssistantUnsignedReasoningPartSkipped covers the Messages API
+// requirement that a replayed thinking block carry a signature: a
+// non-redacted ReasoningPart with an empty Signature cannot form a valid
+// thinking block (there is nothing to sign it with), so it must be silently
+// skipped rather than sent as {"type":"thinking","signature":""}, which the
+// API would reject. Signed ReasoningParts still round-trip normally (see
+// TestAssistantRoundTripReasoningFirst).
+func TestAssistantUnsignedReasoningPartSkipped(t *testing.T) {
+	srv, fs := newFixtureServer(t)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			provider.UserText("simple"),
+			{
+				Role: provider.RoleAssistant,
+				Content: []provider.ContentPart{
+					provider.ReasoningPart{Text: "unsigned reasoning"},
+					provider.TextPart{Text: "answer"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	blocks := fs.lastRequest.Messages[1].Content
+	if len(blocks) != 1 || blocks[0].Type != "text" || blocks[0].Text != "answer" {
+		t.Fatalf("blocks = %#v, want exactly one text block (unsigned ReasoningPart dropped)", blocks)
+	}
+}
+
 // TestStreamThinkingBlock covers the full thinking_delta + signature_delta
 // + content_block_stop sequence, asserting: ReasoningDelta parts carry the
 // streamed text, no stream part is emitted for signature_delta itself, and
