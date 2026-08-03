@@ -1360,6 +1360,43 @@ func TestStreamTextOnAbortFiresOnCtxCancelMidStream(t *testing.T) {
 	}
 }
 
+// TestStreamTextOnAbortFiresOnCtxCancelDuringToolExecution verifies that
+// OnAbort timing-independence extends past the step's own stream: a
+// between-steps error (here, an unknown-tool error out of runToolCalls)
+// fires OnAbort instead of OnError when ctx is already canceled by the time
+// that error is observed, exactly like a mid-stream error would.
+func TestStreamTextOnAbortFiresOnCtxCancelDuringToolExecution(t *testing.T) {
+	m := &aitest.MockModel{Streams: [][]provider.StreamPart{{
+		provider.ToolCallEnd{Call: provider.ToolCallPart{ID: "c1", Name: "unknown_tool", Args: []byte(`{}`)}},
+		provider.FinishPart{Reason: provider.FinishToolCalls},
+	}}}
+	ctx, cancel := context.WithCancel(t.Context())
+
+	var aborted, errored int
+	s, err := StreamText(ctx, GenerateTextOpts{
+		Model: m, Prompt: "hi",
+		OnAbort: func() { aborted++ },
+		OnError: func(error) { errored++ },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel() // cancel before draining, so ctx.Err() is non-nil once runToolCalls's error is observed
+	for range s.Parts() {
+	}
+
+	var nst *NoSuchToolError
+	if !errors.As(s.Err(), &nst) {
+		t.Fatalf("Err() = %v, want *NoSuchToolError", s.Err())
+	}
+	if aborted != 1 {
+		t.Fatalf("OnAbort calls = %d, want 1", aborted)
+	}
+	if errored != 0 {
+		t.Fatalf("OnError calls = %d, want 0 (ctx-cancel fires OnAbort only, even for a between-steps error)", errored)
+	}
+}
+
 // TestStreamTextOnAbortNotFiredOnOrdinaryMidStreamError verifies a genuine
 // (non-ctx-cancel) mid-stream error fires OnError only, not OnAbort.
 func TestStreamTextOnAbortNotFiredOnOrdinaryMidStreamError(t *testing.T) {

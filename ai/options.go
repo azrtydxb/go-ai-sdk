@@ -127,17 +127,22 @@ type GenerateTextOpts struct {
 	//     over it (e.g. via break) before the tool loop would otherwise have
 	//     ended naturally or with an error;
 	//   - the context passed to StreamText is canceled (or its deadline
-	//     exceeded) while a step's stream is in flight, surfacing as that
-	//     step's stream.Err().
+	//     exceeded), causing ANY step of the tool loop to terminate with an
+	//     error — not just a step's stream itself (stream.Err()), but
+	//     equally a between-steps failure while ctx is canceled: tool
+	//     execution (runToolCalls), or building/starting the next step's
+	//     call (buildCall/startStream). Wherever in the loop the
+	//     cancellation is observed, the outcome is the same: OnAbort fires
+	//     instead of OnError for that termination.
 	//
 	// OnAbort never fires on natural completion (StopWhen/MaxSteps/no more
 	// tool calls) — that case is OnFinish's — nor does it fire together with
-	// OnError for the same event: a ctx-cancellation mid-stream fires
-	// OnAbort only, while any other mid-stream error (a real provider
-	// failure, not caused by ctx) fires OnError only. Abandoning iteration
-	// early is likewise never accompanied by an error — Err() reports nil
-	// in that case, same as before this field existed — so only OnAbort
-	// fires for it.
+	// OnError for the same event: a ctx-cancellation-caused termination
+	// anywhere in the loop fires OnAbort only, while any other error (a real
+	// provider or tool failure, not caused by ctx) fires OnError only.
+	// Abandoning iteration early is likewise never accompanied by an error —
+	// Err() reports nil in that case, same as before this field existed —
+	// so only OnAbort fires for it.
 	OnAbort func()
 
 	// ProviderOptions carries provider-specific escape-hatch parameters. It

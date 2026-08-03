@@ -194,19 +194,9 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 
 			if err := stream.Err(); err != nil {
 				s.err = err
-				ctxCanceled := s.ctx.Err() != nil
-				if ctxCanceled {
-					// A ctx cancellation surfacing as the stream's error
-					// fires OnAbort, not OnError — see
-					// GenerateTextOpts.OnAbort's doc comment for why the two
-					// are mutually exclusive for this event.
-					s.fireAbort()
-				}
 				_ = stream.Close()
 				s.current = nil
-				if !ctxCanceled && s.opts.OnError != nil {
-					s.opts.OnError(err)
-				}
+				s.reportAbortOrError(err)
 				return
 			}
 			_ = stream.Close()
@@ -299,9 +289,7 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 					step.ToolResults = nil
 					s.steps = append(s.steps, step)
 					s.current = nil
-					if s.opts.OnError != nil {
-						s.opts.OnError(err)
-					}
+					s.reportAbortOrError(err)
 					return
 				}
 				step.ToolResults = results
@@ -351,9 +339,7 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 			if err != nil {
 				s.err = err
 				s.current = nil
-				if s.opts.OnError != nil {
-					s.opts.OnError(err)
-				}
+				s.reportAbortOrError(err)
 				return
 			}
 			call.Messages = s.messages
@@ -369,9 +355,7 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 			if err != nil {
 				s.err = err
 				s.current = nil
-				if s.opts.OnError != nil {
-					s.opts.OnError(err)
-				}
+				s.reportAbortOrError(err)
 				return
 			}
 			s.current = next
@@ -387,6 +371,32 @@ func assistantContent(respContent []provider.ContentPart) []provider.ContentPart
 		return nil
 	}
 	return append([]provider.ContentPart(nil), respContent...)
+}
+
+// reportAbortOrError classifies a terminal error occurring anywhere in the
+// tool loop — a step's stream failing, tool execution failing, or a
+// subsequent step's call failing to build or start — and dispatches it to
+// exactly one of OnAbort/OnError: if s.ctx is canceled (or its deadline has
+// passed) at the time of this check, err is treated as caused by that
+// cancellation and fireAbort runs instead of OnError, mirroring the
+// mutual-exclusivity GenerateTextOpts.OnAbort's doc comment describes for
+// the original mid-stream-error case; otherwise OnError runs (if set).
+//
+// This ctx check happens once, after the fact, rather than at the moment
+// err actually occurred — so it is inherently a classification-by-timing,
+// not a proof of causation: a genuine provider failure that happens to race
+// a ctx cancellation arriving at (almost) the same instant is classified as
+// an abort too, since there is no way to distinguish "canceled because of
+// this error" from "canceled independently, moments before this error was
+// observed" from the information available here.
+func (s *TextStream) reportAbortOrError(err error) {
+	if s.ctx.Err() != nil {
+		s.fireAbort()
+		return
+	}
+	if s.opts.OnError != nil {
+		s.opts.OnError(err)
+	}
 }
 
 // fireAbort invokes opts.OnAbort, if set, the first time it is called for
