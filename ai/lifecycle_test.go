@@ -221,6 +221,54 @@ func TestGenerateTextToolExecutionLifecycleOnePairPerRepairRetry(t *testing.T) {
 	}
 }
 
+// TestGenerateTextToolExecutionLifecycleRepairChangesID pins the documented
+// behavior of OnToolExecutionStart/OnToolExecutionEnd when RepairToolCall's
+// bad-args repair path changes the call's ID (and Name): Start fires with
+// the ORIGINAL (pre-repair) ID/Name — it fires before Execute is first
+// attempted, before repair has run — while End's ToolResultRecord carries
+// the REPAIRED ID/Name that was actually executed and recorded. The pair
+// must therefore be correlated by call order, not by ID, whenever repair
+// may rename a call.
+func TestGenerateTextToolExecutionLifecycleRepairChangesID(t *testing.T) {
+	tool := NewTool("get_weather", "", func(_ context.Context, a weatherArgs) (any, error) {
+		if a.City == "nowhere" {
+			return nil, &InvalidToolArgumentsError{ToolName: "get_weather", Cause: errors.New("bad args")}
+		}
+		return "sunny", nil
+	})
+	m := &aitest.MockModel{Responses: []*provider.Response{
+		toolCallResponse("get_weather", "orig-id", `{"city":"nowhere"}`),
+		{Content: []provider.ContentPart{provider.TextPart{Text: "done"}}, FinishReason: provider.FinishStop},
+	}}
+
+	var startCall ToolCallRecord
+	var endResult ToolResultRecord
+	_, err := GenerateText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "weather?", Tools: []Tool{tool}, MaxSteps: 3,
+		RepairToolCall: func(ctx context.Context, call ToolCallRecord, toolErr error) (ToolCallRecord, bool) {
+			// Repair changes both ID and Name (as well as fixing Args).
+			return ToolCallRecord{ID: "repaired-id", Name: call.Name, Args: []byte(`{"city":"Ghent"}`)}, true
+		},
+		OnToolExecutionStart: func(stepIndex int, call ToolCallRecord) { startCall = call },
+		OnToolExecutionEnd:   func(stepIndex int, result ToolResultRecord, err error) { endResult = result },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if startCall.ID != "orig-id" {
+		t.Fatalf("OnToolExecutionStart call.ID = %q, want %q (original, pre-repair)", startCall.ID, "orig-id")
+	}
+	if endResult.ToolCallID != "repaired-id" {
+		t.Fatalf("OnToolExecutionEnd result.ToolCallID = %q, want %q (repaired)", endResult.ToolCallID, "repaired-id")
+	}
+	if endResult.Result != "sunny" {
+		t.Fatalf("OnToolExecutionEnd result.Result = %v, want %q", endResult.Result, "sunny")
+	}
+	if endResult.Err != nil {
+		t.Fatalf("OnToolExecutionEnd err = %v, want nil", endResult.Err)
+	}
+}
+
 // TestGenerateTextOutputToolModeFallbackSkipsToolExecutionCallbacks verifies
 // that the Output tool-mode fallback's forced tool call (never executed via
 // runToolCalls) does NOT fire OnToolExecutionStart/End, while

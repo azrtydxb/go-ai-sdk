@@ -2,7 +2,6 @@ package ai
 
 import (
 	"context"
-	"errors"
 	"iter"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/retry"
@@ -111,11 +110,7 @@ func startStream(ctx context.Context, model provider.LanguageModel, call provide
 	stream, err := retry.Do(ctx, maxRetries, func() (provider.StreamResponse, error) {
 		return model.Stream(ctx, call)
 	})
-	if err != nil {
-		var exhausted *retry.ExhaustedError
-		if errors.As(err, &exhausted) {
-			return nil, &RetryError{Attempts: exhausted.Attempts, LastErr: exhausted.LastErr}
-		}
+	if err := translateRetryErr(err); err != nil {
 		return nil, err
 	}
 	return stream, nil

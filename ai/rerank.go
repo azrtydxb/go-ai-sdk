@@ -26,7 +26,10 @@ type RerankOpts struct {
 	// OnRerankStart, when non-nil, fires once before the first attempt.
 	OnRerankStart func(query string, documents []string)
 	// OnRerankEnd, when non-nil, fires once after the final attempt
-	// (success or exhausted error).
+	// (success or exhausted error). err, when non-nil, is the SAME error
+	// Rerank itself returns for that failure (retry exhaustion translated
+	// to *RetryError, never the raw retry-internal error). resp is nil on
+	// error.
 	OnRerankEnd func(resp *provider.RerankResponse, err error)
 }
 

@@ -227,6 +227,15 @@ type GenerateTextOpts struct {
 	// attempt. Neither callback fires for a call that never reaches
 	// Execute at all (e.g. one that aborts the whole batch as an unknown
 	// tool with no successful repair).
+	//
+	// If RepairToolCall's bad-args repair path (see its doc) changes the
+	// call's ID or Name, the pair does NOT agree on those fields:
+	// OnToolExecutionStart still fires with the ORIGINAL (pre-repair) ID
+	// and Name (it fires before Execute is first attempted, when only the
+	// original call is known), while OnToolExecutionEnd's ToolResultRecord
+	// carries the REPAIRED ID and Name (the ones actually executed and
+	// recorded). Correlate the pair by call order within the step, not by
+	// ID, if RepairToolCall may rename calls.
 	OnToolExecutionStart func(stepIndex int, call ToolCallRecord)
 	OnToolExecutionEnd   func(stepIndex int, result ToolResultRecord, err error)
 }
