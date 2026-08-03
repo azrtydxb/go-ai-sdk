@@ -3,7 +3,9 @@ package aitest
 
 import (
 	"context"
+	"errors"
 	"iter"
+	"sync"
 
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -244,3 +246,99 @@ func (m *MockTranscriptionModel) ModelID() string { return "mock" }
 
 // ProviderName implements provider.TranscriptionModel.
 func (m *MockTranscriptionModel) ProviderName() string { return "aitest" }
+
+// MockStreamingTranscriptionModel is a provider.StreamingTranscriptionModel
+// test double that replays a scripted event sequence, or fails every call
+// with Err if set.
+type MockStreamingTranscriptionModel struct {
+	Events []provider.TranscriptEvent // replayed in order by the returned stream
+	// StreamErr, if set, is what the returned stream's Err() reports once
+	// Events has been fully replayed, simulating a mid-stream failure.
+	StreamErr error
+	Err       error                              // if set, StreamTranscribe itself fails with it
+	Calls     []provider.StreamTranscriptionCall // records every StreamTranscribe call
+	Sent      [][]byte                           // records every Send call's audio, across all streams
+	CloseSent int                                // counts CloseSend calls, across all streams
+}
+
+// StreamTranscribe implements provider.StreamingTranscriptionModel. It
+// records the call, then returns Err if set, otherwise a
+// *MockTranscriptionStream replaying Events.
+func (m *MockStreamingTranscriptionModel) StreamTranscribe(ctx context.Context, call provider.StreamTranscriptionCall) (provider.TranscriptionStream, error) {
+	m.Calls = append(m.Calls, call)
+	if m.Err != nil {
+		return nil, m.Err
+	}
+	return &MockTranscriptionStream{model: m, events: m.Events, err: m.StreamErr}, nil
+}
+
+// ModelID implements provider.StreamingTranscriptionModel.
+func (m *MockStreamingTranscriptionModel) ModelID() string { return "mock" }
+
+// ProviderName implements provider.StreamingTranscriptionModel.
+func (m *MockStreamingTranscriptionModel) ProviderName() string { return "aitest" }
+
+// MockTranscriptionStream implements provider.TranscriptionStream by
+// replaying a fixed slice of TranscriptEvent values, then reporting err (if
+// any, scripted via MockStreamingTranscriptionModel.StreamErr) from Err()
+// to simulate a mid-stream failure.
+type MockTranscriptionStream struct {
+	model  *MockStreamingTranscriptionModel
+	events []provider.TranscriptEvent
+	err    error
+
+	mu     sync.Mutex
+	closed bool
+	ended  bool
+}
+
+// Send implements provider.TranscriptionStream. It records the audio on the
+// owning model.
+func (s *MockTranscriptionStream) Send(ctx context.Context, audio []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return errors.New("aitest: Send after Close")
+	}
+	s.model.Sent = append(s.model.Sent, audio)
+	return nil
+}
+
+// CloseSend implements provider.TranscriptionStream. Idempotent.
+func (s *MockTranscriptionStream) CloseSend(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.model.CloseSent++
+	return nil
+}
+
+// Events implements provider.TranscriptionStream. Single use.
+func (s *MockTranscriptionStream) Events() iter.Seq[provider.TranscriptEvent] {
+	return func(yield func(provider.TranscriptEvent) bool) {
+		defer func() {
+			s.mu.Lock()
+			s.ended = true
+			s.mu.Unlock()
+		}()
+		for _, e := range s.events {
+			if !yield(e) {
+				return
+			}
+		}
+	}
+}
+
+// Err implements provider.TranscriptionStream.
+func (s *MockTranscriptionStream) Err() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.err
+}
+
+// Close implements provider.TranscriptionStream. Idempotent.
+func (s *MockTranscriptionStream) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closed = true
+	return nil
+}
