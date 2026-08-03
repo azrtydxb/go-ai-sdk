@@ -204,6 +204,16 @@ and returns:
   a decoded value;
 - `result.Text` otherwise.
 
+### Malformed args: wrapped in `*ai.InvalidToolArgumentsError`
+
+Malformed `{"task": ...}` args passed to `Execute` are wrapped in
+`*ai.InvalidToolArgumentsError{ToolName: name, Args, Cause}` — the same
+typed error every other `ai.Tool` produces for bad args (see
+[Tools § Execution error taxonomy](tools.md#execution-error-taxonomy)), so
+`errors.As` works and `GenerateTextOpts.RepairToolCall`'s bad-args repair
+path is offered a chance to fix it, exactly as it would be for a
+hand-written tool.
+
 ### Errors: wrapped in `*ai.ToolExecutionError`
 
 A sub-agent error from `Generate` is wrapped in a

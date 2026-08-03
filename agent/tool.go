@@ -90,7 +90,7 @@ func (t *asToolTool) Schema() json.RawMessage { return t.schema }
 func (t *asToolTool) Execute(ctx context.Context, args json.RawMessage) (any, error) {
 	var a asToolArgs
 	if err := json.Unmarshal(args, &a); err != nil {
-		return nil, err
+		return nil, &ai.InvalidToolArgumentsError{ToolName: t.name, Args: args, Cause: err}
 	}
 
 	result, err := t.agent.Generate(ctx, RunOpts{Prompt: a.Task})

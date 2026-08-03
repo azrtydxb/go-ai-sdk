@@ -282,12 +282,23 @@ func TestAsToolSuspendedSubAgentIsTypedError(t *testing.T) {
 }
 
 // TestAsToolBadArgsIsError verifies malformed args to the generated tool
-// return an error rather than panicking.
+// return an error rather than panicking, wrapped in
+// *ai.InvalidToolArgumentsError (finding 7) so errors.As works and
+// GenerateTextOpts.RepairToolCall's bad-args repair path is offered a
+// chance to fix it, matching the error taxonomy every other tool produces.
 func TestAsToolBadArgsIsError(t *testing.T) {
 	sub := &Agent{Model: &aitest.MockModel{}}
 	tool := AsTool(sub, "helper", "a helper agent")
 
-	if _, err := tool.Execute(context.Background(), []byte(`not json`)); err == nil {
+	_, err := tool.Execute(context.Background(), []byte(`not json`))
+	if err == nil {
 		t.Fatal("want error for malformed args")
+	}
+	var iae *ai.InvalidToolArgumentsError
+	if !errors.As(err, &iae) {
+		t.Fatalf("err = %v (%T), want *ai.InvalidToolArgumentsError", err, err)
+	}
+	if iae.ToolName != "helper" {
+		t.Fatalf("ToolName = %q, want helper", iae.ToolName)
 	}
 }
