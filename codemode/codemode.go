@@ -1,0 +1,181 @@
+// Package codemode implements "Code Mode": instead of exposing each tool as
+// a separate function call the model invokes one at a time, Tool wraps a
+// set of ai.Tool values into a single run_code tool. The model is shown an
+// API doc of the available functions and writes a short program that calls
+// them, and that program is executed in a sandbox the caller supplies.
+//
+// The SDK ships no runtime. Sandbox is an interface the caller implements
+// against whatever they trust to run model-written code — a subprocess, a
+// container, an embedded interpreter (e.g. goja, a WASM runtime) — and
+// Env.CallTool is the only bridge back from that sandbox into the
+// underlying ai.Tools. codemode itself never executes code: it renders the
+// API doc, decodes the run_code arguments, dispatches CallTool invocations
+// by name, and post-processes the Sandbox's Result for the model.
+//
+// Security note: the sandbox implementer owns isolation. Whatever
+// guarantees the returned Tool appears to have — resource limits, network
+// access, filesystem access, wall-clock limits — are exactly the
+// guarantees the supplied Sandbox.Execute provides. codemode does not
+// enforce sandboxing on its own.
+package codemode
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strings"
+
+	"github.com/azrtydxb/go-ai-sdk/ai"
+)
+
+// Sandbox executes model-written code. The SDK ships no runtime — the
+// caller implements this against their own sandbox (subprocess, container,
+// embedded interpreter). Execute must honor ctx cancellation.
+type Sandbox interface {
+	Execute(ctx context.Context, code string, env Env) (*Result, error)
+}
+
+// Env is the binding surface a Sandbox exposes to running code.
+type Env struct {
+	// CallTool dispatches a tool invocation from sandboxed code to the
+	// underlying ai.Tools by name. Args is the raw JSON argument object.
+	CallTool func(ctx context.Context, name string, args json.RawMessage) (any, error)
+}
+
+// Result is what a Sandbox returns to the model.
+type Result struct {
+	Output string // printed/returned output, sent back to the model verbatim
+	Logs   []string
+}
+
+// Options configures the run_code Tool. A nil *Options is equivalent to
+// the zero value, which applies the documented defaults.
+type Options struct {
+	// Language names the language in the generated tool description and
+	// API docs. Purely prompting — the Sandbox defines what actually
+	// runs. Default "javascript".
+	Language string
+	// MaxOutputBytes truncates Result.Output sent to the model. 0 means
+	// the default of 16384.
+	MaxOutputBytes int
+}
+
+const (
+	defaultLanguage       = "javascript"
+	defaultMaxOutputBytes = 16384
+)
+
+// codeArgs is the {"code": string} argument shape the run_code tool's
+// schema describes and its Execute decodes.
+type codeArgs struct {
+	Code string `json:"code"`
+}
+
+// codeSchemaTemplate is the hand-written JSON Schema for the run_code
+// tool, with "<language>" substituted into the code field's description.
+const codeSchemaTemplate = `{"type":"object","properties":{"code":{"type":"string","description":"The %s code to execute."}},"required":["code"],"additionalProperties":false}`
+
+// codeTool is the ai.Tool implementation Tool returns.
+type codeTool struct {
+	sandbox        Sandbox
+	byName         map[string]ai.Tool
+	description    string
+	schema         json.RawMessage
+	maxOutputBytes int
+}
+
+// Tool wraps tools into a single "run_code" ai.Tool: the model writes code
+// that calls the tools through the sandbox's binding, instead of invoking
+// them one call at a time.
+func Tool(sandbox Sandbox, tools []ai.Tool, opts *Options) ai.Tool {
+	language := defaultLanguage
+	maxOutputBytes := defaultMaxOutputBytes
+	if opts != nil {
+		if opts.Language != "" {
+			language = opts.Language
+		}
+		if opts.MaxOutputBytes != 0 {
+			maxOutputBytes = opts.MaxOutputBytes
+		}
+	}
+
+	byName := make(map[string]ai.Tool, len(tools))
+	for _, t := range tools {
+		byName[t.Name()] = t
+	}
+
+	return &codeTool{
+		sandbox:        sandbox,
+		byName:         byName,
+		description:    buildDescription(language, tools),
+		schema:         json.RawMessage(fmt.Sprintf(codeSchemaTemplate, language)),
+		maxOutputBytes: maxOutputBytes,
+	}
+}
+
+// buildDescription assembles the run_code tool's description: a fixed
+// preamble naming the language, the generated API doc for tools, and the
+// usage rules the model needs to write valid calls.
+func buildDescription(language string, tools []ai.Tool) string {
+	preamble := fmt.Sprintf("Execute %s code in a sandbox. The following functions are available to your code:", language)
+	usage := "Call functions with a single object argument matching the schema; return or print your final answer."
+	return preamble + "\n\n" + APIDoc(language, tools) + "\n\n" + usage
+}
+
+// Name implements ai.Tool.
+func (t *codeTool) Name() string { return "run_code" }
+
+// Description implements ai.Tool.
+func (t *codeTool) Description() string { return t.description }
+
+// Schema implements ai.Tool.
+func (t *codeTool) Schema() json.RawMessage { return t.schema }
+
+// Execute implements ai.Tool. It decodes {"code": string}, runs it in the
+// sandbox with a CallTool binding that dispatches to the wrapped tools by
+// name, and returns the sandbox's Result rendered as a single string
+// (Output, truncated to MaxOutputBytes, followed by any Logs). Sandbox
+// errors are returned as-is (not wrapped) so the ai tool loop's usual
+// *ai.ToolExecutionError wrapping applies exactly once.
+func (t *codeTool) Execute(ctx context.Context, args json.RawMessage) (any, error) {
+	var a codeArgs
+	if err := json.Unmarshal(args, &a); err != nil {
+		return nil, err
+	}
+
+	env := Env{CallTool: t.dispatch}
+	result, err := t.sandbox.Execute(ctx, a.Code, env)
+	if err != nil {
+		return nil, err
+	}
+
+	output := result.Output
+	if len(output) > t.maxOutputBytes {
+		output = output[:t.maxOutputBytes] + "\n[truncated]"
+	}
+	var b strings.Builder
+	b.WriteString(output)
+	for _, line := range result.Logs {
+		b.WriteString("\nlog: ")
+		b.WriteString(line)
+	}
+	return b.String(), nil
+}
+
+// dispatch resolves name against the wrapped tools and executes it,
+// passing ctx through unchanged so ai.RuntimeContextFrom works inside the
+// dispatched tool. An unknown name is reported as a plain error (never a
+// panic) listing the available tool names, sorted for determinism.
+func (t *codeTool) dispatch(ctx context.Context, name string, args json.RawMessage) (any, error) {
+	tool, ok := t.byName[name]
+	if !ok {
+		names := make([]string, 0, len(t.byName))
+		for n := range t.byName {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		return nil, fmt.Errorf("codemode: unknown tool %q; available tools: %s", name, strings.Join(names, ", "))
+	}
+	return tool.Execute(ctx, args)
+}
