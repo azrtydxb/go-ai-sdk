@@ -71,21 +71,22 @@ where supported, `provider.EmbeddingModel`/`ImageModel`/`SpeechModel`/
 `TranscriptionModel`) against that vendor's actual HTTP API. Three
 implementation shapes exist in practice:
 
-- **Full, standalone implementations** — OpenAI, Anthropic, Google,
-  Mistral, Cohere, Bedrock, Vertex, Azure, ElevenLabs: each speaks its
-  vendor's wire format directly (own request/response structs, own SSE or
-  event-stream framing, own auth).
-- **Thin presets over `openaicompat`** — Groq, xAI, DeepSeek, Together,
-  Fireworks, Cerebras, Perplexity: these vendors' APIs are OpenAI
-  chat-completions compatible, so each provider package is little more
-  than a `Config{Name, BaseURL, ...}` value handed to
+- **Thin presets over `openaicompat`** — OpenAI, Azure, Groq, xAI,
+  DeepSeek, Cerebras, Together, Fireworks, Perplexity: these vendors'
+  APIs are OpenAI chat-completions compatible, so each provider package
+  is little more than a `Config{Name, BaseURL, ...}` value handed to
   `openaicompat.NewLanguageModel`, plus vendor-specific option wiring
-  (env var name, default base URL, auth header shape).
-- **Presets over `geminicompat`** — none ship as a preset today (`google`
-  is itself the full implementation `geminicompat` was extracted from,
-  per `internal/geminicompat`'s doc comment), but the shape mirrors
-  `openaicompat`'s: any future Gemini-wire-compatible vendor is a thin
-  `Config` away.
+  (env var name, default base URL, auth header shape). OpenAI is the
+  full preset (chat, embeddings, images, speech, transcription); the
+  others configure a subset.
+- **Presets over `geminicompat`** — Google and Vertex AI: Google is the
+  full implementation `geminicompat` was extracted from (per
+  `internal/geminicompat`'s doc comment), and Vertex AI configures the
+  same base with its own auth and base-URL shape.
+- **Full, standalone implementations** — Anthropic, Mistral, Cohere,
+  Bedrock, ElevenLabs: each speaks its vendor's wire format directly
+  (own request/response structs, own SSE or event-stream framing, own
+  auth) because it diverges too far from either shared base.
 
 ### Compat bases: `internal/openaicompat` and `internal/geminicompat`
 
