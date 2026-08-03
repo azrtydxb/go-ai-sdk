@@ -19,9 +19,11 @@ env var table. A few providers need more than a bare API key:
 - **Vertex AI** — needs a project and location
   (`GOOGLE_VERTEX_PROJECT`/`vertex.WithProject`,
   `GOOGLE_VERTEX_LOCATION`/`vertex.WithLocation`, defaulting to
-  `us-central1`) plus credentials. If neither an API key nor explicit
-  credentials are set, `New()` falls back to `GOOGLE_APPLICATION_CREDENTIALS`
-  — but this is **not** the full Google Application Default Credentials
+  `us-central1`) plus credentials — Vertex has no API-key concept, only an
+  OAuth2 bearer token. If no token source is configured (neither
+  `vertex.WithTokenSource`/`vertex.WithAccessToken`), `New()` falls back to
+  `GOOGLE_APPLICATION_CREDENTIALS` — but this is **not** the full Google
+  Application Default Credentials
   chain (no metadata-server lookup, no `gcloud auth` fallback), so running
   under GCE/GKE workload identity without an explicit credentials file will
   fail. Also note the project ID is only required at request time, not at
