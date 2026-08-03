@@ -496,7 +496,7 @@ seam above, which an application can bridge to OTel itself).
 5. **Reflection-based JSON Schema from structs** replaces Zod for tools and structured output.
 6. **Wave 4 media interfaces** — new top-level interfaces for image/speech/transcription (not embedded in LanguageModel) to keep the contract simple and separate concerns. Providers implement one, some, or all capabilities; the capability matrix is the source of truth.
 
-## Status: feature-complete (v0.1.0 candidate)
+## Status: feature-complete (released as v0.1.0)
 
 All goals in this spec are implemented and tested end-to-end: the core SDK
 (text/streaming, tool calling, structured output, embeddings), all 16
@@ -509,4 +509,4 @@ middleware, the model registry, telemetry, MCP tool integration, and
 file/document attachments). See [`CHANGELOG.md`](../../../CHANGELOG.md)
 for the full, feature-organized release record and
 [`docs/README.md`](../../README.md) for the current documentation index.
-No tag has been cut yet; this is the `v0.1.0` candidate state.
+Released as `v0.1.0` on 2026-08-03.

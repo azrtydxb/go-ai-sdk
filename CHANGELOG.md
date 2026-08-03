@@ -6,12 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 once it reaches 1.0.
 
-## [Unreleased] — v0.1.0 candidate
+## [Unreleased]
+
+Nothing yet.
+
+## [0.1.0] — 2026-08-03
 
 The public API described in the [design spec](docs/superpowers/specs/2026-08-02-go-ai-sdk-design.md)
 is implemented and tested end-to-end: the full core SDK, 22 providers, media
-capabilities, and the parity features listed below.
-No tag has been cut yet; this section will become `v0.1.0` at release.
+capabilities, and the parity features listed below. Providers are verified
+against recorded/documented wire formats via fixture tests; none have been
+smoke-tested against live APIs yet (see the
+[live-testing status](docs/providers/README.md#live-testing-status)).
 
 ### Added
 
@@ -123,4 +129,5 @@ No tag has been cut yet; this section will become `v0.1.0` at release.
 - [Migrating from the Vercel AI SDK](docs/migrating-from-vercel-ai-sdk.md)
   and [Architecture](docs/architecture.md).
 
-[Unreleased]: https://github.com/azrtydxb/go-ai-sdk/commits/main
+[Unreleased]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/azrtydxb/go-ai-sdk/releases/tag/v0.1.0

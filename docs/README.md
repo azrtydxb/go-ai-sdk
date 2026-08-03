@@ -55,7 +55,7 @@ exists — the SDK's public API is implemented and documented end-to-end (see
 
 ## Versioning
 
-`go-ai-sdk` is pre-1.0 (currently a `v0.1.0` candidate, unreleased): the
+`go-ai-sdk` is pre-1.0 (current release: `v0.1.0`): the
 public API described throughout this tree is implemented and tested
 end-to-end, but may still change before `v1.0.0`. Once the project reaches
 1.0, it follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
