@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/fetchimage"
@@ -28,10 +30,41 @@ func (m *imageModel) ProviderName() string { return providerName }
 // ---- wire types ----
 
 type imageRequest struct {
-	Prompt    string `json:"prompt"`
-	NumImages int    `json:"num_images,omitempty"`
-	ImageSize string `json:"image_size,omitempty"`
-	Seed      *int64 `json:"seed,omitempty"`
+	Prompt    string          `json:"prompt"`
+	NumImages int             `json:"num_images,omitempty"`
+	ImageSize json.RawMessage `json:"image_size,omitempty"`
+	Seed      *int64          `json:"seed,omitempty"`
+}
+
+// wxhSizePattern matches the SDK's "WxH" Size convention (e.g.
+// "1024x1024").
+var wxhSizePattern = regexp.MustCompile(`^\d+x\d+$`)
+
+// imageSizeValue translates ImageCall.Size into fal's image_size field.
+// fal accepts either an enum name (e.g. "square_hd") or an explicit
+// {"width":W,"height":H} object; when size matches the SDK's "WxH"
+// convention it's translated into that object, otherwise it's passed
+// through verbatim as a string (an enum name, presumably).
+func imageSizeValue(size string) (json.RawMessage, error) {
+	if size == "" {
+		return nil, nil
+	}
+	if wxhSizePattern.MatchString(size) {
+		w, h, _ := strings.Cut(size, "x")
+		width, err := strconv.Atoi(w)
+		if err != nil {
+			return nil, fmt.Errorf("parse width from Size %q: %w", size, err)
+		}
+		height, err := strconv.Atoi(h)
+		if err != nil {
+			return nil, fmt.Errorf("parse height from Size %q: %w", size, err)
+		}
+		return json.Marshal(struct {
+			Width  int `json:"width"`
+			Height int `json:"height"`
+		}{Width: width, Height: height})
+	}
+	return json.Marshal(size)
 }
 
 type imageResponseWire struct {
@@ -48,10 +81,14 @@ func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall
 		return nil, errors.New("fal: aspect ratio is not supported; use Size")
 	}
 
+	imageSize, err := imageSizeValue(call.Size)
+	if err != nil {
+		return nil, fmt.Errorf("fal: %w", err)
+	}
 	req := imageRequest{
 		Prompt:    call.Prompt,
 		NumImages: call.N,
-		ImageSize: call.Size,
+		ImageSize: imageSize,
 		Seed:      call.Seed,
 	}
 	reqBody, err := json.Marshal(req)

@@ -54,7 +54,11 @@ use AspectRatio"`. fal follows the OpenAI/xAI family (`Size` only, mapped
 to `image_size`); Replicate and Luma follow the Google/Vertex family
 (`AspectRatio` only, mapped to `aspect_ratio`) — see
 [fal](../providers/fal.md), [Replicate](../providers/replicate.md), and
-[Luma](../providers/luma.md) for the exact error strings.
+[Luma](../providers/luma.md) for the exact error strings. fal's
+`image_size` accepts either enum names or an explicit size object: when
+`Size` matches the SDK's `"WxH"` convention (e.g. `"1024x1024"`) it's
+translated into `{"width":1024,"height":1024}`; any other value (e.g.
+`"square_hd"`) is passed through verbatim as a string.
 
 `Seed` is silently ignored by OpenAI/xAI (the images API has no seed
 parameter) and by Luma (Dream Machine has no seed parameter), but is sent

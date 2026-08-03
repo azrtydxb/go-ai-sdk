@@ -95,6 +95,69 @@ func TestGenerateImages_OmitsZeroValues(t *testing.T) {
 	}
 }
 
+func TestGenerateImages_SizeWxHTranslatesToObject(t *testing.T) {
+	var gotBody map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"images":[{"url":"data:image/png;base64,` + base64.StdEncoding.EncodeToString([]byte("d")) + `"}]}`))
+	}))
+	defer srv.Close()
+
+	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
+	m := p.ImageModel("fal-ai/flux/schnell")
+
+	_, err := m.GenerateImages(context.Background(), provider.ImageCall{
+		Prompt: "a cat",
+		Size:   "1024x1024",
+	})
+	if err != nil {
+		t.Fatalf("GenerateImages: %v", err)
+	}
+
+	imageSize, ok := gotBody["image_size"].(map[string]any)
+	if !ok {
+		t.Fatalf("image_size = %v (%T), want object", gotBody["image_size"], gotBody["image_size"])
+	}
+	if imageSize["width"] != float64(1024) {
+		t.Errorf("width = %v, want 1024", imageSize["width"])
+	}
+	if imageSize["height"] != float64(1024) {
+		t.Errorf("height = %v, want 1024", imageSize["height"])
+	}
+}
+
+func TestGenerateImages_SizeEnumNamePassthrough(t *testing.T) {
+	var gotBody map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"images":[{"url":"data:image/png;base64,` + base64.StdEncoding.EncodeToString([]byte("d")) + `"}]}`))
+	}))
+	defer srv.Close()
+
+	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
+	m := p.ImageModel("fal-ai/flux/schnell")
+
+	_, err := m.GenerateImages(context.Background(), provider.ImageCall{
+		Prompt: "a cat",
+		Size:   "square_hd",
+	})
+	if err != nil {
+		t.Fatalf("GenerateImages: %v", err)
+	}
+
+	if gotBody["image_size"] != "square_hd" {
+		t.Errorf("image_size = %v (%T), want string \"square_hd\"", gotBody["image_size"], gotBody["image_size"])
+	}
+}
+
 func TestGenerateImages_AspectRatioUnsupported(t *testing.T) {
 	p := New(WithAPIKey("k"))
 	m := p.ImageModel("fal-ai/flux/schnell")

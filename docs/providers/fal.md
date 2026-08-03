@@ -36,6 +36,13 @@ request.
   returns `"fal: aspect ratio is not supported; use Size"`
   (`providers/fal/image.go`); `Size` is sent through as fal's
   `image_size` field.
+- **`Size` translation: `"WxH"` becomes an object, anything else passes
+  through.** fal's `image_size` field accepts either an enum name (e.g.
+  `"square_hd"`) or an explicit `{"width":W,"height":H}` object. When
+  `Size` matches the SDK's `"WxH"` convention (regex `^\d+x\d+$`, e.g.
+  `"1024x1024"`), `imageSizeValue` in `providers/fal/image.go` translates
+  it into `{"width":1024,"height":1024}`; any other value (an enum name
+  like `"square_hd"`) is sent through unchanged as a JSON string.
 - **Two ways to receive an image.** fal's response returns each image as
   either an `https://` URL (fetched via `internal/fetchimage.Fetch`) or an
   inline `data:<mediatype>;base64,<data>` URL (decoded locally,
