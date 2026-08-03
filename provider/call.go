@@ -64,6 +64,24 @@ type Call struct {
 	// specific ignore comment.
 	Seed *int64
 
+	// Reasoning is the unified reasoning/thinking request option. Providers
+	// map it to their native knob: openaicompat sends Effort under
+	// "reasoning_effort" (BudgetTokens has no OpenAI-wire equivalent, so
+	// it's ignored there); anthropic, geminicompat, and bedrock instead
+	// need a token budget, resolved via EffortBudgetTokens when
+	// BudgetTokens is unset (see that function's table) — anthropic sends
+	// it as "thinking":{"type":"enabled","budget_tokens":N}, geminicompat
+	// as generationConfig.thinkingConfig:{"thinkingBudget":N,
+	// "includeThoughts":true}, and bedrock as
+	// additionalModelRequestFields.thinking (same shape as anthropic's).
+	// cohere and mistral have no reasoning knob and ignore this field
+	// entirely. See each provider's wire.go for the exact mapping. Effort
+	// and BudgetTokens may be set together (providers that only understand
+	// one use that one; BudgetTokens wins where both map to the same
+	// knob). ProviderOptions still merge last and win on wire-key
+	// collision.
+	Reasoning *ReasoningConfig
+
 	// Headers carries extra HTTP headers to send with the request, applied
 	// AFTER the provider sets its own authentication header(s) — so an
 	// entry here can never override the auth header itself: an entry whose
@@ -99,4 +117,36 @@ type Call struct {
 	// stringified with fmt.Sprint. Setting ProviderOptions is a no-op for
 	// any key that doesn't match the provider actually being called.
 	ProviderOptions map[string]any
+}
+
+// ReasoningConfig is the unified reasoning/thinking request option.
+// Providers map it to their native knob; see each provider's request
+// builder for the exact mapping. Effort and BudgetTokens may be set
+// together (providers that only understand one use that one; BudgetTokens
+// wins where both map to the same knob). ProviderOptions still merge last
+// and win on wire-key collision.
+type ReasoningConfig struct {
+	Effort       string // "", "minimal", "low", "medium", "high" — passed through, not validated
+	BudgetTokens *int   // explicit thinking-token budget
+}
+
+// EffortBudgetTokens maps a ReasoningConfig.Effort value to an explicit
+// thinking-token budget, for providers whose only reasoning knob is a token
+// budget (anthropic, geminicompat, bedrock): "minimal"→1024, "low"→4096,
+// "medium"→8192, "high"→16384. Reports false (with a zero int) for "" or
+// any unrecognized effort string, so callers can omit the field entirely
+// rather than send a fabricated default.
+func EffortBudgetTokens(effort string) (int, bool) {
+	switch effort {
+	case "minimal":
+		return 1024, true
+	case "low":
+		return 4096, true
+	case "medium":
+		return 8192, true
+	case "high":
+		return 16384, true
+	default:
+		return 0, false
+	}
 }

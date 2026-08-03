@@ -194,6 +194,8 @@ func buildChatRequest(modelID string, call provider.Call, stream bool) (chatRequ
 	}
 	// call.TopK is intentionally ignored: Mistral's chat completions API has
 	// no top_k parameter.
+	// call.Reasoning is intentionally ignored: Mistral's chat completions
+	// API has no reasoning/thinking knob.
 
 	// ToolChoiceNone means: omit tools entirely, not merely tool_choice —
 	// Mistral rejects tool_choice without a non-empty tools array.

@@ -28,6 +28,11 @@ type GenerateTextOpts struct {
 	PresencePenalty  *float64
 	FrequencyPenalty *float64
 	Seed             *int64
+	// Reasoning is the unified reasoning/thinking request option. It is
+	// threaded through to the identically-named provider.Call field
+	// unchanged — see that field's doc for per-provider wire mapping.
+	// ProviderOptions still merge last and win on wire-key collision.
+	Reasoning *provider.ReasoningConfig
 	// Headers carries extra HTTP headers to send with the request; threaded
 	// through to provider.Call.Headers unchanged — see that field's doc for
 	// precedence (it never overrides the provider's auth header) and which
@@ -277,6 +282,7 @@ func buildCall(opts GenerateTextOpts) (provider.Call, error) {
 		PresencePenalty:  opts.PresencePenalty,
 		FrequencyPenalty: opts.FrequencyPenalty,
 		Seed:             opts.Seed,
+		Reasoning:        opts.Reasoning,
 		Headers:          opts.Headers,
 		ProviderOptions:  opts.ProviderOptions,
 	}, nil

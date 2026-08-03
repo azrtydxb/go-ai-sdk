@@ -558,3 +558,70 @@ func TestRequestShapeHeaders(t *testing.T) {
 		t.Errorf("x-goog-api-key = %v, want [k] (Headers must not clobber auth)", got)
 	}
 }
+
+// TestRequestShapeReasoningExplicitBudget asserts call.Reasoning.BudgetTokens
+// serializes as generationConfig.thinkingConfig.thinkingBudget verbatim
+// (with includeThoughts true) when set explicitly.
+func TestRequestShapeReasoningExplicitBudget(t *testing.T) {
+	model, srv := newTestLanguageModel(t)
+
+	budget := 2048
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages:  []provider.Message{provider.UserText("simple")},
+		Reasoning: &provider.ReasoningConfig{Effort: "high", BudgetTokens: &budget},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	req := lastRequest(t, srv)
+	if req.GenerationConfig == nil || req.GenerationConfig.ThinkingConfig == nil {
+		t.Fatal("thinkingConfig = nil, want non-nil")
+	}
+	tc := req.GenerationConfig.ThinkingConfig
+	if tc.ThinkingBudget != 2048 {
+		t.Errorf("thinkingBudget = %d, want 2048 (explicit BudgetTokens wins over Effort)", tc.ThinkingBudget)
+	}
+	if !tc.IncludeThoughts {
+		t.Error("includeThoughts = false, want true")
+	}
+}
+
+// TestRequestShapeReasoningEffortMapped asserts call.Reasoning.Effort (with
+// no explicit BudgetTokens) resolves via the effort->budget table.
+func TestRequestShapeReasoningEffortMapped(t *testing.T) {
+	model, srv := newTestLanguageModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages:  []provider.Message{provider.UserText("simple")},
+		Reasoning: &provider.ReasoningConfig{Effort: "low"},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	req := lastRequest(t, srv)
+	if req.GenerationConfig == nil || req.GenerationConfig.ThinkingConfig == nil {
+		t.Fatal("thinkingConfig = nil, want non-nil")
+	}
+	if req.GenerationConfig.ThinkingConfig.ThinkingBudget != 4096 {
+		t.Errorf("thinkingBudget = %d, want 4096 (low)", req.GenerationConfig.ThinkingConfig.ThinkingBudget)
+	}
+}
+
+// TestRequestShapeReasoningNeitherResolvesOmitsThinkingConfig asserts that
+// Reasoning set with neither BudgetTokens nor a recognized Effort omits
+// thinkingConfig entirely.
+func TestRequestShapeReasoningNeitherResolvesOmitsThinkingConfig(t *testing.T) {
+	model, srv := newTestLanguageModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages:  []provider.Message{provider.UserText("simple")},
+		Reasoning: &provider.ReasoningConfig{},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	req := lastRequest(t, srv)
+	if req.GenerationConfig != nil && req.GenerationConfig.ThinkingConfig != nil {
+		t.Errorf("thinkingConfig = %+v, want nil", req.GenerationConfig.ThinkingConfig)
+	}
+}

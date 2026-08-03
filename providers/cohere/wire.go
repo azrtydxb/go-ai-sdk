@@ -188,6 +188,8 @@ func buildChatRequest(modelID string, call provider.Call, stream bool) (chatRequ
 		Seed:             call.Seed,
 		StopSequences:    call.StopSequences,
 	}
+	// call.Reasoning is intentionally ignored: Cohere's chat API has no
+	// reasoning/thinking knob.
 
 	switch {
 	case call.ToolChoice != nil && call.ToolChoice.Mode == provider.ToolChoiceNone:

@@ -618,3 +618,54 @@ func TestRequestShapeHeaders(t *testing.T) {
 		t.Errorf("Authorization = %v, want [Bearer k] (Headers must not clobber auth)", got)
 	}
 }
+
+// TestRequestShapeReasoningEffort asserts call.Reasoning.Effort serializes
+// under "reasoning_effort", and that BudgetTokens (with no OpenAI-wire
+// equivalent) is never sent.
+func TestRequestShapeReasoningEffort(t *testing.T) {
+	model, srv := newTestLanguageModel(t)
+
+	budget := 4096
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages:  []provider.Message{provider.UserText("simple")},
+		Reasoning: &provider.ReasoningConfig{Effort: "high", BudgetTokens: &budget},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(lastRawBody(srv), &raw); err != nil {
+		t.Fatalf("decode raw request: %v", err)
+	}
+	var effort string
+	if err := json.Unmarshal(raw["reasoning_effort"], &effort); err != nil || effort != "high" {
+		t.Errorf("reasoning_effort = %s, want %q", raw["reasoning_effort"], "high")
+	}
+	if _, ok := raw["budget_tokens"]; ok {
+		t.Errorf("request unexpectedly contains budget_tokens (no OpenAI-wire equivalent): %s", lastRawBody(srv))
+	}
+}
+
+// TestRequestShapeReasoningOmittedWhenEffortEmpty asserts that Reasoning set
+// with an empty Effort (and no wire equivalent for BudgetTokens) omits
+// reasoning_effort entirely.
+func TestRequestShapeReasoningOmittedWhenEffortEmpty(t *testing.T) {
+	model, srv := newTestLanguageModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages:  []provider.Message{provider.UserText("simple")},
+		Reasoning: &provider.ReasoningConfig{},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(lastRawBody(srv), &raw); err != nil {
+		t.Fatalf("decode raw request: %v", err)
+	}
+	if _, ok := raw["reasoning_effort"]; ok {
+		t.Errorf("request unexpectedly contains reasoning_effort: %s", lastRawBody(srv))
+	}
+}

@@ -103,6 +103,7 @@ type chatRequest struct {
 	PresencePenalty  *float64       `json:"presence_penalty,omitempty"`
 	FrequencyPenalty *float64       `json:"frequency_penalty,omitempty"`
 	Seed             *int64         `json:"seed,omitempty"`
+	ReasoningEffort  string         `json:"reasoning_effort,omitempty"`
 	Stop             []string       `json:"stop,omitempty"`
 	Stream           bool           `json:"stream,omitempty"`
 	StreamOptions    *streamOptions `json:"stream_options,omitempty"`
@@ -282,6 +283,13 @@ func buildChatRequest(cfg Config, modelID string, call provider.Call, stream boo
 	// call.TopK is intentionally ignored: OpenAI's chat-completions API (and
 	// every OpenAI-compatible server this package targets) has no top_k
 	// parameter.
+
+	if call.Reasoning != nil && call.Reasoning.Effort != "" {
+		req.ReasoningEffort = call.Reasoning.Effort
+	}
+	// call.Reasoning.BudgetTokens is intentionally ignored: OpenAI's
+	// chat-completions wire has no token-budget equivalent to
+	// reasoning_effort, only the effort string itself.
 
 	if len(call.Tools) > 0 {
 		req.Tools = convertTools(call.Tools)

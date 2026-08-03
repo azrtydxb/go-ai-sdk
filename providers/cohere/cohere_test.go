@@ -772,3 +772,30 @@ func TestStreamClosedTwiceIsIdempotent(t *testing.T) {
 		t.Fatalf("Close() #2 = %v, want nil (idempotent)", err)
 	}
 }
+
+// TestRequestShapeReasoningIgnored asserts call.Reasoning has no wire
+// representation for Cohere: setting it produces no new top-level keys in
+// the request.
+func TestRequestShapeReasoningIgnored(t *testing.T) {
+	srv, fs := newFixtureServer(t)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("cohere-test")
+
+	budget := 4096
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages:  []provider.Message{provider.UserText("simple")},
+		Reasoning: &provider.ReasoningConfig{Effort: "high", BudgetTokens: &budget},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(fs.rawBody(), &raw); err != nil {
+		t.Fatalf("decode raw request: %v", err)
+	}
+	for _, key := range []string{"reasoning", "thinking", "reasoning_effort", "budget_tokens"} {
+		if _, ok := raw[key]; ok {
+			t.Errorf("request unexpectedly contains %q (Cohere has no reasoning knob): %s", key, fs.rawBody())
+		}
+	}
+}

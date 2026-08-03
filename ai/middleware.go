@@ -406,7 +406,7 @@ func (s *simulatedStreamResponse) Close() error { return nil }
 // DefaultSettingsMiddleware wraps model so that every call's zero-valued
 // fields are filled in from defaults before being sent to the underlying
 // model: Temperature/TopP/MaxTokens/TopK/PresencePenalty/FrequencyPenalty/
-// Seed (nil pointers), StopSequences (empty slice), Headers (merged per
+// Seed/Reasoning (nil pointers), StopSequences (empty slice), Headers (merged per
 // header key, with per-call keys winning over the matching default key —
 // same semantics as ProviderOptions below, applied one level shallower
 // since Headers has no namespace level), and ProviderOptions (merged per
@@ -457,6 +457,9 @@ func (m *defaultSettingsModel) applyDefaults(call provider.Call) provider.Call {
 	}
 	if call.Seed == nil {
 		call.Seed = m.defaults.Seed
+	}
+	if call.Reasoning == nil {
+		call.Reasoning = m.defaults.Reasoning
 	}
 	if len(call.StopSequences) == 0 {
 		call.StopSequences = m.defaults.StopSequences

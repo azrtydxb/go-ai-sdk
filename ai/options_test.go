@@ -52,3 +52,29 @@ func TestBuildCallThreadsTopKPenaltiesSeedHeaders(t *testing.T) {
 		t.Errorf("call.Headers = %v, want X-Custom-Header=custom-value", call.Headers)
 	}
 }
+
+// TestBuildCallThreadsReasoning asserts buildCall threads
+// GenerateTextOpts.Reasoning unchanged into the provider.Call it builds.
+func TestBuildCallThreadsReasoning(t *testing.T) {
+	m := &aitest.MockModel{Responses: []*provider.Response{{
+		Content:      []provider.ContentPart{provider.TextPart{Text: "hi"}},
+		FinishReason: provider.FinishStop,
+	}}}
+
+	budget := 4096
+	reasoning := &provider.ReasoningConfig{Effort: "high", BudgetTokens: &budget}
+
+	_, err := GenerateText(t.Context(), GenerateTextOpts{
+		Model:     m,
+		Prompt:    "hi",
+		Reasoning: reasoning,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	call := m.Calls[0]
+	if call.Reasoning != reasoning {
+		t.Errorf("call.Reasoning = %v, want the same *ReasoningConfig passed in (%v)", call.Reasoning, reasoning)
+	}
+}

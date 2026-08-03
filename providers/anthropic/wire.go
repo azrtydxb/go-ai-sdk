@@ -81,7 +81,18 @@ type messagesRequest struct {
 	Temperature   *float64      `json:"temperature,omitempty"`
 	TopP          *float64      `json:"top_p,omitempty"`
 	TopK          *int          `json:"top_k,omitempty"`
+	Thinking      *wireThinking `json:"thinking,omitempty"`
 	Stream        bool          `json:"stream,omitempty"`
+}
+
+// wireThinking is the Messages API's extended-thinking request block.
+// BudgetTokens is required by Anthropic to be less than MaxTokens, and
+// enabling thinking imposes temperature restrictions — this SDK passes
+// values through without validating either constraint; a violation surfaces
+// as an APICallError from the API.
+type wireThinking struct {
+	Type         string `json:"type"`
+	BudgetTokens int    `json:"budget_tokens"`
 }
 
 // ---- Response wire types (non-streaming) ----
@@ -207,6 +218,17 @@ func applyProviderOptions(reqBytes []byte, providerOptions map[string]any) ([]by
 	return json.Marshal(m)
 }
 
+// resolveBudgetTokens resolves the thinking-token budget for cfg:
+// cfg.BudgetTokens if explicitly set, otherwise the table lookup for
+// cfg.Effort via provider.EffortBudgetTokens. Reports false if neither
+// resolves, in which case the caller omits the thinking block entirely.
+func resolveBudgetTokens(cfg *provider.ReasoningConfig) (int, bool) {
+	if cfg.BudgetTokens != nil {
+		return *cfg.BudgetTokens, true
+	}
+	return provider.EffortBudgetTokens(cfg.Effort)
+}
+
 // ---- Request building ----
 
 func buildMessagesRequest(modelID string, call provider.Call, stream bool) (messagesRequest, error) {
@@ -232,6 +254,12 @@ func buildMessagesRequest(modelID string, call provider.Call, stream bool) (mess
 	}
 	// call.PresencePenalty, call.FrequencyPenalty, and call.Seed are
 	// intentionally ignored: the Messages API has no equivalent parameters.
+
+	if call.Reasoning != nil {
+		if budget, ok := resolveBudgetTokens(call.Reasoning); ok {
+			req.Thinking = &wireThinking{Type: "enabled", BudgetTokens: budget}
+		}
+	}
 
 	// ToolChoiceNone means: omit tools entirely, not merely tool_choice.
 	omitTools := call.ToolChoice != nil && call.ToolChoice.Mode == provider.ToolChoiceNone

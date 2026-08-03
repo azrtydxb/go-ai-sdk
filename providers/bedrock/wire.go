@@ -140,6 +140,14 @@ type converseRequest struct {
 	Messages        []wireMessage        `json:"messages"`
 	ToolConfig      *wireToolConfig      `json:"toolConfig,omitempty"`
 	InferenceConfig *wireInferenceConfig `json:"inferenceConfig,omitempty"`
+	// AdditionalModelRequestFields carries model-specific fields not part
+	// of Converse's base contract — e.g. Reasoning's thinking block (see
+	// buildConverseRequest). ProviderOptions["bedrock"] can also target
+	// this key; applyProviderOptions merges into it per sub-key rather
+	// than replacing it wholesale, so a Reasoning-derived "thinking" entry
+	// coexists with other additionalModelRequestFields entries set via
+	// ProviderOptions (which still wins on an exact key collision).
+	AdditionalModelRequestFields map[string]any `json:"additionalModelRequestFields,omitempty"`
 }
 
 // ---- Response wire types (non-streaming) ----
@@ -253,9 +261,42 @@ func applyProviderOptions(reqBytes []byte, providerOptions map[string]any) ([]by
 		return nil, fmt.Errorf("bedrock: unmarshal request for provider options merge: %w", err)
 	}
 	for k, v := range opts {
+		// additionalModelRequestFields is merged per sub-key rather than
+		// replaced wholesale, so a Reasoning-derived entry (e.g.
+		// "thinking", set in buildConverseRequest before this merge runs)
+		// survives alongside other additionalModelRequestFields entries
+		// set via ProviderOptions — which still wins on an exact
+		// sub-key collision, same as every other field here.
+		if k == "additionalModelRequestFields" {
+			existing, existingOK := m[k].(map[string]any)
+			incoming, incomingOK := v.(map[string]any)
+			if existingOK && incomingOK {
+				merged := make(map[string]any, len(existing)+len(incoming))
+				for ek, ev := range existing {
+					merged[ek] = ev
+				}
+				for ik, iv := range incoming {
+					merged[ik] = iv
+				}
+				m[k] = merged
+				continue
+			}
+		}
 		m[k] = v
 	}
 	return json.Marshal(m)
+}
+
+// resolveBudgetTokens resolves the thinking-token budget for cfg:
+// cfg.BudgetTokens if explicitly set, otherwise the table lookup for
+// cfg.Effort via provider.EffortBudgetTokens. Reports false if neither
+// resolves, in which case the caller omits additionalModelRequestFields.thinking
+// entirely.
+func resolveBudgetTokens(cfg *provider.ReasoningConfig) (int, bool) {
+	if cfg.BudgetTokens != nil {
+		return *cfg.BudgetTokens, true
+	}
+	return provider.EffortBudgetTokens(cfg.Effort)
 }
 
 // ---- Request building ----
@@ -314,6 +355,17 @@ func buildConverseRequest(call provider.Call) (converseRequest, error) {
 	// model-specific, not part of the Converse base contract this package
 	// maps — reach it via
 	// ProviderOptions["bedrock"]["additionalModelRequestFields"] instead).
+
+	if call.Reasoning != nil {
+		if budget, ok := resolveBudgetTokens(call.Reasoning); ok {
+			req.AdditionalModelRequestFields = map[string]any{
+				"thinking": map[string]any{
+					"type":          "enabled",
+					"budget_tokens": budget,
+				},
+			}
+		}
+	}
 
 	// ResponseFormat is intentionally ignored: Bedrock's Converse API has no
 	// response-format field, and Capabilities().NativeJSON is false so the

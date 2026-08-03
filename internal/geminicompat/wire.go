@@ -63,16 +63,25 @@ type wireToolConfig struct {
 }
 
 type wireGenerationConfig struct {
-	ResponseMimeType string          `json:"responseMimeType,omitempty"`
-	ResponseSchema   json.RawMessage `json:"responseSchema,omitempty"`
-	MaxOutputTokens  *int            `json:"maxOutputTokens,omitempty"`
-	Temperature      *float64        `json:"temperature,omitempty"`
-	TopP             *float64        `json:"topP,omitempty"`
-	TopK             *int            `json:"topK,omitempty"`
-	PresencePenalty  *float64        `json:"presencePenalty,omitempty"`
-	FrequencyPenalty *float64        `json:"frequencyPenalty,omitempty"`
-	Seed             *int64          `json:"seed,omitempty"`
-	StopSequences    []string        `json:"stopSequences,omitempty"`
+	ResponseMimeType string              `json:"responseMimeType,omitempty"`
+	ResponseSchema   json.RawMessage     `json:"responseSchema,omitempty"`
+	MaxOutputTokens  *int                `json:"maxOutputTokens,omitempty"`
+	Temperature      *float64            `json:"temperature,omitempty"`
+	TopP             *float64            `json:"topP,omitempty"`
+	TopK             *int                `json:"topK,omitempty"`
+	PresencePenalty  *float64            `json:"presencePenalty,omitempty"`
+	FrequencyPenalty *float64            `json:"frequencyPenalty,omitempty"`
+	Seed             *int64              `json:"seed,omitempty"`
+	StopSequences    []string            `json:"stopSequences,omitempty"`
+	ThinkingConfig   *wireThinkingConfig `json:"thinkingConfig,omitempty"`
+}
+
+// wireThinkingConfig is Gemini's generationConfig.thinkingConfig block.
+// IncludeThoughts is always sent true alongside a resolved ThinkingBudget
+// so the model's thinking summary is surfaced back in the response.
+type wireThinkingConfig struct {
+	ThinkingBudget  int  `json:"thinkingBudget"`
+	IncludeThoughts bool `json:"includeThoughts"`
 }
 
 type generateContentRequest struct {
@@ -176,6 +185,17 @@ func applyProviderOptions(reqBytes []byte, providerOptions map[string]any, name 
 	return json.Marshal(m)
 }
 
+// resolveBudgetTokens resolves the thinking-token budget for cfg:
+// cfg.BudgetTokens if explicitly set, otherwise the table lookup for
+// cfg.Effort via provider.EffortBudgetTokens. Reports false if neither
+// resolves, in which case the caller omits thinkingConfig entirely.
+func resolveBudgetTokens(cfg *provider.ReasoningConfig) (int, bool) {
+	if cfg.BudgetTokens != nil {
+		return *cfg.BudgetTokens, true
+	}
+	return provider.EffortBudgetTokens(cfg.Effort)
+}
+
 // ---- Request building ----
 
 func buildGenerateContentRequest(modelID string, call provider.Call) (generateContentRequest, error) {
@@ -237,6 +257,12 @@ func buildGenerateContentRequest(modelID string, call provider.Call) (generateCo
 	if len(call.StopSequences) > 0 {
 		gc.StopSequences = call.StopSequences
 		haveGC = true
+	}
+	if call.Reasoning != nil {
+		if budget, ok := resolveBudgetTokens(call.Reasoning); ok {
+			gc.ThinkingConfig = &wireThinkingConfig{ThinkingBudget: budget, IncludeThoughts: true}
+			haveGC = true
+		}
 	}
 	if haveGC {
 		req.GenerationConfig = gc

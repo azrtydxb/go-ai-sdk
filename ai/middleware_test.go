@@ -750,3 +750,43 @@ func TestDefaultSettingsMiddleware_Stream(t *testing.T) {
 		t.Errorf("Temperature = %v, want %v", mock.Calls[0].Temperature, defTemp)
 	}
 }
+
+// TestDefaultSettingsMiddleware_FillsReasoning covers the Reasoning
+// nil-pointer fill added alongside the other scalar defaults.
+func TestDefaultSettingsMiddleware_FillsReasoning(t *testing.T) {
+	mock := &aitest.MockModel{Responses: []*provider.Response{{}}}
+	budget := 4096
+	defReasoning := &provider.ReasoningConfig{Effort: "high", BudgetTokens: &budget}
+	defaults := provider.Call{Reasoning: defReasoning}
+	wrapped := DefaultSettingsMiddleware(mock, defaults)
+
+	_, err := wrapped.Generate(context.Background(), provider.Call{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := mock.Calls[0]
+	if got.Reasoning != defReasoning {
+		t.Errorf("Reasoning = %v, want the default %v", got.Reasoning, defReasoning)
+	}
+}
+
+// TestDefaultSettingsMiddleware_PerCallReasoningWins covers that a
+// per-call Reasoning (already set, non-nil) is preserved rather than
+// overwritten by the default.
+func TestDefaultSettingsMiddleware_PerCallReasoningWins(t *testing.T) {
+	mock := &aitest.MockModel{Responses: []*provider.Response{{}}}
+	defBudget := 4096
+	defaults := provider.Call{Reasoning: &provider.ReasoningConfig{Effort: "high", BudgetTokens: &defBudget}}
+	wrapped := DefaultSettingsMiddleware(mock, defaults)
+
+	callReasoning := &provider.ReasoningConfig{Effort: "low"}
+	call := provider.Call{Reasoning: callReasoning}
+	_, err := wrapped.Generate(context.Background(), call)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := mock.Calls[0]
+	if got.Reasoning != callReasoning {
+		t.Errorf("Reasoning = %v, want per-call value %v (per-call should win)", got.Reasoning, callReasoning)
+	}
+}

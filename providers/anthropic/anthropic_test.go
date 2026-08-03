@@ -1260,3 +1260,69 @@ func TestStreamThinkingBlock(t *testing.T) {
 		t.Errorf("TextDelta parts = %#v", textDeltas)
 	}
 }
+
+// TestRequestShapeReasoningExplicitBudget asserts call.Reasoning.BudgetTokens
+// serializes as thinking.budget_tokens verbatim when set explicitly, taking
+// priority over any Effort table lookup.
+func TestRequestShapeReasoningExplicitBudget(t *testing.T) {
+	srv, fs := newFixtureServer(t)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
+
+	budget := 2048
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages:  []provider.Message{provider.UserText("simple")},
+		Reasoning: &provider.ReasoningConfig{Effort: "high", BudgetTokens: &budget},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if fs.lastRequest.Thinking == nil {
+		t.Fatal("Thinking = nil, want non-nil")
+	}
+	if fs.lastRequest.Thinking.Type != "enabled" {
+		t.Errorf("Thinking.Type = %q, want enabled", fs.lastRequest.Thinking.Type)
+	}
+	if fs.lastRequest.Thinking.BudgetTokens != 2048 {
+		t.Errorf("Thinking.BudgetTokens = %d, want 2048 (explicit BudgetTokens wins over Effort)", fs.lastRequest.Thinking.BudgetTokens)
+	}
+}
+
+// TestRequestShapeReasoningEffortMapped asserts call.Reasoning.Effort (with
+// no explicit BudgetTokens) resolves via the effort->budget table.
+func TestRequestShapeReasoningEffortMapped(t *testing.T) {
+	srv, fs := newFixtureServer(t)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages:  []provider.Message{provider.UserText("simple")},
+		Reasoning: &provider.ReasoningConfig{Effort: "medium"},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if fs.lastRequest.Thinking == nil {
+		t.Fatal("Thinking = nil, want non-nil")
+	}
+	if fs.lastRequest.Thinking.BudgetTokens != 8192 {
+		t.Errorf("Thinking.BudgetTokens = %d, want 8192 (medium)", fs.lastRequest.Thinking.BudgetTokens)
+	}
+}
+
+// TestRequestShapeReasoningNeitherResolvesOmitsThinking asserts that
+// Reasoning set with neither BudgetTokens nor a recognized Effort omits the
+// thinking block entirely.
+func TestRequestShapeReasoningNeitherResolvesOmitsThinking(t *testing.T) {
+	srv, fs := newFixtureServer(t)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages:  []provider.Message{provider.UserText("simple")},
+		Reasoning: &provider.ReasoningConfig{},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if fs.lastRequest.Thinking != nil {
+		t.Errorf("Thinking = %+v, want nil", fs.lastRequest.Thinking)
+	}
+}
