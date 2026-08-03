@@ -18,6 +18,7 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -120,9 +121,16 @@ func bufReaderFor(conn net.Conn) *bufio.Reader {
 // callers that expect a fragmented message must call ReadMessage
 // repeatedly and reassemble continuation frames themselves. Successive
 // calls for the same conn share a buffered reader, so bytes read ahead by
-// one call are visible to the next.
+// one call are visible to the next. Once conn reaches EOF its cached
+// reader is dropped, so a conn value that's later reused (e.g. a reused
+// *net.TCPConn wrapper, or simply to bound the cache's lifetime) doesn't
+// keep a stale, exhausted *bufio.Reader alive forever.
 func ReadMessage(conn net.Conn) (opcode int, payload []byte, err error) {
-	return ReadMessageBuf(bufReaderFor(conn))
+	opcode, payload, err = ReadMessageBuf(bufReaderFor(conn))
+	if err != nil && (errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)) {
+		connReaders.Delete(conn)
+	}
+	return opcode, payload, err
 }
 
 // ReadMessageBuf is like ReadMessage but reads from an existing

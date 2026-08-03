@@ -72,6 +72,10 @@ const defaultMaxMessageBytes = 16 * 1024 * 1024
 // DialOptions configures Dial.
 type DialOptions struct {
 	// Header carries extra handshake request headers (e.g. Authorization).
+	// Entries named Host, Upgrade, Connection, or Sec-WebSocket-* are
+	// reserved (the handshake sets them itself) and are silently skipped.
+	// A header name or value containing a CR or LF makes Dial return an
+	// error rather than risk request-splitting.
 	Header http.Header
 	// TLSConfig configures wss:// connections; nil uses a default config.
 	TLSConfig *tls.Config
@@ -207,7 +211,18 @@ func handshake(conn net.Conn, u *url.URL, extraHeaders http.Header) (*Conn, erro
 	fmt.Fprintf(&req, "Sec-WebSocket-Key: %s\r\n", key)
 	req.WriteString("Sec-WebSocket-Version: 13\r\n")
 	for name, values := range extraHeaders {
+		if isReservedHeader(name) {
+			// Host/Upgrade/Connection/Sec-WebSocket-* are set above and
+			// must not be overridden by caller-supplied headers.
+			continue
+		}
+		if strings.ContainsAny(name, "\r\n") {
+			return nil, fmt.Errorf("websocket: invalid header name %q: contains CR or LF", name)
+		}
 		for _, v := range values {
+			if strings.ContainsAny(v, "\r\n") {
+				return nil, fmt.Errorf("websocket: invalid value for header %q: contains CR or LF", name)
+			}
 			fmt.Fprintf(&req, "%s: %s\r\n", name, v)
 		}
 	}
@@ -239,6 +254,21 @@ func handshake(conn net.Conn, u *url.URL, extraHeaders http.Header) (*Conn, erro
 	return &Conn{conn: conn, br: br}, nil
 }
 
+// isReservedHeader reports whether name collides with a header the
+// handshake sets itself (Host, Upgrade, Connection, or any
+// Sec-WebSocket-* header). DialOptions.Header entries with these names
+// are silently skipped rather than overriding the protocol-required
+// values.
+func isReservedHeader(name string) bool {
+	switch {
+	case strings.EqualFold(name, "Host"),
+		strings.EqualFold(name, "Upgrade"),
+		strings.EqualFold(name, "Connection"):
+		return true
+	}
+	return len(name) >= len("Sec-WebSocket-") && strings.EqualFold(name[:len("Sec-WebSocket-")], "Sec-WebSocket-")
+}
+
 // headerHasToken reports whether value (a comma-separated header value, as
 // used by the Connection header) contains token, case-insensitively.
 func headerHasToken(value, token string) bool {
@@ -262,34 +292,59 @@ func computeAccept(key string) string {
 // runWithContext runs fn, arranging for a blocked conn I/O call inside fn
 // to be interrupted (via SetDeadline) if ctx is done before fn returns. If
 // ctx has no deadline/cancellation (e.g. context.Background()), fn runs
-// with no extra overhead. If fn fails because ctx triggered the interrupt,
-// the returned error is ctx.Err() instead of the raw deadline-exceeded
-// error.
+// with no extra overhead.
+//
+// runWithContext always waits for the watcher goroutine to fully finish
+// touching conn's deadline before returning — this closes a race where a
+// ctx that fires right as fn is finishing could otherwise set a deadline
+// on conn *after* control had already returned to the caller (e.g. into
+// the very next Read/Write call, or into a `defer cancel()` that races
+// this function's own cleanup), permanently poisoning an otherwise-healthy
+// connection.
+//
+// If fn failed because the watcher's deadline actually interrupted it,
+// the returned error is ctx.Err() and, per Read/Write's documented
+// contract, the connection is left unusable (deadline still in the past).
+// If the watcher fired but fn nonetheless succeeded (a benign race between
+// the ctx deadline and the underlying I/O completing), the deadline is
+// reset so the connection remains usable — ctx cancellation must not fail
+// an operation that actually completed.
+//
+// Because SetDeadline affects both halves of a full-duplex conn, a Read
+// cancelled by ctx can transiently surface a deadline-exceeded error to a
+// concurrent in-flight Write on the same Conn (and vice versa); callers
+// relying on one-reader/one-writer concurrency should treat any such
+// error the same as "the connection is now unusable".
 func runWithContext(ctx context.Context, conn net.Conn, fn func() error) error {
 	if ctx.Done() == nil {
 		return fn()
 	}
 
 	stop := make(chan struct{})
-	interrupted := make(chan struct{})
+	watcherDone := make(chan struct{})
+	var interrupted atomic.Bool
 	go func() {
+		defer close(watcherDone)
 		select {
 		case <-ctx.Done():
+			interrupted.Store(true)
 			_ = conn.SetDeadline(time.Unix(0, 0))
-			close(interrupted)
 		case <-stop:
 		}
 	}()
 
 	err := fn()
 	close(stop)
+	<-watcherDone // don't return until the watcher can no longer touch the deadline unexpectedly
 
-	select {
-	case <-interrupted:
-		if err != nil {
+	if interrupted.Load() {
+		if err == nil {
+			// fn completed despite the ctx firing; don't leave a stale
+			// past deadline on an otherwise-healthy connection.
+			_ = conn.SetDeadline(time.Time{})
+		} else {
 			return ctx.Err()
 		}
-	default:
 	}
 	return err
 }
@@ -318,7 +373,7 @@ func (c *Conn) readMessage() (int, []byte, error) {
 	for {
 		h, err := readFrameHeader(c.br)
 		if err != nil {
-			return 0, nil, c.handleReadError(err)
+			return 0, nil, c.handleFrameError(err)
 		}
 
 		if h.masked {
@@ -326,16 +381,16 @@ func (c *Conn) readMessage() (int, []byte, error) {
 			return 0, nil, errors.New("websocket: received masked frame from server")
 		}
 
-		payload, err := readFramePayload(c.br, h)
-		if err != nil {
-			return 0, nil, c.handleReadError(err)
-		}
-
 		switch {
 		case isControlOpcode(h.opcode):
+			payload, err := readFramePayload(c.br, h)
+			if err != nil {
+				return 0, nil, c.handleFrameError(err)
+			}
 			switch h.opcode {
 			case opPing:
 				if werr := c.writeControl(opPong, payload); werr != nil {
+					c.shutdown()
 					return 0, nil, werr
 				}
 			case opPong:
@@ -343,7 +398,13 @@ func (c *Conn) readMessage() (int, []byte, error) {
 			case opClose:
 				code, reason := parseClosePayload(payload)
 				c.closeFrameOnce.Do(func() {
-					_ = c.writeControl(opClose, closePayload(code, reason))
+					// Echo back exactly what the peer sent. In particular,
+					// if the peer's close carried no status code (payload
+					// too short — parsed as closeNoStatus/1005 below),
+					// echo an equally empty payload: RFC 6455 §7.4.1
+					// forbids ever sending 1005 on the wire, even though
+					// CloseError.Code below still reports it to the caller.
+					_ = c.writeControl(opClose, payload)
 				})
 				c.shutdown()
 				return 0, nil, &CloseError{Code: code, Reason: reason}
@@ -357,28 +418,38 @@ func (c *Conn) readMessage() (int, []byte, error) {
 				c.abort(CloseProtocolError, "new data frame received mid-fragmentation")
 				return 0, nil, errors.New("websocket: new data frame received mid-fragmentation")
 			}
+			// Check the *declared* length against budget before reading
+			// any payload bytes: a server can lie about the length, and
+			// reading it first would risk an oversized allocation (or a
+			// panic on a bogus 64-bit length) or a read that blocks
+			// forever waiting for bytes the server never sends.
+			if err := c.checkFrameBudget(0, h.payloadLen); err != nil {
+				return 0, nil, err
+			}
+			payload, err := readFramePayload(c.br, h)
+			if err != nil {
+				return 0, nil, c.handleFrameError(err)
+			}
 			if h.fin {
-				if err := c.checkSize(len(payload)); err != nil {
-					return 0, nil, err
-				}
 				return int(h.opcode), payload, nil
 			}
 			fragmenting = true
 			msgOpcode = h.opcode
 			buf = append([]byte(nil), payload...)
-			if err := c.checkSize(len(buf)); err != nil {
-				return 0, nil, err
-			}
 
 		case h.opcode == opContinuation:
 			if !fragmenting {
 				c.abort(CloseProtocolError, "continuation frame with nothing to continue")
 				return 0, nil, errors.New("websocket: continuation frame with nothing to continue")
 			}
-			buf = append(buf, payload...)
-			if err := c.checkSize(len(buf)); err != nil {
+			if err := c.checkFrameBudget(len(buf), h.payloadLen); err != nil {
 				return 0, nil, err
 			}
+			payload, err := readFramePayload(c.br, h)
+			if err != nil {
+				return 0, nil, c.handleFrameError(err)
+			}
+			buf = append(buf, payload...)
 			if h.fin {
 				return int(msgOpcode), buf, nil
 			}
@@ -390,21 +461,38 @@ func (c *Conn) readMessage() (int, []byte, error) {
 	}
 }
 
-// checkSize enforces MaxMessageBytes, closing the connection with 1009 if
-// exceeded.
-func (c *Conn) checkSize(n int) error {
-	if c.maxMessage > 0 && n > c.maxMessage {
+// checkFrameBudget enforces MaxMessageBytes across a message being
+// reassembled from one or more frames. It is checked against a frame's
+// declared length (already is the size accumulated from prior fragments)
+// before that frame's payload is read off the wire.
+func (c *Conn) checkFrameBudget(already int, frameLen uint64) error {
+	if c.maxMessage <= 0 {
+		return nil
+	}
+	remaining := c.maxMessage - already
+	if remaining < 0 {
+		remaining = 0
+	}
+	if frameLen > uint64(remaining) {
 		c.abort(closeMessageTooBig, "message too large")
 		return fmt.Errorf("websocket: message exceeds MaxMessageBytes (%d)", c.maxMessage)
 	}
 	return nil
 }
 
-// handleReadError classifies a read failure: an EOF not preceded by a
-// local Close() is an abnormal closure (synthesized 1006); anything else
-// (including a ctx-driven deadline, unwound by the caller) is returned
-// as-is.
-func (c *Conn) handleReadError(err error) error {
+// handleFrameError classifies a frame-read failure. A protocolErr (raised
+// by readFrameHeader for a low-level framing violation, e.g. bad reserved
+// bits or an oversized control frame) is turned into a proper 1002 abort —
+// sending the close frame and shutting down the socket — instead of just
+// being handed back to the caller. An EOF not preceded by a local Close()
+// is an abnormal closure (synthesized 1006); anything else (including a
+// ctx-driven deadline, unwound by the caller) is returned as-is.
+func (c *Conn) handleFrameError(err error) error {
+	var perr protocolErr
+	if errors.As(err, &perr) {
+		c.abort(CloseProtocolError, string(perr))
+		return err
+	}
 	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 		if c.localClose.Load() {
 			return err

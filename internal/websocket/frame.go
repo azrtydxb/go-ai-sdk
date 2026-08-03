@@ -54,9 +54,13 @@ func readFrameHeader(r io.Reader) (frameHeader, error) {
 		opcode: lead[0] & 0x0f,
 		masked: lead[1]&0x80 != 0,
 	}
-	// Reserved bits (lead[0] & 0x70) are ignored: no extensions are
-	// negotiated by this client, so RSV1-3 should always be zero, and we
-	// don't police that against a misbehaving server here.
+
+	// RSV1-3 must be zero: no extensions (e.g. permessage-deflate) are
+	// negotiated by this client, so a server that sets any of these bits
+	// is violating the (extension-free) protocol we agreed to.
+	if lead[0]&0x70 != 0 {
+		return frameHeader{}, protocolErr("websocket: reserved bits (RSV1-3) must be zero")
+	}
 
 	length := uint64(lead[1] & 0x7f)
 	switch length {
@@ -72,6 +76,11 @@ func readFrameHeader(r io.Reader) (frameHeader, error) {
 			return frameHeader{}, err
 		}
 		length = binary.BigEndian.Uint64(ext[:])
+		// RFC 6455 §5.2: "the most significant bit MUST be 0". Reject
+		// before it ever reaches an allocation.
+		if length&(1<<63) != 0 {
+			return frameHeader{}, protocolErr("websocket: 64-bit payload length must have MSB unset")
+		}
 	}
 	h.payloadLen = length
 

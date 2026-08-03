@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"io"
 	"testing"
@@ -142,6 +143,59 @@ func TestReadFrameHeader_TruncatedHeader(t *testing.T) {
 	if err == nil || !errors.Is(err, io.EOF) {
 		t.Fatalf("readFrameHeader err = %v, want io.EOF", err)
 	}
+}
+
+func TestReadFrameHeader_ReservedBitsSet(t *testing.T) {
+	var buf bytes.Buffer
+	// fin=1, RSV1=1, opcode=text; no extensions are negotiated so RSV1-3
+	// must always be zero.
+	buf.WriteByte(0x80 | 0x40 | opText)
+	buf.WriteByte(0x00) // zero-length payload, unmasked
+
+	_, err := readFrameHeader(&buf)
+	var perr protocolErr
+	if !errors.As(err, &perr) {
+		t.Fatalf("readFrameHeader err = %v, want protocolErr", err)
+	}
+}
+
+func TestReadFrameHeader_64BitLengthMSBSet(t *testing.T) {
+	var buf bytes.Buffer
+	buf.WriteByte(0x80 | opBinary) // fin=1, opcode=binary
+	buf.WriteByte(127)             // 64-bit extended length follows
+	var ext [8]byte
+	binary.BigEndian.PutUint64(ext[:], 1<<63|5)
+	buf.Write(ext[:])
+	// No payload bytes needed: the MSB check must reject before any read
+	// of the (nonexistent) payload is attempted.
+
+	_, err := readFrameHeader(&buf)
+	var perr protocolErr
+	if !errors.As(err, &perr) {
+		t.Fatalf("readFrameHeader err = %v, want protocolErr (MSB set)", err)
+	}
+}
+
+func TestReadFrameHeader_HugeLengthDoesNotPanicOrAllocate(t *testing.T) {
+	var buf bytes.Buffer
+	buf.WriteByte(0x80 | opBinary)
+	buf.WriteByte(127)
+	var ext [8]byte
+	binary.BigEndian.PutUint64(ext[:], 1<<62) // MSB unset, but enormous
+	buf.Write(ext[:])
+
+	h, err := readFrameHeader(&buf)
+	if err != nil {
+		t.Fatalf("readFrameHeader err = %v, want nil (length itself is legal; budget is a connection-layer concern)", err)
+	}
+	if h.payloadLen != 1<<62 {
+		t.Errorf("payloadLen = %d, want %d", h.payloadLen, uint64(1)<<62)
+	}
+	// Critically: readFrameHeader must not have allocated 1<<62 bytes or
+	// attempted to read them — it only parses the header. The connection
+	// layer (checkFrameBudget in websocket.go) is responsible for
+	// rejecting this length against MaxMessageBytes before ever calling
+	// readFramePayload.
 }
 
 // writeRawControlFrame writes a control frame header directly, bypassing

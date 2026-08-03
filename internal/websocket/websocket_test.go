@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -43,6 +44,42 @@ func dialCtx(t *testing.T) context.Context {
 	t.Cleanup(cancel)
 	return ctx
 }
+
+// writeRawHeaderOnly writes a frame header declaring length bytes of
+// payload but never writes any payload bytes — used to test that the
+// client rejects an oversized/lying declared length before ever blocking
+// on (or allocating for) payload it was never going to receive.
+func writeRawHeaderOnly(conn net.Conn, opcode uint8, length uint64) error {
+	var buf bytes.Buffer
+	buf.WriteByte(0x80 | opcode) // fin=1
+	buf.WriteByte(127)           // 64-bit extended length follows
+	var ext [8]byte
+	binary.BigEndian.PutUint64(ext[:], length)
+	buf.Write(ext[:])
+	_, err := conn.Write(buf.Bytes())
+	return err
+}
+
+// fakeConn is a minimal net.Conn test double for whitebox tests that need
+// to observe or control Write/Close/SetDeadline behavior directly, without
+// a real socket.
+type fakeConn struct {
+	writeErr      error
+	closed        bool
+	deadlineCalls []time.Time
+}
+
+func (f *fakeConn) Read(p []byte) (int, error)  { return 0, io.EOF }
+func (f *fakeConn) Write(p []byte) (int, error) { return 0, f.writeErr }
+func (f *fakeConn) Close() error                { f.closed = true; return nil }
+func (f *fakeConn) LocalAddr() net.Addr         { return nil }
+func (f *fakeConn) RemoteAddr() net.Addr        { return nil }
+func (f *fakeConn) SetDeadline(t time.Time) error {
+	f.deadlineCalls = append(f.deadlineCalls, t)
+	return nil
+}
+func (f *fakeConn) SetReadDeadline(time.Time) error  { return nil }
+func (f *fakeConn) SetWriteDeadline(time.Time) error { return nil }
 
 func TestDial_HandshakeSuccess(t *testing.T) {
 	l, wsURL := newTestServer(t)
@@ -586,5 +623,370 @@ func TestDialWSS(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("server handler did not finish")
+	}
+}
+
+// --- Review round: CRITICAL 1 — declared length must be checked before allocation/read ---
+
+func TestOversizedMessage_HugeDeclaredLengthNoHangNoPanic(t *testing.T) {
+	l, wsURL := newTestServer(t)
+	go func() {
+		conn, err := websockettest.Accept(l)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		// Declare an enormous (but MSB-unset, so individually "legal")
+		// length and never send any payload bytes at all.
+		writeRawHeaderOnly(conn, opBinary, 1<<62)
+	}()
+
+	ctx := dialCtx(t)
+	conn, err := Dial(ctx, wsURL, DialOptions{MaxMessageBytes: 1024})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer conn.Close(CloseNormal, "")
+
+	readDone := make(chan error, 1)
+	go func() {
+		_, _, rerr := conn.Read(ctx)
+		readDone <- rerr
+	}()
+
+	select {
+	case rerr := <-readDone:
+		if rerr == nil {
+			t.Fatal("expected an error for a declared length far exceeding MaxMessageBytes")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Read hung instead of rejecting the declared length immediately (no panic, no allocation, no hang expected)")
+	}
+}
+
+func TestOversizedMessage_JustOverBudgetNoPayloadSent(t *testing.T) {
+	l, wsURL := newTestServer(t)
+	go func() {
+		conn, err := websockettest.Accept(l)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		// Declare 101 bytes (budget is 100) and never write them.
+		writeRawHeaderOnly(conn, opText, 101)
+	}()
+
+	ctx := dialCtx(t)
+	conn, err := Dial(ctx, wsURL, DialOptions{MaxMessageBytes: 100})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer conn.Close(CloseNormal, "")
+
+	readDone := make(chan error, 1)
+	go func() {
+		_, _, rerr := conn.Read(ctx)
+		readDone <- rerr
+	}()
+
+	select {
+	case rerr := <-readDone:
+		if rerr == nil {
+			t.Fatal("expected a 1009 error for a declared length just over budget")
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("Read hung waiting for payload bytes that were (deliberately) never sent")
+	}
+}
+
+// --- Review round: CRITICAL 2 — ctx watcher must never permanently poison a healthy conn ---
+
+func TestCtxCancelAfterSuccess_ConnStaysUsable(t *testing.T) {
+	const iterations = 250
+
+	l, wsURL := newTestServer(t)
+	go func() {
+		conn, err := websockettest.Accept(l)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		for i := 0; i < iterations; i++ {
+			op, payload, err := websockettest.ReadMessage(conn)
+			if err != nil {
+				return
+			}
+			if err := websockettest.WriteMessage(conn, op, payload); err != nil {
+				return
+			}
+		}
+	}()
+
+	conn, err := Dial(dialCtx(t), wsURL, DialOptions{})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer conn.Close(CloseNormal, "")
+
+	for i := 0; i < iterations; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		if err := conn.WriteText(ctx, []byte("ping")); err != nil {
+			cancel()
+			t.Fatalf("iteration %d: WriteText: %v", i, err)
+		}
+		_, data, err := conn.Read(ctx)
+		// Mimic the standard `ctx, cancel := ...; defer cancel()` pattern:
+		// cancel() fires immediately after the call returns successfully,
+		// racing runWithContext's own internal cleanup.
+		cancel()
+		if err != nil {
+			t.Fatalf("iteration %d: Read: %v", i, err)
+		}
+		if string(data) != "ping" {
+			t.Fatalf("iteration %d: got %q, want %q", i, data, "ping")
+		}
+	}
+}
+
+func TestRunWithContext_AlreadyDoneButFnSucceeds_ResetsDeadline(t *testing.T) {
+	fc := &fakeConn{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already done before runWithContext is even called
+
+	err := runWithContext(ctx, fc, func() error {
+		// Give the watcher goroutine time to observe the already-done ctx
+		// and call SetDeadline before fn returns, deterministically
+		// reproducing "ctx fires while fn is in flight but fn succeeds".
+		time.Sleep(20 * time.Millisecond)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("runWithContext returned %v, want nil (fn succeeded)", err)
+	}
+
+	if len(fc.deadlineCalls) < 2 {
+		t.Fatalf("expected at least 2 SetDeadline calls (poison + reset), got %d: %v", len(fc.deadlineCalls), fc.deadlineCalls)
+	}
+	poisoned := fc.deadlineCalls[len(fc.deadlineCalls)-2]
+	reset := fc.deadlineCalls[len(fc.deadlineCalls)-1]
+	if !poisoned.Equal(time.Unix(0, 0)) {
+		t.Errorf("expected the watcher to have set a past deadline, got %v", poisoned)
+	}
+	if !reset.IsZero() {
+		t.Errorf("expected the deadline to be reset to the zero value since fn succeeded, got %v", reset)
+	}
+}
+
+// --- Review round: IMPORTANT 1 — a protocolErr from readFrameHeader must abort (1002 + close socket) ---
+
+func TestProtocolViolation_ClosesSocketAndSends1002(t *testing.T) {
+	l, wsURL := newTestServer(t)
+	resultCh := make(chan closeInfo, 1)
+	eofCh := make(chan bool, 1)
+	go func() {
+		conn, err := websockettest.Accept(l)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		// A 126-byte ping is a direct RFC 6455 §5.5 violation (control
+		// frames must be <=125 bytes) surfaced as a protocolErr from
+		// readFrameHeader.
+		websockettest.WriteFrame(conn, true, websockettest.OpPing, bytes.Repeat([]byte{'p'}, 126))
+
+		op, payload, err := websockettest.ReadMessage(conn)
+		if err == nil && op == websockettest.OpClose && len(payload) >= 2 {
+			resultCh <- closeInfo{code: int(binary.BigEndian.Uint16(payload[:2]))}
+		} else {
+			resultCh <- closeInfo{code: -1}
+		}
+
+		// Confirm the client actually closed its socket (no fd leak)
+		// rather than merely returning an error while leaving the TCP
+		// connection half-open. Depending on OS-level timing, tearing
+		// down a connection can surface as a clean io.EOF or as a
+		// "connection reset by peer" (both are legitimate outcomes of the
+		// peer having torn down the socket); only a timeout indicates the
+		// fd was never actually closed.
+		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		var b [1]byte
+		_, rerr := conn.Read(b[:])
+		var netErr net.Error
+		isTimeout := errors.As(rerr, &netErr) && netErr.Timeout()
+		eofCh <- rerr != nil && !isTimeout
+	}()
+
+	ctx := dialCtx(t)
+	conn, err := Dial(ctx, wsURL, DialOptions{})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer conn.Close(CloseNormal, "")
+
+	if _, _, err := conn.Read(ctx); err == nil {
+		t.Fatal("expected an error for the oversized ping")
+	}
+
+	select {
+	case info := <-resultCh:
+		if info.code != CloseProtocolError {
+			t.Errorf("server observed close code = %d, want %d", info.code, CloseProtocolError)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the 1002 close echo")
+	}
+
+	select {
+	case torndown := <-eofCh:
+		if !torndown {
+			t.Error("expected the client to have torn down its socket (server should observe EOF or reset, not a timeout); the fd may be leaked")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting to observe the client's socket closure")
+	}
+}
+
+// --- Review round: IMPORTANT 2 — never echo an explicit 1005 on the wire ---
+
+func TestServerInitiatedClose_EmptyPayloadEchoedEmpty(t *testing.T) {
+	l, wsURL := newTestServer(t)
+	echoCh := make(chan []byte, 1)
+	go func() {
+		conn, err := websockettest.Accept(l)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		// No status code at all — an entirely empty close payload.
+		websockettest.WriteFrame(conn, true, websockettest.OpClose, nil)
+
+		op, payload, err := websockettest.ReadMessage(conn)
+		if err == nil && op == websockettest.OpClose {
+			echoCh <- payload
+		} else {
+			echoCh <- []byte("READ-ERROR")
+		}
+	}()
+
+	ctx := dialCtx(t)
+	conn, err := Dial(ctx, wsURL, DialOptions{})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+
+	_, _, err = conn.Read(ctx)
+	var closeErr *CloseError
+	if !errors.As(err, &closeErr) {
+		t.Fatalf("Read err = %v, want *CloseError", err)
+	}
+	if closeErr.Code != closeNoStatus {
+		t.Errorf("CloseError.Code = %d, want %d (no status code received)", closeErr.Code, closeNoStatus)
+	}
+
+	select {
+	case echoed := <-echoCh:
+		if len(echoed) != 0 {
+			t.Errorf("echoed close payload = %v (len %d), want empty: RFC 6455 §7.4.1 forbids ever sending 1005 on the wire", echoed, len(echoed))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the close echo")
+	}
+
+	conn.Close(CloseNormal, "")
+}
+
+// --- Review round: MINOR (b) — a failed automatic pong write must shut down the conn ---
+
+func TestPingAutoPongWriteFailureShutsDownConn(t *testing.T) {
+	var buf bytes.Buffer
+	if err := writeFrame(&buf, true, opPing, []byte("hi"), nil); err != nil {
+		t.Fatalf("writeFrame: %v", err)
+	}
+	fc := &fakeConn{writeErr: errors.New("boom")}
+	c := &Conn{conn: fc, br: bufio.NewReader(&buf), maxMessage: defaultMaxMessageBytes}
+
+	if _, _, err := c.readMessage(); err == nil {
+		t.Fatal("expected an error when the automatic pong write fails")
+	}
+	if !fc.closed {
+		t.Error("expected the connection to be shut down after a failed automatic pong write")
+	}
+}
+
+// --- Review round: MINOR (c) — reserved headers are skipped; CR/LF is rejected ---
+
+func TestDial_HeaderCRLFRejected(t *testing.T) {
+	l, wsURL := newTestServer(t)
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		// The malformed header must be caught before any bytes are sent,
+		// so there's nothing for the server to do here except not hang.
+	}()
+
+	ctx := dialCtx(t)
+	_, err := Dial(ctx, wsURL, DialOptions{Header: http.Header{"X-Evil": {"value\r\nInjected: true"}}})
+	if err == nil {
+		t.Fatal("expected an error for a header value containing CR/LF")
+	}
+	if !strings.Contains(err.Error(), "CR or LF") {
+		t.Errorf("error = %v, want to mention CR or LF", err)
+	}
+}
+
+func TestDial_ReservedHeadersSkipped(t *testing.T) {
+	l, wsURL := newTestServer(t)
+	reqCh := make(chan *http.Request, 1)
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			reqCh <- nil
+			return
+		}
+		defer conn.Close()
+		br := bufio.NewReader(conn)
+		req, err := http.ReadRequest(br)
+		if err != nil {
+			reqCh <- nil
+			return
+		}
+		req.Body.Close()
+		reqCh <- req
+
+		accept := websockettest.ComputeAccept(req.Header.Get("Sec-WebSocket-Key"))
+		resp := "HTTP/1.1 101 Switching Protocols\r\n" +
+			"Upgrade: websocket\r\n" +
+			"Connection: Upgrade\r\n" +
+			"Sec-WebSocket-Accept: " + accept + "\r\n\r\n"
+		conn.Write([]byte(resp))
+	}()
+
+	ctx := dialCtx(t)
+	conn, err := Dial(ctx, wsURL, DialOptions{Header: http.Header{
+		"Host":                     {"evil.example"},
+		"Sec-WebSocket-Extensions": {"permessage-deflate"},
+		"X-Custom":                 {"value1"},
+	}})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer conn.Close(CloseNormal, "")
+
+	req := <-reqCh
+	if req == nil {
+		t.Fatal("server did not receive a request")
+	}
+	if req.Host == "evil.example" {
+		t.Errorf("Host header was overridden by caller-supplied header: %q", req.Host)
+	}
+	if got := req.Header.Get("Sec-WebSocket-Extensions"); got != "" {
+		t.Errorf("Sec-WebSocket-Extensions = %q, want empty (reserved headers must be skipped)", got)
+	}
+	if got := req.Header.Get("X-Custom"); got != "value1" {
+		t.Errorf("X-Custom = %q, want %q (non-reserved headers must pass through)", got, "value1")
 	}
 }
