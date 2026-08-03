@@ -190,6 +190,19 @@ func (t *tool) Execute(ctx context.Context, args json.RawMessage) (any, error) {
 	argValue := reflect.New(argType)
 	argInterface := argValue.Interface()
 
+	// Normalize empty/nil/whitespace-only args to "{}" before decoding: this
+	// is the normal wire shape for a no-arg tool call (and exactly what
+	// stream assembly produces when a tool call arrives with no ArgsDelta —
+	// see stream_text.go's ToolCallPart{Args: pc.args} with nil pc.args).
+	// Without this, json.Decoder.Decode on an empty/blank reader returns
+	// io.EOF, rejecting every no-arg call as *InvalidToolArgumentsError.
+	// Args with required fields are unaffected: Decode against "{}" still
+	// fails validation the same way it would against any other object
+	// missing required fields (schema-level, unchanged).
+	if len(bytes.TrimSpace(args)) == 0 {
+		args = []byte("{}")
+	}
+
 	// Unmarshal strictly with DisallowUnknownFields
 	decoder := json.NewDecoder(bytes.NewReader(args))
 	decoder.DisallowUnknownFields()

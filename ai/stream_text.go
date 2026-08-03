@@ -52,6 +52,19 @@ type TextStream struct {
 	// resume batch (before any stream ran) or mid-loop, after a step. See
 	// GenerateTextResult.PendingApprovals.
 	pendingApprovals []ApprovalRequest
+
+	// suspendResolved, when true, means the resume-batch immediate-suspend
+	// return path (see StreamText) already released Timeout.Total's ctx
+	// eagerly and captured its finishOrTimeout outcome at that moment,
+	// before doing so — s.ctx.Err()/context.Cause(s.ctx) can no longer be
+	// trusted for that decision afterward, since the eager release makes
+	// s.ctx appear done (cause context.Canceled) even when Total never
+	// actually fired. finishOrTimeout consults these fields instead of
+	// re-deriving from s.ctx when suspendResolved is set; every other
+	// finishOrTimeout call site leaves it false and takes the normal path.
+	suspendResolved   bool
+	suspendTimeoutErr *TimeoutError
+	suspendAbort      bool
 }
 
 // StreamText starts the first model call (retried like GenerateText) and
@@ -119,6 +132,23 @@ func StreamText(ctx context.Context, opts GenerateTextOpts) (*TextStream, error)
 			// the result surface (see Parts and buildResult).
 			s.pendingApprovals = batch.pending
 			s.lastFinish = provider.FinishToolCalls
+			// No further work will ever run on this *TextStream (s.current
+			// stays nil forever), so Timeout.Total's derived ctx/timer must
+			// be released now rather than left for Parts()/Close() — a
+			// caller that only reads PendingApprovals() and drops the
+			// stream without calling either must not leak it. Capture
+			// finishOrTimeout's decision first, from the still-live ctx, so
+			// a caller that DOES go on to call Parts() still gets the
+			// correct finish/timeout/abort classification despite ctx now
+			// appearing done for an unrelated reason (our own cancel).
+			s.suspendResolved = true
+			if te, ok := timeoutErrorFor(ctx, opts.Timeout); ok {
+				s.suspendTimeoutErr = te
+			} else if ctx.Err() != nil {
+				s.suspendAbort = true
+			}
+			s.chunkWD.Stop()
+			cancelTotal()
 			return s, nil
 		}
 		s.messages = append(s.messages, toolResultMessage(batch.results))
@@ -676,6 +706,21 @@ func (s *TextStream) finish() {
 // this window is classified identically wherever it's observed. Only when
 // s.ctx is not done at all does this proceed to the normal success path.
 func (s *TextStream) finishOrTimeout() {
+	if s.suspendResolved {
+		if s.suspendTimeoutErr != nil {
+			s.err = s.suspendTimeoutErr
+			if s.opts.OnError != nil {
+				s.opts.OnError(s.suspendTimeoutErr)
+			}
+			return
+		}
+		if s.suspendAbort {
+			s.fireAbort()
+			return
+		}
+		s.finish()
+		return
+	}
 	if s.ctx.Err() != nil {
 		if te, ok := timeoutErrorFor(s.ctx, s.opts.Timeout); ok {
 			s.err = te

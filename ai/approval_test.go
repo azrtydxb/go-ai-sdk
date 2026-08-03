@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/azrtydxb/go-ai-sdk/ai/aitest"
 	"github.com/azrtydxb/go-ai-sdk/provider"
@@ -332,6 +333,78 @@ func TestResumeStreamText(t *testing.T) {
 	}
 	if len(m.Calls) != 1 {
 		t.Fatalf("model calls = %d, want 1", len(m.Calls))
+	}
+}
+
+// TestResumeStreamTextImmediateSuspendReleasesTotalTimeout pins the fix for
+// the resume-batch immediate-suspend path leaking Timeout.Total's derived
+// context/timer: when the resume batch still has no decision (still
+// pending), StreamText returns *TextStream with s.current == nil and
+// pendingApprovals set, without ever starting a model stream. A caller that
+// reads PendingApprovals() and drops the stream — never calling Parts() or
+// Close() — must not leak Total's context/timer. Since s.ctx is an
+// unexported field, this test (same package) asserts it directly: it must
+// already be Done immediately after StreamText returns, proving Total's
+// timer/goroutine was released eagerly rather than left to fire on its own
+// after the (here, very long) Total duration.
+func TestResumeStreamTextImmediateSuspendReleasesTotalTimeout(t *testing.T) {
+	tool := RequireApproval(approvalWeatherTool(nil))
+	m := &aitest.MockModel{} // no model calls expected at all
+	s, err := StreamText(t.Context(), GenerateTextOpts{
+		Model: m, Messages: pendingAssistantMessages("weather?"), Tools: []Tool{tool}, MaxSteps: 2,
+		Timeout: &Timeout{Total: time.Hour}, // far larger than the test; only released early if the fix works
+		// No Approvals, no ApproveToolCall: still pending.
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.PendingApprovals()) != 1 {
+		t.Fatalf("PendingApprovals = %+v", s.PendingApprovals())
+	}
+	// The caller drops s here without calling Parts() or Close() — exactly
+	// the leak scenario. s.ctx must already be canceled/done: Total's
+	// context.WithTimeoutCause-derived ctx/timer was released proactively.
+	select {
+	case <-s.ctx.Done():
+	default:
+		t.Fatal("s.ctx is not done: Timeout.Total's context/timer was not released eagerly (leak)")
+	}
+}
+
+// TestResumeStreamTextImmediateSuspendThenPartsStillFinishes confirms the
+// eager-release fix above doesn't regress the ordinary case where a caller
+// DOES go on to call Parts() after reading (or ignoring) PendingApprovals():
+// OnFinish must still fire normally (not as an abort), since Timeout.Total
+// never actually elapsed — only our own proactive early release made
+// s.ctx.Err() non-nil, which finishOrTimeout must not mistake for a real
+// timeout or a caller abort.
+func TestResumeStreamTextImmediateSuspendThenPartsStillFinishes(t *testing.T) {
+	tool := RequireApproval(approvalWeatherTool(nil))
+	m := &aitest.MockModel{}
+	var finished *GenerateTextResult
+	var aborted bool
+	s, err := StreamText(t.Context(), GenerateTextOpts{
+		Model: m, Messages: pendingAssistantMessages("weather?"), Tools: []Tool{tool}, MaxSteps: 2,
+		Timeout:  &Timeout{Total: time.Hour},
+		OnFinish: func(r *GenerateTextResult) { finished = r },
+		OnAbort:  func() { aborted = true },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+	}
+	if s.Err() != nil {
+		t.Fatalf("s.Err() = %v, want nil (no real timeout ever fired)", s.Err())
+	}
+	if aborted {
+		t.Fatal("OnAbort fired; want normal finish (the eager release must not be mistaken for a real abort)")
+	}
+	if finished == nil {
+		t.Fatal("OnFinish did not fire")
+	}
+	if len(finished.PendingApprovals) != 1 {
+		t.Fatalf("OnFinish result PendingApprovals = %+v", finished.PendingApprovals)
 	}
 }
 

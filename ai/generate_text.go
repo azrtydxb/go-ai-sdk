@@ -749,6 +749,9 @@ func buildStep(resp *provider.Response) Step {
 // one-line hook for middleware that decorates a provider.LanguageModel
 // (e.g. logging, caching, retries) before it is passed to GenerateText.
 func WrapModel(m provider.LanguageModel, wrap func(provider.LanguageModel) provider.LanguageModel) provider.LanguageModel {
+	if m == nil {
+		panic("ai: WrapModel: nil model")
+	}
 	return wrap(m)
 }
 
@@ -757,5 +760,8 @@ func WrapModel(m provider.LanguageModel, wrap func(provider.LanguageModel) provi
 // middleware that decorates a provider.ImageModel before it is passed to
 // GenerateImage.
 func WrapImageModel(m provider.ImageModel, wrap func(provider.ImageModel) provider.ImageModel) provider.ImageModel {
+	if m == nil {
+		panic("ai: WrapImageModel: nil model")
+	}
 	return wrap(m)
 }

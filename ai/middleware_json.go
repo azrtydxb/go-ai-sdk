@@ -69,6 +69,9 @@ import (
 // correctly in both directions, since the relevant undecided/pending bytes
 // carry over between feeds.
 func ExtractJSONMiddleware(model provider.LanguageModel) provider.LanguageModel {
+	if model == nil {
+		panic("ai: ExtractJSONMiddleware: nil model")
+	}
 	return &extractJSONModel{model: model}
 }
 

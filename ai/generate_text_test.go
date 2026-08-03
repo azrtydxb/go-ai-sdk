@@ -16,6 +16,28 @@ func TestMain(m *testing.M) {
 	m.Run()
 }
 
+func TestWrapModelNilModelPanics(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r != "ai: WrapModel: nil model" {
+			t.Fatalf("recover() = %v", r)
+		}
+	}()
+	WrapModel(nil, func(m provider.LanguageModel) provider.LanguageModel { return m })
+	t.Fatal("did not panic")
+}
+
+func TestWrapImageModelNilModelPanics(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r != "ai: WrapImageModel: nil model" {
+			t.Fatalf("recover() = %v", r)
+		}
+	}()
+	WrapImageModel(nil, func(m provider.ImageModel) provider.ImageModel { return m })
+	t.Fatal("did not panic")
+}
+
 func TestGenerateTextSimplePrompt(t *testing.T) {
 	m := &aitest.MockModel{Responses: []*provider.Response{{
 		Content:      []provider.ContentPart{provider.TextPart{Text: "hello"}},

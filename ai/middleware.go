@@ -30,6 +30,9 @@ import (
 // idempotent per call — each invocation starts again from the original
 // Description plus the original InputExamples supplied by the caller.
 func AddToolInputExamplesMiddleware(model provider.LanguageModel) provider.LanguageModel {
+	if model == nil {
+		panic("ai: AddToolInputExamplesMiddleware: nil model")
+	}
 	return &addToolInputExamplesModel{model: model}
 }
 
@@ -120,6 +123,9 @@ type ExtractReasoningOpts struct {
 // (e.g. "<th" then "ink>") are still recognized correctly since the
 // unresolved prefix carries over between feeds.
 func ExtractReasoningMiddleware(model provider.LanguageModel, opts ExtractReasoningOpts) provider.LanguageModel {
+	if model == nil {
+		panic("ai: ExtractReasoningMiddleware: nil model")
+	}
 	return &extractReasoningModel{model: model, opts: opts}
 }
 
@@ -162,10 +168,11 @@ func extractReasoningFromResponse(resp *provider.Response, opts ExtractReasoning
 		newContent = append(newContent, extractReasoningParts(tp.Text, opts)...)
 	}
 	return &provider.Response{
-		Content:      newContent,
-		FinishReason: resp.FinishReason,
-		Usage:        resp.Usage,
-		Raw:          resp.Raw,
+		Content:          newContent,
+		FinishReason:     resp.FinishReason,
+		Usage:            resp.Usage,
+		Raw:              resp.Raw,
+		ProviderMetadata: resp.ProviderMetadata,
 	}
 }
 
@@ -408,6 +415,9 @@ func longestSuffixPrefixOverlap(buf, watch []byte) int {
 // ToolCallEnd for each tool call; then a single FinishPart carrying the
 // response's FinishReason and Usage.
 func SimulateStreamingMiddleware(model provider.LanguageModel) provider.LanguageModel {
+	if model == nil {
+		panic("ai: SimulateStreamingMiddleware: nil model")
+	}
 	return &simulateStreamingModel{model: model}
 }
 
@@ -450,7 +460,11 @@ func (m *simulateStreamingModel) Stream(ctx context.Context, call provider.Call)
 			parts = append(parts, provider.ToolCallEnd{Call: tc})
 		}
 	}
-	parts = append(parts, provider.FinishPart{Reason: resp.FinishReason, Usage: resp.Usage})
+	parts = append(parts, provider.FinishPart{
+		Reason:           resp.FinishReason,
+		Usage:            resp.Usage,
+		ProviderMetadata: resp.ProviderMetadata,
+	})
 
 	return &simulatedStreamResponse{parts: parts}, nil
 }
@@ -489,6 +503,9 @@ func (s *simulatedStreamResponse) Close() error { return nil }
 // win because only zero-valued fields are ever replaced/merged in the
 // caller's favor.
 func DefaultSettingsMiddleware(model provider.LanguageModel, defaults provider.Call) provider.LanguageModel {
+	if model == nil {
+		panic("ai: DefaultSettingsMiddleware: nil model")
+	}
 	return &defaultSettingsModel{model: model, defaults: defaults}
 }
 

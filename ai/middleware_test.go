@@ -365,6 +365,41 @@ func TestExtractReasoningMiddleware_PassthroughFields(t *testing.T) {
 	}
 }
 
+// TestExtractReasoningMiddleware_Generate_PreservesProviderMetadata pins the
+// fix for extractReasoningFromResponse dropping ProviderMetadata: it used to
+// rebuild *provider.Response copying Content/FinishReason/Usage/Raw but
+// omitting ProviderMetadata, silently losing it on every Generate call.
+func TestExtractReasoningMiddleware_Generate_PreservesProviderMetadata(t *testing.T) {
+	mock := &aitest.MockModel{
+		Responses: []*provider.Response{
+			{
+				Content:          []provider.ContentPart{provider.TextPart{Text: "plain text"}},
+				FinishReason:     provider.FinishStop,
+				ProviderMetadata: map[string]any{"anthropic": map[string]any{"cache_read": 42}},
+			},
+		},
+	}
+	wrapped := ExtractReasoningMiddleware(mock, ExtractReasoningOpts{TagName: "think"})
+	resp, err := wrapped.Generate(context.Background(), provider.Call{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !reflect.DeepEqual(resp.ProviderMetadata, map[string]any{"anthropic": map[string]any{"cache_read": 42}}) {
+		t.Fatalf("ProviderMetadata = %#v, want preserved", resp.ProviderMetadata)
+	}
+}
+
+func TestExtractReasoningMiddleware_NilModelPanics(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r != "ai: ExtractReasoningMiddleware: nil model" {
+			t.Fatalf("recover() = %v", r)
+		}
+	}()
+	ExtractReasoningMiddleware(nil, ExtractReasoningOpts{TagName: "think"})
+	t.Fatal("did not panic")
+}
+
 // ---------------------------------------------------------------------
 // SimulateStreamingMiddleware
 // ---------------------------------------------------------------------
@@ -416,6 +451,53 @@ func TestSimulateStreamingMiddleware_ReplaysToolCallResponse(t *testing.T) {
 	}
 }
 
+// TestSimulateStreamingMiddleware_Stream_PreservesProviderMetadata pins the
+// fix for SimulateStreamingMiddleware.Stream synthesizing a FinishPart with
+// no ProviderMetadata, silently dropping resp.ProviderMetadata on every
+// simulated stream.
+func TestSimulateStreamingMiddleware_Stream_PreservesProviderMetadata(t *testing.T) {
+	mock := &aitest.MockModel{
+		Responses: []*provider.Response{
+			{
+				Content:          []provider.ContentPart{provider.TextPart{Text: "hi"}},
+				FinishReason:     provider.FinishStop,
+				ProviderMetadata: map[string]any{"openai": map[string]any{"system_fingerprint": "abc"}},
+			},
+		},
+	}
+	wrapped := SimulateStreamingMiddleware(mock)
+	sr, err := wrapped.Stream(context.Background(), provider.Call{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	parts := collectStreamParts(t, sr)
+	var fp provider.FinishPart
+	var found bool
+	for _, p := range parts {
+		if f, ok := p.(provider.FinishPart); ok {
+			fp = f
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("no FinishPart observed")
+	}
+	if !reflect.DeepEqual(fp.ProviderMetadata, map[string]any{"openai": map[string]any{"system_fingerprint": "abc"}}) {
+		t.Fatalf("FinishPart.ProviderMetadata = %#v, want preserved", fp.ProviderMetadata)
+	}
+}
+
+func TestSimulateStreamingMiddleware_NilModelPanics(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r != "ai: SimulateStreamingMiddleware: nil model" {
+			t.Fatalf("recover() = %v", r)
+		}
+	}()
+	SimulateStreamingMiddleware(nil)
+	t.Fatal("did not panic")
+}
+
 func TestSimulateStreamingMiddleware_GeneratePassesThrough(t *testing.T) {
 	resp := &provider.Response{
 		Content:      []provider.ContentPart{provider.TextPart{Text: "hi"}},
@@ -446,6 +528,17 @@ func TestSimulateStreamingMiddleware_StreamPropagatesGenerateError(t *testing.T)
 // ---------------------------------------------------------------------
 // DefaultSettingsMiddleware
 // ---------------------------------------------------------------------
+
+func TestDefaultSettingsMiddleware_NilModelPanics(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r != "ai: DefaultSettingsMiddleware: nil model" {
+			t.Fatalf("recover() = %v", r)
+		}
+	}()
+	DefaultSettingsMiddleware(nil, provider.Call{})
+	t.Fatal("did not panic")
+}
 
 func TestDefaultSettingsMiddleware_FillsZeroFields(t *testing.T) {
 	mock := &aitest.MockModel{Responses: []*provider.Response{{}}}
@@ -795,6 +888,17 @@ func TestDefaultSettingsMiddleware_PerCallReasoningWins(t *testing.T) {
 // ---------------------------------------------------------------------
 // AddToolInputExamplesMiddleware
 // ---------------------------------------------------------------------
+
+func TestAddToolInputExamplesMiddleware_NilModelPanics(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r != "ai: AddToolInputExamplesMiddleware: nil model" {
+			t.Fatalf("recover() = %v", r)
+		}
+	}()
+	AddToolInputExamplesMiddleware(nil)
+	t.Fatal("did not panic")
+}
 
 func TestAddToolInputExamplesMiddleware_AppendsAndClears(t *testing.T) {
 	mock := &aitest.MockModel{Responses: []*provider.Response{{}}}

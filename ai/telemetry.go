@@ -76,6 +76,9 @@ type Telemetry interface {
 // (model.Stream returning a non-nil error) ends the span immediately with
 // that Err, and no StreamResponse is ever wrapped or returned.
 func TelemetryMiddleware(model provider.LanguageModel, t Telemetry) provider.LanguageModel {
+	if model == nil {
+		panic("ai: TelemetryMiddleware: nil model")
+	}
 	return &telemetryModel{model: model, t: t}
 }
 

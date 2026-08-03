@@ -13,6 +13,17 @@ import (
 // ExtractJSONMiddleware — Generate
 // ---------------------------------------------------------------------
 
+func TestExtractJSONMiddleware_NilModelPanics(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r != "ai: ExtractJSONMiddleware: nil model" {
+			t.Fatalf("recover() = %v", r)
+		}
+	}()
+	ExtractJSONMiddleware(nil)
+	t.Fatal("did not panic")
+}
+
 func TestExtractJSONMiddleware_Generate_StripsFence(t *testing.T) {
 	mock := &aitest.MockModel{
 		Responses: []*provider.Response{

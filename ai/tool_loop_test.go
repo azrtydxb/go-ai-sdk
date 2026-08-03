@@ -53,6 +53,43 @@ func TestToolLoopExecutesAndContinues(t *testing.T) {
 	}
 }
 
+// TestStreamTextNoArgToolCallSucceeds pins the real regression path for the
+// no-arg-tool-call fix: a streamed tool call that arrives with no
+// ArgsDelta at all (ToolCallEnd.Call.Args is nil — the normal wire shape
+// for a tool the model calls with no arguments) must still execute
+// successfully, not be rejected as *InvalidToolArgumentsError.
+func TestStreamTextNoArgToolCallSucceeds(t *testing.T) {
+	var executed bool
+	m := &aitest.MockModel{Streams: [][]provider.StreamPart{
+		{
+			provider.ToolCallEnd{Call: provider.ToolCallPart{ID: "c1", Name: "ping"}},
+			provider.FinishPart{Reason: provider.FinishToolCalls},
+		},
+		{
+			provider.TextDelta{Text: "pong"},
+			provider.FinishPart{Reason: provider.FinishStop},
+		},
+	}}
+	tool := NewTool("ping", "", func(_ context.Context, _ struct{}) (any, error) {
+		executed = true
+		return "pong", nil
+	})
+	s, err := StreamText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "x", Tools: []Tool{tool}, MaxSteps: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+	}
+	if s.Err() != nil {
+		t.Fatalf("Err() = %v", s.Err())
+	}
+	if !executed {
+		t.Fatal("no-arg tool never executed")
+	}
+}
+
 func TestToolLoopStopsAtMaxSteps(t *testing.T) {
 	m := &aitest.MockModel{Responses: []*provider.Response{
 		toolCallResponse("t", "c1", `{"city":"a"}`),

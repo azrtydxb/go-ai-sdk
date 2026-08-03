@@ -33,6 +33,17 @@ func (r *recordingTelemetry) OnSpanEnd(info SpanInfo) {
 	r.ends = append(r.ends, info)
 }
 
+func TestTelemetryMiddlewareNilModelPanics(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r != "ai: TelemetryMiddleware: nil model" {
+			t.Fatalf("recover() = %v", r)
+		}
+	}()
+	TelemetryMiddleware(nil, nil)
+	t.Fatal("did not panic")
+}
+
 func TestTelemetryMiddlewareGenerateSpanSuccess(t *testing.T) {
 	m := &aitest.MockModel{Responses: []*provider.Response{{
 		Content:      []provider.ContentPart{provider.TextPart{Text: "hello"}},
