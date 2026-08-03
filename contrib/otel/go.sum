@@ -1,3 +1,5 @@
+github.com/azrtydxb/go-ai-sdk v0.2.0 h1:I4eyWqWaDIwSrVqtt3sKYSUV+v90k2ZJc7oGLxTT/kg=
+github.com/azrtydxb/go-ai-sdk v0.2.0/go.mod h1:p0p1pIpaRC5Ackd8F+/Dqjs11t3oxRh1NBfESYq3nTM=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
 github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
