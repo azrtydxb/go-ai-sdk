@@ -239,6 +239,48 @@ func TestTranscribe_ProviderOptionsOverrideModelQueryParam(t *testing.T) {
 	}
 }
 
+func TestTranscribe_ProviderOptionsRepeatedListParam(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"metadata":{"duration":0},"results":{"channels":[{"alternatives":[{"transcript":"hi","words":[]}]}]}}`))
+	}))
+	defer srv.Close()
+
+	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
+	m := p.TranscriptionModel("nova-3")
+
+	_, err := m.Transcribe(context.Background(), provider.TranscriptionCall{
+		Audio:     []byte("x"),
+		MediaType: "audio/wav",
+		ProviderOptions: map[string]any{
+			"deepgram": map[string]any{
+				"keywords": []any{"widget", "gizmo"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Transcribe: %v", err)
+	}
+
+	q, err := url.ParseQuery(gotQuery)
+	if err != nil {
+		t.Fatalf("parse query: %v", err)
+	}
+	got := q["keywords"]
+	want := []string{"widget", "gizmo"}
+	if len(got) != len(want) {
+		t.Fatalf("keywords = %v, want %v", got, want)
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Errorf("keywords[%d] = %q, want %q", i, got[i], w)
+		}
+	}
+}
+
 func TestTranscribe_NoLanguageOmitsQueryParam(t *testing.T) {
 	var gotQuery string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

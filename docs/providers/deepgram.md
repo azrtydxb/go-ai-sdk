@@ -86,6 +86,32 @@ entry is added as an additional query parameter (stringified with
 `smart_format`, `language`) — so an entry with one of those keys overrides
 the SDK-set value (`providers/deepgram/transcription.go`).
 
+**Repeated query parameters.** Some Deepgram parameters (e.g. `keywords`,
+`keyterm`) are meant to be repeated as multiple same-named query params
+rather than sent once as a comma-separated string. A
+`ProviderOptions["deepgram"]` value of type `[]any` or `[]string` is
+detected and added element-by-element via `url.Values.Add` (each element
+stringified with `fmt.Sprint` for `[]any`), producing one repeated `?k=v1&k=v2`
+pair per element; any other value type is still treated as scalar and set
+with `url.Values.Set` as before:
+
+```go
+_, err := ai.Transcribe(context.Background(), ai.TranscribeOpts{
+	Model:     transcription,
+	Audio:     audioBytes,
+	MediaType: "audio/wav",
+	ProviderOptions: map[string]any{
+		"deepgram": map[string]any{
+			"keywords": []any{"widget", "gizmo"},
+		},
+	},
+})
+```
+
+Verified in
+`providers/deepgram/transcription_test.go`
+(`TestTranscribe_ProviderOptionsRepeatedListParam`).
+
 ## Source of truth
 
 - [`providers/deepgram/deepgram.go`](../../providers/deepgram/deepgram.go)

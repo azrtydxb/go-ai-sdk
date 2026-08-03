@@ -65,6 +65,13 @@ type wireWord struct {
 // Options win: since they're applied after the reserved params (model,
 // smart_format, language), an entry in ProviderOptions["deepgram"] with one
 // of those keys overrides the SDK-set value.
+//
+// Deepgram accepts some query parameters (e.g. "keywords", "keyterm")
+// repeated multiple times rather than as a single comma-separated value.
+// To support that, a ProviderOptions["deepgram"] value of []any or
+// []string is added as one q.Add call per element (repeated params, each
+// stringified with fmt.Sprint), instead of a single q.Set call. Any other
+// value type is treated as scalar and set with q.Set as before.
 func (m *transcriptionModel) Transcribe(ctx context.Context, call provider.TranscriptionCall) (*provider.TranscriptionResponse, error) {
 	// call.Prompt is not supported by Deepgram's /v1/listen endpoint and is
 	// silently ignored.
@@ -77,7 +84,20 @@ func (m *transcriptionModel) Transcribe(ctx context.Context, call provider.Trans
 	}
 	if opts, ok := call.ProviderOptions["deepgram"].(map[string]any); ok {
 		for k, v := range opts {
-			q.Set(k, fmt.Sprint(v))
+			switch vv := v.(type) {
+			case []any:
+				q.Del(k)
+				for _, item := range vv {
+					q.Add(k, fmt.Sprint(item))
+				}
+			case []string:
+				q.Del(k)
+				for _, item := range vv {
+					q.Add(k, item)
+				}
+			default:
+				q.Set(k, fmt.Sprint(v))
+			}
 		}
 	}
 
