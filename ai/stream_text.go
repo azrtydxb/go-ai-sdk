@@ -86,7 +86,7 @@ func StreamText(ctx context.Context, opts GenerateTextOpts) (*TextStream, error)
 	// Messages is run first — approval rules applied — before the first
 	// model call. See GenerateTextOpts.Messages's resume-semantics doc.
 	if resumeCalls := trailingUnansweredToolCalls(messages); len(resumeCalls) > 0 {
-		batch, berr := runApprovalAwareToolCalls(ctx, opts, opts.Tools, resumeCalls, s.activeTools, 0)
+		batch, berr := runApprovalAwareToolCalls(ctx, opts, opts.Tools, resumeCalls, s.activeTools, 0, true)
 		if berr != nil {
 			// Mirrors the first-stream-start failure path below: no
 			// *TextStream has been returned to a caller yet, so this is
@@ -339,7 +339,7 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 			hasToolCalls := len(toolCalls) > 0
 
 			if hasToolCalls {
-				batch, err := runApprovalAwareToolCalls(s.ctx, s.opts, s.opts.Tools, toolCalls, s.activeTools, stepIndex)
+				batch, err := runApprovalAwareToolCalls(s.ctx, s.opts, s.opts.Tools, toolCalls, s.activeTools, stepIndex, false)
 				if err != nil {
 					s.err = err
 					step.ToolResults = nil

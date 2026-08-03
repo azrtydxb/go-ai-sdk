@@ -171,7 +171,7 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 	// Messages is run first — approval rules applied — before the first
 	// model call. See GenerateTextOpts.Messages's resume-semantics doc.
 	if resumeCalls := trailingUnansweredToolCalls(messages); len(resumeCalls) > 0 {
-		batch, berr := runApprovalAwareToolCalls(ctx, opts, opts.Tools, resumeCalls, active, 0)
+		batch, berr := runApprovalAwareToolCalls(ctx, opts, opts.Tools, resumeCalls, active, 0, true)
 		if berr != nil {
 			return fail(berr)
 		}
@@ -298,7 +298,7 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 		}
 
 		if hasToolCalls {
-			batch, err := runApprovalAwareToolCalls(ctx, opts, opts.Tools, toolCalls, active, stepIndex)
+			batch, err := runApprovalAwareToolCalls(ctx, opts, opts.Tools, toolCalls, active, stepIndex, false)
 			if err != nil {
 				return fail(err)
 			}
@@ -554,11 +554,19 @@ type toolBatchResult struct {
 // validates unknown tool names first (same as runToolCalls — rule: approval
 // checks happen after unknown-tool validation, before execution/repair),
 // then resolves an ApprovalDecision for every call whose Tool implements
-// ApprovalRequirer and reports true: first checking opts.Approvals by
-// ToolCallID, then opts.ApproveToolCall if set. Any call left undecided
-// makes the WHOLE batch pending — nothing executes, and Pending lists every
-// undecided call, in call order.
-func runApprovalAwareToolCalls(ctx context.Context, opts GenerateTextOpts, tools []Tool, calls []provider.ToolCallPart, active map[string]bool, stepIndex int) (*toolBatchResult, error) {
+// ApprovalRequirer and reports true. consultApprovals gates whether
+// opts.Approvals is checked at all: true only for the RESUME batch (the
+// batch pending at entry from Messages — see Messages's resume-semantics
+// doc), false for every batch arising later within the same run. This
+// matters because opts.Approvals matches by ToolCallID alone, and some
+// providers (e.g. geminicompat) synthesize deterministic IDs — a later
+// batch's call can legitimately reuse an ID an earlier Approvals entry
+// already answered, which would otherwise auto-approve a call no one ever
+// actually decided. opts.ApproveToolCall has no such collision risk (it's
+// consulted live, per call) and is always tried regardless of
+// consultApprovals. Any call left undecided makes the WHOLE batch pending —
+// nothing executes, and Pending lists every undecided call, in call order.
+func runApprovalAwareToolCalls(ctx context.Context, opts GenerateTextOpts, tools []Tool, calls []provider.ToolCallPart, active map[string]bool, stepIndex int, consultApprovals bool) (*toolBatchResult, error) {
 	byName := buildActiveToolMap(tools, active)
 	resolved, err := resolveToolCallNames(ctx, byName, calls, opts.RepairToolCall)
 	if err != nil {
@@ -573,9 +581,11 @@ func runApprovalAwareToolCalls(ctx context.Context, opts GenerateTextOpts, tools
 			continue
 		}
 		rec := ToolCallRecord{ID: c.ID, Name: c.Name, Args: c.Args}
-		if d, found := findApprovalDecision(opts.Approvals, c.ID); found {
-			decisions[c.ID] = &d
-			continue
+		if consultApprovals {
+			if d, found := findApprovalDecision(opts.Approvals, c.ID); found {
+				decisions[c.ID] = &d
+				continue
+			}
 		}
 		if opts.ApproveToolCall != nil {
 			if d, ok := opts.ApproveToolCall(ctx, ApprovalRequest{StepIndex: stepIndex, Call: rec}); ok {

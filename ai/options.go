@@ -294,9 +294,15 @@ type GenerateTextOpts struct {
 	ApproveToolCall func(ctx context.Context, req ApprovalRequest) (ApprovalDecision, bool)
 	// Approvals supplies out-of-band decisions on a resume call, matched by
 	// ToolCallID against the unanswered assistant tool-call batch at the end
-	// of Messages (see Messages's resume semantics). Also consulted for
-	// approval-needing calls arising later in the SAME run, before falling
-	// back to ApproveToolCall.
+	// of Messages (see Messages's resume semantics). It is consulted ONLY
+	// for that resume batch — not for any approval-needing call arising
+	// later within the same run, which must instead be decided via
+	// ApproveToolCall (or left to suspend). This scoping exists because
+	// Approvals matches by ToolCallID alone, and some providers (e.g.
+	// geminicompat) synthesize deterministic IDs from a call's name and
+	// index; a later batch's call can legitimately reuse an ID an earlier
+	// Approvals entry already answered, and consulting Approvals for it too
+	// would auto-approve a call no one actually decided.
 	Approvals []ApprovalDecision
 }
 

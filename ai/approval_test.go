@@ -390,7 +390,14 @@ func TestBatchWithDecisionsForAllExecutesAll(t *testing.T) {
 	}}
 	res, err := GenerateText(t.Context(), GenerateTextOpts{
 		Model: m, Prompt: "x", Tools: []Tool{plain, approvalTool}, MaxSteps: 2,
-		Approvals: []ApprovalDecision{{ToolCallID: "c2", Approved: true}},
+		// This is the FIRST batch of a Prompt-driven run, not a resume
+		// batch (see finding 5 / TestApprovalsDoesNotAutoApproveLaterBatchWithCollidingID):
+		// opts.Approvals is only consulted for the resume batch, so a
+		// non-resume batch's decision must come from ApproveToolCall
+		// instead.
+		ApproveToolCall: func(_ context.Context, req ApprovalRequest) (ApprovalDecision, bool) {
+			return ApprovalDecision{ToolCallID: req.Call.ID, Approved: true}, true
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -454,6 +461,97 @@ func TestLifecycleEventsFiredForDeniedCall(t *testing.T) {
 	var denied *ToolApprovalDeniedError
 	if !errors.As(endErr, &denied) {
 		t.Fatalf("OnToolExecutionEnd err = %v, want *ToolApprovalDeniedError", endErr)
+	}
+}
+
+// ---------------------------------------------------------------------
+// Finding 5: Approvals is scoped to the resume batch only
+// ---------------------------------------------------------------------
+
+// TestApprovalsDoesNotAutoApproveLaterBatchWithColliding ID pins finding 5:
+// some providers (e.g. geminicompat) synthesize deterministic tool-call IDs
+// like call_<name>_<index> — so a LATER batch, arising after the resume
+// batch within the SAME run, can legitimately reuse the exact ToolCallID an
+// earlier Approvals entry already answered. Matching opts.Approvals by ID
+// alone against every batch in the run (not just the resume batch it was
+// supplied for) would silently auto-approve that unrelated later call with a
+// decision that was never actually made for it.
+func TestApprovalsDoesNotAutoApproveLaterBatchWithCollidingID(t *testing.T) {
+	var executions int
+	guarded := RequireApproval(NewTool("guarded", "", func(_ context.Context, a weatherArgs) (any, error) {
+		executions++
+		return "ok", nil
+	}))
+
+	// The resume batch: an unanswered assistant tool-call message ending in
+	// a call to "guarded" with ID "call_guarded_0", answered by Approvals.
+	messages := []provider.Message{
+		provider.UserText("go"),
+		{Role: provider.RoleAssistant, Content: []provider.ContentPart{
+			provider.ToolCallPart{ID: "call_guarded_0", Name: "guarded", Args: []byte(`{"city":"a"}`)},
+		}},
+	}
+
+	m := &aitest.MockModel{Responses: []*provider.Response{
+		// Step 0 of the NEW run (post-resume): a LATER call that happens to
+		// reuse the same ID a synthesizing provider could plausibly produce
+		// again (e.g. index resets, or a second run reusing the pattern).
+		toolCallResponse("guarded", "call_guarded_0", `{"city":"b"}`),
+		// Only reached if the bug lets the later call auto-approve and
+		// execute, continuing the loop for one more (unwanted) step.
+		{Content: []provider.ContentPart{provider.TextPart{Text: "done"}}, FinishReason: provider.FinishStop},
+	}}
+
+	res, err := GenerateText(t.Context(), GenerateTextOpts{
+		Model: m, Messages: messages, Tools: []Tool{guarded}, MaxSteps: 3,
+		Approvals: []ApprovalDecision{{ToolCallID: "call_guarded_0", Approved: true}},
+		// No ApproveToolCall: the later batch has no other way to get a
+		// decision, so it must suspend rather than reuse the resume
+		// decision.
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executions != 1 {
+		t.Fatalf("executions = %d, want 1 (only the resume batch's call)", executions)
+	}
+	if len(res.PendingApprovals) != 1 || res.PendingApprovals[0].Call.ID != "call_guarded_0" {
+		t.Fatalf("PendingApprovals = %+v, want the later call suspended", res.PendingApprovals)
+	}
+}
+
+// TestApprovalsStillHonoredOnResumeBatch is the control: the SAME Approvals
+// field must still work normally for the resume batch itself.
+func TestApprovalsStillHonoredOnResumeBatch(t *testing.T) {
+	var executions int
+	guarded := RequireApproval(NewTool("guarded", "", func(_ context.Context, a weatherArgs) (any, error) {
+		executions++
+		return "ok", nil
+	}))
+	messages := []provider.Message{
+		provider.UserText("go"),
+		{Role: provider.RoleAssistant, Content: []provider.ContentPart{
+			provider.ToolCallPart{ID: "call_guarded_0", Name: "guarded", Args: []byte(`{"city":"a"}`)},
+		}},
+	}
+	m := &aitest.MockModel{Responses: []*provider.Response{
+		{Content: []provider.ContentPart{provider.TextPart{Text: "done"}}, FinishReason: provider.FinishStop},
+	}}
+	res, err := GenerateText(t.Context(), GenerateTextOpts{
+		Model: m, Messages: messages, Tools: []Tool{guarded}, MaxSteps: 2,
+		Approvals: []ApprovalDecision{{ToolCallID: "call_guarded_0", Approved: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executions != 1 {
+		t.Fatalf("executions = %d, want 1", executions)
+	}
+	if len(res.PendingApprovals) != 0 {
+		t.Fatalf("PendingApprovals = %+v, want none", res.PendingApprovals)
+	}
+	if res.Text != "done" {
+		t.Fatalf("Text = %q", res.Text)
 	}
 }
 

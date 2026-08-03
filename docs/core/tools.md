@@ -271,12 +271,18 @@ For each call whose tool reports `ApprovalRequired() == true`, a decision is
 resolved in this order:
 
 1. **`GenerateTextOpts.Approvals`** — checked first, matched by
-   `ToolCallID`. Supplies out-of-band decisions, typically from a resumed
-   call (see [Resumable flow](#resumable-flow-suspend-then-resume) below),
-   but also consulted for approval-needing calls arising later in the same
-   run.
-2. **`GenerateTextOpts.ApproveToolCall`** — called only if `Approvals` had
-   no matching decision. Signature:
+   `ToolCallID`, but **only for the RESUME batch** (the unanswered
+   assistant tool-call batch at the end of `Messages` at the start of this
+   call — see [Resumable flow](#resumable-flow-suspend-then-resume) below).
+   For any batch arising LATER within the same run, `Approvals` is not
+   consulted at all — go straight to `ApproveToolCall`. This scoping exists
+   because `Approvals` matches by `ToolCallID` alone, and some providers
+   (e.g. geminicompat) synthesize deterministic IDs from a call's name and
+   index — a later batch's call can legitimately reuse an ID an earlier
+   `Approvals` entry already answered, and matching it there too would
+   auto-approve a call no one actually decided.
+2. **`GenerateTextOpts.ApproveToolCall`** — called whenever `Approvals`
+   didn't apply or had no matching decision. Signature:
    `func(ctx context.Context, req ai.ApprovalRequest) (ai.ApprovalDecision, bool)`.
    Return `(decision, true)` to decide inline; `(_, false)` to leave it
    pending.

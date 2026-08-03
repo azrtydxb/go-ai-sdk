@@ -522,12 +522,18 @@ for the full walkthrough (decision order, batch atomicity, denial shape,
 a complete resume example). Summarized as an opts/result reference:
 
 - **`ApproveToolCall func(ctx context.Context, req ApprovalRequest) (ApprovalDecision, bool)`**
-  — decides approval-needing calls inline. Checked only after `Approvals`
-  has no matching decision for that call's `ToolCallID`.
+  — decides approval-needing calls inline. Checked whenever `Approvals`
+  didn't apply or had no matching decision for that call's `ToolCallID`.
 - **`Approvals []ApprovalDecision`** — out-of-band decisions, matched by
-  `ToolCallID`. Checked first, both against the resumed batch at the start
-  of `Messages` (see below) and against any approval-needing call arising
-  later in the same run.
+  `ToolCallID`, checked first — but **only against the resume batch** (the
+  unanswered batch at the start of `Messages`, see below). Any
+  approval-needing call arising LATER in the same run skips `Approvals`
+  entirely and goes straight to `ApproveToolCall`: `Approvals` matches by
+  `ToolCallID` alone, and some providers synthesize deterministic IDs (e.g.
+  geminicompat's `call_<name>_<index>`), so a later batch's call can
+  legitimately reuse an ID an earlier `Approvals` entry already answered —
+  consulting it there too would auto-approve a call no one actually
+  decided.
 - **`PendingApprovals []ApprovalRequest`** (on the result) — non-empty when
   the loop suspended because some call(s) needed approval and neither
   `Approvals` nor `ApproveToolCall` produced a decision. Not an error:
