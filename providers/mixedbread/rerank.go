@@ -102,7 +102,12 @@ func (m *rerankingModel) Rerank(ctx context.Context, call provider.RerankCall) (
 
 	return &provider.RerankResponse{
 		Results: results,
-		Usage:   provider.Usage{},
-		Raw:     json.RawMessage(respBody),
+		// Usage is left zero-valued: Mixedbread's documented /rerank
+		// response shape (`{"data":[{"index","score"}]}`) carries no
+		// usage/total_tokens block, unlike Voyage's rerank response — there
+		// is nothing to map here (same precedent as Cohere, which bills
+		// rerank outside of a token-usage field).
+		Usage: provider.Usage{},
+		Raw:   json.RawMessage(respBody),
 	}, nil
 }
