@@ -47,6 +47,16 @@ exists — the SDK's public API is implemented and documented end-to-end (see
 - [Cohere](providers/cohere.md)
 - [ElevenLabs](providers/elevenlabs.md)
 
+## Versioning
+
+`go-ai-sdk` is pre-1.0 (currently a `v0.1.0` candidate, unreleased): the
+public API described throughout this tree is implemented and tested
+end-to-end, but may still change before `v1.0.0`. Once the project reaches
+1.0, it follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+[`CHANGELOG.md`](../CHANGELOG.md) tracks every notable change, release or
+not — check it for the current status and any breaking changes between
+versions.
+
 ## Reference
 
 - [Troubleshooting](troubleshooting.md) — auth failures, structured-output errors, streaming and tool-calling issues, MCP debugging
