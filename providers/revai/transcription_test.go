@@ -226,6 +226,28 @@ func TestTranscribe_FailedStatus(t *testing.T) {
 	}
 }
 
+// TestTranscribe_FailedStatus_EmptyFailureDetailFallsBackToBody covers the
+// fallback for a terminal "failed" status whose failure_detail field is
+// empty: the raw poll response body is included in the returned error
+// instead of a bare "revai: job ... failed" with no detail at all,
+// mirroring assemblyai's equivalent fallback.
+func TestTranscribe_FailedStatus_EmptyFailureDetailFallsBackToBody(t *testing.T) {
+	srv, _ := newJobFixture(t, []string{
+		`{"id":"job-1","status":"failed","distinctive_debug_field":"xyzzy-plugh"}`,
+	}, "")
+
+	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
+	m := p.TranscriptionModel("")
+
+	_, err := m.Transcribe(context.Background(), provider.TranscriptionCall{Audio: []byte("x")})
+	if err == nil {
+		t.Fatal("expected error for failed status")
+	}
+	if !strings.Contains(err.Error(), "xyzzy-plugh") {
+		t.Errorf("error = %q, want it to include the raw response body since failure_detail is empty", err.Error())
+	}
+}
+
 func TestTranscribe_401Error(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

@@ -196,6 +196,28 @@ func TestTranscribe_ErrorStatus(t *testing.T) {
 	}
 }
 
+// TestTranscribe_ErrorStatus_EmptyErrorCodeFallsBackToBody covers the
+// fallback for a terminal "error" status whose error_code field is absent
+// (nil): the raw poll response body is included in the returned error
+// instead of a bare "gladia: transcription ... failed" with no detail at
+// all, mirroring assemblyai's equivalent fallback.
+func TestTranscribe_ErrorStatus_EmptyErrorCodeFallsBackToBody(t *testing.T) {
+	srv, _, _, _, _, _ := newFixtureServer(t, []string{
+		`{"id":"job-1","status":"error","distinctive_debug_field":"xyzzy-plugh"}`,
+	})
+
+	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
+	m := p.TranscriptionModel("")
+
+	_, err := m.Transcribe(context.Background(), provider.TranscriptionCall{Audio: []byte("x")})
+	if err == nil {
+		t.Fatal("expected error for error status")
+	}
+	if !strings.Contains(err.Error(), "xyzzy-plugh") {
+		t.Errorf("error = %q, want it to include the raw response body since error_code is absent", err.Error())
+	}
+}
+
 func TestTranscribe_ProviderOptionsMergeTopLevel(t *testing.T) {
 	const done = `{"id":"job-1","status":"done","result":{"metadata":{"audio_duration":0.1},"transcription":{"full_transcript":"hi"}}}`
 	srv, _, createBody, _, _, _ := newFixtureServer(t, []string{done})
