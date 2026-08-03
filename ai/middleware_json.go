@@ -37,6 +37,11 @@ import (
 //     final strings.TrimSpace in stripFences). None of this requires a
 //     newline anywhere — "```json{...}```" with no newlines at all is
 //     handled the same as the more common "```json\n{...}\n```".
+//   - A closing fence is only ever looked for when an opening fence WAS
+//     resolved at the start of the stream — stripFences strips only when
+//     BOTH ends are fenced, so a stream that never opened with "```"
+//     passes through entirely verbatim, even if it happens to end in a
+//     "```" marker.
 //   - A closing fence is only a CANDIDATE until it's known to terminate the
 //     stream: found via the same technique the "```" is searched for
 //     anywhere in the remaining body (not just at a line start), it (and
@@ -191,7 +196,11 @@ var fenceMarker = []byte("```")
 //     this never depends on what follows, so no buffering beyond the
 //     handful of bytes needed to recognize "```"/"json" themselves is ever
 //     needed for the opening side.
-//   - Once in the body, any "```" found is only a CANDIDATE closing fence:
+//   - If no opening fence was resolved, the body streams through entirely
+//     verbatim — stripFences strips only when BOTH ends are fenced, so an
+//     unopened stream ending in "```" keeps that marker.
+//   - Once in the body of an OPENED stream, any "```" found is only a
+//     CANDIDATE closing fence:
 //     it (plus any whitespace-only bytes after it) is buffered, not
 //     emitted, until either non-whitespace content arrives (not terminal
 //     after all — flush the candidate verbatim as ordinary text, then keep
@@ -203,7 +212,8 @@ var fenceMarker = []byte("```")
 // follows it, until resolved) is ever buffered; everything else streams
 // through with no more than a few bytes of lookback.
 type fenceScanner struct {
-	phase int
+	phase  int
+	opened bool // an opening "```" was resolved at the start of the stream; closing-fence candidacy applies only when true
 
 	lead  []byte // phaseLeadWS: buffered leading whitespace, pending resolution
 	ticks []byte // phaseOpenTick: buffered backticks (1-2) seen so far
@@ -268,6 +278,7 @@ func (s *fenceScanner) feed(data []byte) {
 					// mirroring stripFences' TrimSpace + TrimPrefix("```").
 					s.lead = nil
 					s.ticks = nil
+					s.opened = true
 					s.phase = phaseTagCheck
 				}
 				continue
@@ -342,6 +353,14 @@ func (s *fenceScanner) feed(data []byte) {
 // arriving in a later delta — by the time that marker is found, already-
 // flushed bytes can no longer be un-flushed.
 func (s *fenceScanner) bodyFeed(data []byte) {
+	if !s.opened {
+		// No opening fence was resolved at the start of the stream:
+		// stripFences strips only when BOTH ends are fenced, so this text
+		// passes through entirely verbatim — no closing-fence candidacy,
+		// no buffering.
+		s.emit(string(data))
+		return
+	}
 	s.buf = append(s.buf, data...)
 	for {
 		if s.candidateActive {

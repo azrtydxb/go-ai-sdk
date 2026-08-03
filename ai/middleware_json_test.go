@@ -509,6 +509,8 @@ func TestExtractJSONMiddleware_GenerateStreamParity(t *testing.T) {
 		{"uppercase tag not recognized", "```JSON\n{\"a\":1}\n```"},
 		{"leading whitespace before fence", "  ```json\n{\"a\":1}\n```"},
 		{"fence with trailing whitespace before close", "```json\n{\"a\":1}\n   \n```"},
+		{"unopened text ending in a fence marker", "Some prose\n```\ncode\n```"},
+		{"unopened JSON ending in a fence marker", "{\"a\":1}\n```"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
