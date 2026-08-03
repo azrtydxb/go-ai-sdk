@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/azrtydxb/go-ai-sdk/ai"
 	"github.com/azrtydxb/go-ai-sdk/internal/imagesniff"
 )
 
@@ -23,8 +24,10 @@ const maxErrorBodyBytes = 1024
 // taken from the response's Content-Type header (parameters such as
 // "; charset=..." are stripped) when it starts with "image/"; otherwise
 // it's determined by sniffing the downloaded bytes via
-// imagesniff.SniffMediaType. A non-2xx response returns an error including
-// the status code and up to 1KB of the response body.
+// imagesniff.SniffMediaType. A non-2xx response returns an *ai.APICallError
+// (via ai.NewAPICallError) carrying the status code, url, and up to 1KB of
+// the response body, so a transient CDN 5xx from an image host is
+// retryable through ai core the same way a provider API error is.
 func Fetch(ctx context.Context, client *http.Client, url string) ([]byte, string, error) {
 	if client == nil {
 		client = http.DefaultClient
@@ -51,7 +54,7 @@ func Fetch(ctx context.Context, client *http.Client, url string) ([]byte, string
 		if len(truncated) > maxErrorBodyBytes {
 			truncated = truncated[:maxErrorBodyBytes]
 		}
-		return nil, "", fmt.Errorf("fetchimage: fetch %s: status %d: %s", url, resp.StatusCode, truncated)
+		return nil, "", ai.NewAPICallError(resp.StatusCode, url, string(truncated), string(truncated))
 	}
 
 	contentType := parseMediaType(resp.Header.Get("Content-Type"))

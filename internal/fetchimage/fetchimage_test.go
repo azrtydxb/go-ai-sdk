@@ -2,10 +2,13 @@ package fetchimage
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/azrtydxb/go-ai-sdk/ai"
 )
 
 func TestFetchUsesContentTypeWhenImage(t *testing.T) {
@@ -82,6 +85,44 @@ func TestFetchNon2xxError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "not found body") {
 		t.Errorf("error = %v, want it to include response body", err)
+	}
+
+	var apiErr *ai.APICallError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("error is not *ai.APICallError: %v (%T)", err, err)
+	}
+	if apiErr.StatusCode != http.StatusNotFound {
+		t.Errorf("StatusCode = %d, want 404", apiErr.StatusCode)
+	}
+	if apiErr.URL != srv.URL {
+		t.Errorf("URL = %q, want %q", apiErr.URL, srv.URL)
+	}
+	if apiErr.Retryable {
+		t.Error("Retryable = true, want false for 404 (not in the retryable set)")
+	}
+}
+
+func TestFetchNon2xxErrorIsRetryableFor5xx(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		w.Write([]byte("upstream hiccup"))
+	}))
+	defer srv.Close()
+
+	_, _, err := Fetch(context.Background(), nil, srv.URL)
+	if err == nil {
+		t.Fatal("expected error for non-2xx status")
+	}
+
+	var apiErr *ai.APICallError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("error is not *ai.APICallError: %v (%T)", err, err)
+	}
+	if apiErr.StatusCode != http.StatusBadGateway {
+		t.Errorf("StatusCode = %d, want 502", apiErr.StatusCode)
+	}
+	if !apiErr.Retryable {
+		t.Error("Retryable = false, want true for a transient 5xx CDN error")
 	}
 }
 
