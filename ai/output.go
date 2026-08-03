@@ -232,7 +232,7 @@ func buildOutputCall(opts GenerateTextOpts) (call provider.Call, outputToolName 
 		return provider.Call{}, "", ErrOutputRequiresJSONOrNoTools
 	}
 
-	call.Tools = []provider.ToolDef{{Name: name, Schema: sch}}
+	call.Tools = []provider.ToolDef{{Name: name, Description: opts.SchemaDescription, Schema: sch}}
 	call.ToolChoice = &provider.ToolChoice{Mode: provider.ToolChoiceTool, ToolName: name}
 	return call, name, nil
 }

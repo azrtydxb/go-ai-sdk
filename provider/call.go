@@ -150,3 +150,16 @@ func EffortBudgetTokens(effort string) (int, bool) {
 		return 0, false
 	}
 }
+
+// ResolveBudgetTokens resolves a ReasoningConfig to a concrete thinking-token
+// budget: BudgetTokens when set, else the EffortBudgetTokens mapping of
+// Effort. ok is false when neither resolves.
+func ResolveBudgetTokens(cfg *ReasoningConfig) (n int, ok bool) {
+	if cfg == nil {
+		return 0, false
+	}
+	if cfg.BudgetTokens != nil {
+		return *cfg.BudgetTokens, true
+	}
+	return EffortBudgetTokens(cfg.Effort)
+}

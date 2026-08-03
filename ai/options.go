@@ -24,14 +24,20 @@ type GenerateTextOpts struct {
 	// which requires Tools to be empty (ErrOutputRequiresJSONOrNoTools
 	// otherwise). See Output's doc and OutputObject/OutputArray/
 	// OutputChoice/OutputJSON for the available modes, and OutputAs to
-	// extract the decoded GenerateTextResult.Output as a concrete type.
-	Output        Output
-	MaxSteps      int  // default 1; if 0 and StopWhen is set, defaults to 16
-	MaxRetries    *int // default 2
-	MaxTokens     *int
-	Temperature   *float64
-	TopP          *float64
-	StopSequences []string
+	// extract the decoded GenerateTextResult.Output as a concrete type. In the
+	// tool-mode fallback, if the model emits the output tool more than once in
+	// one response, only the first matching call is decoded and answered.
+	Output Output
+	// SchemaDescription describes the expected output schema; used as the
+	// injected output tool's Description in the tool-mode fallback and passed
+	// as ResponseFormat description where providers support one.
+	SchemaDescription string
+	MaxSteps          int  // default 1; if 0 and StopWhen is set, defaults to 16
+	MaxRetries        *int // default 2
+	MaxTokens         *int
+	Temperature       *float64
+	TopP              *float64
+	StopSequences     []string
 	// TopK, PresencePenalty, FrequencyPenalty, and Seed are threaded through
 	// to the identically-named provider.Call fields unchanged — see those
 	// fields' docs for per-provider support and wire-name mapping.
@@ -83,7 +89,11 @@ type GenerateTextOpts struct {
 	// swap made at step N doesn't need to be re-asserted at every later step
 	// to "stick") and matches the common use case of routing to a different
 	// model partway through a run (e.g. a cheaper model once a plan has been
-	// established) rather than alternating models step by step.
+	// established) rather than alternating models step by step. A model swapped
+	// in via PrepareStep is not re-checked against Output's NativeJSON capability
+	// requirement — the output strategy is fixed from opts.Model at entry; swapping
+	// to a model without native JSON mid-loop leaves the schema unenforced on that
+	// provider.
 	PrepareStep func(stepIndex int, plan StepPlan) (StepPlan, bool)
 	// OnStepFinish, when set, is called after each step completes
 	// (including the final step) in both GenerateText and StreamText, with

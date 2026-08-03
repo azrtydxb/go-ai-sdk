@@ -176,6 +176,42 @@ func TestOutputToolModeFallback(t *testing.T) {
 	}
 }
 
+func TestOutputToolModeFallbackSchemaDescription(t *testing.T) {
+	m := &aitest.MockModel{ // NativeJSON false
+		Responses: []*provider.Response{{
+			Content: []provider.ContentPart{provider.ToolCallPart{
+				ID: "c1", Name: defaultSchemaName, Args: []byte(`{"title":"Dune","pages":412}`)}},
+			FinishReason: provider.FinishToolCalls,
+		}},
+	}
+	res, err := GenerateText(t.Context(), GenerateTextOpts{
+		Model:             m,
+		Prompt:            "book",
+		Output:            OutputObject[outBook](),
+		SchemaDescription: "A book with title and page count",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Calls) != 1 {
+		t.Fatalf("want exactly one model call, got %d", len(m.Calls))
+	}
+	call := m.Calls[0]
+	if len(call.Tools) != 1 {
+		t.Fatalf("want exactly one tool, got %d", len(call.Tools))
+	}
+	if call.Tools[0].Description != "A book with title and page count" {
+		t.Fatalf("tool description = %q, want %q", call.Tools[0].Description, "A book with title and page count")
+	}
+	book, err := OutputAs[outBook](res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if book.Title != "Dune" {
+		t.Fatalf("book = %+v", book)
+	}
+}
+
 func TestOutputNoNativeJSONWithToolsIsError(t *testing.T) {
 	m := &aitest.MockModel{} // NativeJSON false
 	_, err := GenerateText(t.Context(), GenerateTextOpts{

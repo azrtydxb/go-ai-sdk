@@ -287,18 +287,6 @@ func applyProviderOptions(reqBytes []byte, providerOptions map[string]any) ([]by
 	return json.Marshal(m)
 }
 
-// resolveBudgetTokens resolves the thinking-token budget for cfg:
-// cfg.BudgetTokens if explicitly set, otherwise the table lookup for
-// cfg.Effort via provider.EffortBudgetTokens. Reports false if neither
-// resolves, in which case the caller omits additionalModelRequestFields.thinking
-// entirely.
-func resolveBudgetTokens(cfg *provider.ReasoningConfig) (int, bool) {
-	if cfg.BudgetTokens != nil {
-		return *cfg.BudgetTokens, true
-	}
-	return provider.EffortBudgetTokens(cfg.Effort)
-}
-
 // ---- Request building ----
 
 func buildConverseRequest(call provider.Call) (converseRequest, error) {
@@ -357,7 +345,7 @@ func buildConverseRequest(call provider.Call) (converseRequest, error) {
 	// ProviderOptions["bedrock"]["additionalModelRequestFields"] instead).
 
 	if call.Reasoning != nil {
-		if budget, ok := resolveBudgetTokens(call.Reasoning); ok {
+		if budget, ok := provider.ResolveBudgetTokens(call.Reasoning); ok {
 			req.AdditionalModelRequestFields = map[string]any{
 				"thinking": map[string]any{
 					"type":          "enabled",

@@ -189,6 +189,11 @@ a swap made at step N doesn't need to be re-asserted at every later step to
 "stick," which matches the common case of routing to a cheaper model partway
 through a run rather than alternating models step by step.
 
+**Output and NativeJSON capability:** a model swapped in via `PrepareStep` is
+not re-checked against `Output`'s `NativeJSON` capability requirement — the
+output strategy is fixed from `opts.Model` at entry. Swapping to a model
+without native JSON mid-loop leaves the schema unenforced on that provider.
+
 ## OnStepFinish
 
 `OnStepFinish`, when set, is called after each step completes (including the
@@ -367,6 +372,15 @@ result, err := ai.GenerateText(context.Background(), ai.GenerateTextOpts{
 choice, err := ai.OutputAs[string](result)
 ```
 
+### SchemaDescription
+
+When `Output` is set, `GenerateTextOpts.SchemaDescription` (optional) describes
+the expected output schema. It is used as the injected output tool's `Description`
+in the tool-mode fallback and passed as `ResponseFormat` description where
+providers support one. This is useful for guiding the model on the expected
+structure when using tool-mode fallback with models that don't have native JSON
+support.
+
 ### Native JSON vs tool-mode fallback
 
 Just like `GenerateObject`, the wire strategy depends on
@@ -421,7 +435,9 @@ If the model calls some other tool instead of the injected output-schema
 tool (or makes no tool calls at all when `Output`'s tool-mode fallback is
 in effect), `GenerateText` returns a `*ai.NoObjectGeneratedError` with
 `RawText` set to the response's text, rather than silently decoding the
-wrong call's arguments.
+wrong call's arguments. In the tool-mode fallback, if the model emits the
+output tool more than once in one response, only the first matching call is
+decoded and answered.
 
 A decode failure (the model's final text isn't valid JSON, or doesn't match
 `Output`'s schema) also returns a `*ai.NoObjectGeneratedError` — the same

@@ -185,17 +185,6 @@ func applyProviderOptions(reqBytes []byte, providerOptions map[string]any, name 
 	return json.Marshal(m)
 }
 
-// resolveBudgetTokens resolves the thinking-token budget for cfg:
-// cfg.BudgetTokens if explicitly set, otherwise the table lookup for
-// cfg.Effort via provider.EffortBudgetTokens. Reports false if neither
-// resolves, in which case the caller omits thinkingConfig entirely.
-func resolveBudgetTokens(cfg *provider.ReasoningConfig) (int, bool) {
-	if cfg.BudgetTokens != nil {
-		return *cfg.BudgetTokens, true
-	}
-	return provider.EffortBudgetTokens(cfg.Effort)
-}
-
 // ---- Request building ----
 
 func buildGenerateContentRequest(modelID string, call provider.Call) (generateContentRequest, error) {
@@ -259,7 +248,7 @@ func buildGenerateContentRequest(modelID string, call provider.Call) (generateCo
 		haveGC = true
 	}
 	if call.Reasoning != nil {
-		if budget, ok := resolveBudgetTokens(call.Reasoning); ok {
+		if budget, ok := provider.ResolveBudgetTokens(call.Reasoning); ok {
 			gc.ThinkingConfig = &wireThinkingConfig{ThinkingBudget: budget, IncludeThoughts: true}
 			haveGC = true
 		}
