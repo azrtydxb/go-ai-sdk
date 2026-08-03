@@ -295,6 +295,132 @@ func TestOutputMultiStepToolLoopThenDecode(t *testing.T) {
 	}
 }
 
+// TestOutputToolModeFallbackTranscriptWellFormed pins finding 1: the
+// tool-mode fallback must not leave Result.Messages ending with a dangling
+// (unanswered) assistant tool call. It must append a synthetic RoleTool
+// result message answering the forced call, and must not misreport
+// FinishReason as tool-calls or leave the synthetic call in ToolCalls.
+func TestOutputToolModeFallbackTranscriptWellFormed(t *testing.T) {
+	m := &aitest.MockModel{ // NativeJSON false
+		Responses: []*provider.Response{{
+			Content: []provider.ContentPart{provider.ToolCallPart{
+				ID: "c1", Name: defaultSchemaName, Args: []byte(`{"title":"Dune","pages":412}`)}},
+			FinishReason: provider.FinishToolCalls,
+		}},
+	}
+	res, err := GenerateText(t.Context(), GenerateTextOpts{Model: m, Prompt: "book", Output: OutputObject[outBook]()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if res.FinishReason == provider.FinishToolCalls {
+		t.Fatalf("FinishReason = %q, want anything but tool-calls", res.FinishReason)
+	}
+	if len(res.ToolCalls) != 0 {
+		t.Fatalf("ToolCalls = %+v, want empty (synthetic call scrubbed)", res.ToolCalls)
+	}
+	if len(res.Steps) != 1 || len(res.Steps[0].ToolCalls) != 0 {
+		t.Fatalf("Steps[0].ToolCalls = %+v, want empty", res.Steps[0].ToolCalls)
+	}
+
+	// The transcript must end with an assistant tool call answered by a
+	// RoleTool message — never with a dangling assistant tool call.
+	msgs := res.Messages
+	if len(msgs) < 2 {
+		t.Fatalf("want at least 2 messages (assistant tool call + tool result), got %d", len(msgs))
+	}
+	last := msgs[len(msgs)-1]
+	if last.Role != provider.RoleTool {
+		t.Fatalf("last message role = %q, want RoleTool answering the forced call", last.Role)
+	}
+	if len(last.Content) != 1 {
+		t.Fatalf("last message content = %+v, want exactly one ToolResultPart", last.Content)
+	}
+	trp, ok := last.Content[0].(provider.ToolResultPart)
+	if !ok {
+		t.Fatalf("last message content[0] = %T, want provider.ToolResultPart", last.Content[0])
+	}
+	if trp.ToolCallID != "c1" {
+		t.Fatalf("ToolResultPart.ToolCallID = %q, want %q", trp.ToolCallID, "c1")
+	}
+
+	assistant := msgs[len(msgs)-2]
+	if assistant.Role != provider.RoleAssistant {
+		t.Fatalf("second-to-last message role = %q, want RoleAssistant", assistant.Role)
+	}
+}
+
+// TestOutputToolModeFallbackWrongToolNameErrors pins finding 4: if the model
+// hallucinates a call to some other tool name instead of the injected
+// output-schema tool, GenerateText must return a *NoObjectGeneratedError
+// rather than silently decoding that call's args.
+func TestOutputToolModeFallbackWrongToolNameErrors(t *testing.T) {
+	m := &aitest.MockModel{ // NativeJSON false
+		Responses: []*provider.Response{{
+			Content: []provider.ContentPart{provider.ToolCallPart{
+				ID: "c1", Name: "some_other_tool", Args: []byte(`{"foo":"bar"}`)}},
+			FinishReason: provider.FinishToolCalls,
+		}},
+	}
+	_, err := GenerateText(t.Context(), GenerateTextOpts{Model: m, Prompt: "book", Output: OutputObject[outBook]()})
+	var noge *NoObjectGeneratedError
+	if !errors.As(err, &noge) {
+		t.Fatalf("err = %v, want *NoObjectGeneratedError", err)
+	}
+}
+
+// TestOutputChoiceRejectsOutOfEnumValue pins finding 2: OutputChoice.decode
+// must reject a value outside the configured choice set (relevant on
+// tool-mode providers, where the schema enum isn't enforced by the model).
+func TestOutputChoiceRejectsOutOfEnumValue(t *testing.T) {
+	m := &aitest.MockModel{
+		Caps: provider.Capabilities{NativeJSON: true},
+		Responses: []*provider.Response{{
+			Content:      []provider.ContentPart{provider.TextPart{Text: `{"result":"z"}`}},
+			FinishReason: provider.FinishStop,
+		}},
+	}
+	_, err := GenerateText(t.Context(), GenerateTextOpts{Model: m, Prompt: "pick", Output: OutputChoice("a", "b", "c")})
+	var noge *NoObjectGeneratedError
+	if !errors.As(err, &noge) {
+		t.Fatalf("err = %v, want *NoObjectGeneratedError for out-of-enum choice", err)
+	}
+}
+
+// TestOutputChoiceAcceptsInEnumValue is the positive-path complement of
+// TestOutputChoiceRejectsOutOfEnumValue.
+func TestOutputChoiceAcceptsInEnumValue(t *testing.T) {
+	m := &aitest.MockModel{
+		Caps: provider.Capabilities{NativeJSON: true},
+		Responses: []*provider.Response{{
+			Content:      []provider.ContentPart{provider.TextPart{Text: `{"result":"b"}`}},
+			FinishReason: provider.FinishStop,
+		}},
+	}
+	res, err := GenerateText(t.Context(), GenerateTextOpts{Model: m, Prompt: "pick", Output: OutputChoice("a", "b", "c")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	choice, err := OutputAs[string](res)
+	if err != nil || choice != "b" {
+		t.Fatalf("choice = %q, err = %v", choice, err)
+	}
+}
+
+// TestOutputChoiceEmptyChoicesIsError pins finding 3: OutputChoice() with
+// zero choices must fail fast (up front, before any model call) rather than
+// build an unsatisfiable {"enum":[]} schema.
+func TestOutputChoiceEmptyChoicesIsError(t *testing.T) {
+	m := &aitest.MockModel{Caps: provider.Capabilities{NativeJSON: true}}
+	_, err := GenerateText(t.Context(), GenerateTextOpts{Model: m, Prompt: "pick", Output: OutputChoice()})
+	if err == nil {
+		t.Fatal("want error for OutputChoice() with zero choices")
+	}
+	if len(m.Calls) != 0 {
+		t.Fatalf("want no model call, got %d", len(m.Calls))
+	}
+}
+
 func TestStreamTextWithOutputIsError(t *testing.T) {
 	m := &aitest.MockModel{}
 	_, err := StreamText(t.Context(), GenerateTextOpts{Model: m, Prompt: "x", Output: OutputObject[outBook]()})

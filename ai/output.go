@@ -116,12 +116,22 @@ type choiceOutput struct {
 }
 
 // OutputChoice selects a structured-output mode that decodes the model's
-// response into one of choices, enforced via a JSON schema enum.
+// response into one of choices, enforced via a JSON schema enum. Calling it
+// with zero choices is a configuration error: schema() returns an error
+// (surfaced from GenerateText up front, before any model call) rather than
+// building an unsatisfiable {"enum":[]} schema. The enum constraint is not
+// necessarily enforced by the model itself (tool-mode providers don't
+// validate arguments against the injected tool's schema), so decode also
+// checks membership: a result outside choices returns a
+// *NoObjectGeneratedError rather than returning it silently.
 func OutputChoice(choices ...string) Output {
 	return choiceOutput{choices: choices}
 }
 
 func (c choiceOutput) schema() (string, json.RawMessage, error) {
+	if len(c.choices) == 0 {
+		return "", nil, errors.New("ai: OutputChoice requires at least one choice")
+	}
 	enum := make([]any, len(c.choices))
 	for i, s := range c.choices {
 		enum[i] = s
@@ -144,12 +154,23 @@ func (c choiceOutput) schema() (string, json.RawMessage, error) {
 	return defaultSchemaName, sch, nil
 }
 
-func (choiceOutput) decode(rawText string) (any, error) {
+func (c choiceOutput) decode(rawText string) (any, error) {
 	wrapper, err := decodeObject[choiceResult](rawText)
 	if err != nil {
 		return nil, err
 	}
-	return wrapper.Result, nil
+	for _, choice := range c.choices {
+		if wrapper.Result == choice {
+			return wrapper.Result, nil
+		}
+	}
+	// Tool-mode providers don't enforce the schema's enum constraint — the
+	// model can return any string for the "result" field. Membership must
+	// be checked here rather than trusted from the schema.
+	return nil, &NoObjectGeneratedError{
+		RawText: rawText,
+		Cause:   fmt.Errorf("ai: OutputChoice: model returned %q, which is not one of the configured choices %v", wrapper.Result, c.choices),
+	}
 }
 
 // jsonOutput is the Output implementation for OutputJSON.

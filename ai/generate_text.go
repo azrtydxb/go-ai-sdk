@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/retry"
 	"github.com/azrtydxb/go-ai-sdk/provider"
@@ -72,6 +73,20 @@ type GenerateTextResult struct {
 	// OutputChoice, or an arbitrary JSON value (map[string]any / []any /
 	// ...) for OutputJSON. Nil when Output was not set. Extract it with
 	// OutputAs[T].
+	//
+	// In the tool-mode fallback (Model.Capabilities().NativeJSON false),
+	// the model is forced to call a single injected output-schema tool;
+	// that call is never a real tool call as far as the rest of the
+	// result is concerned. FinishReason is never tool-calls for it (the
+	// underlying response's finish reason is kept when it's something
+	// else, e.g. length; tool-calls itself is mapped to FinishStop), and
+	// ToolCalls is empty on both the final Step and GenerateTextResult —
+	// the forced call is scrubbed from both, not left dangling. Messages
+	// ends with the assistant message carrying that tool call followed by
+	// a synthetic RoleTool message answering it (a single ToolResultPart
+	// whose Result is the call's own args JSON as a string), so the
+	// returned transcript is always well-formed for a round-trip resend —
+	// no provider's wire format is left with an unanswered tool call.
 	Output any
 }
 
@@ -172,10 +187,56 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 		if outputToolName != "" && hasToolCalls {
 			// Output's tool-mode fallback: the model was forced (via
 			// ToolChoice) to call the single injected output-schema tool.
+			// Find that call by name (mirrors GenerateObject's guard) — a
+			// model that hallucinates a call to some other tool name is not
+			// a valid structured-output response, so it must not be decoded
+			// silently.
+			matched, ok := findToolCallByName(toolCalls, outputToolName)
+			if !ok {
+				return fail(&NoObjectGeneratedError{
+					RawText: resp.Text(),
+					Cause:   fmt.Errorf("ai: output: model did not call the output tool %q", outputToolName),
+				})
+			}
+
 			// That call is not a real tool — it must not be executed via
-			// runToolCalls — its Args are the structured output's raw JSON,
-			// which becomes this (single, final) step's Text.
-			step.Text = string(toolCalls[0].Args)
+			// runToolCalls. Its Args are the structured output's raw JSON,
+			// which becomes this (single, final) step's Text. Scrub it from
+			// ToolCalls (this step's, and thus the eventual Result's — see
+			// GenerateTextResult.Output's doc) so callers keying off
+			// FinishReason == tool-calls or ToolCalls length don't
+			// misclassify this step as an unanswered tool call.
+			step.Text = string(matched.Args)
+			step.ToolCalls = nil
+
+			// The transcript must not end with a dangling (unanswered)
+			// assistant tool call — several providers 400 on a round-trip
+			// resend of a conversation whose last assistant message has an
+			// unanswered tool_use/tool_calls block. Append a synthetic
+			// RoleTool result message answering the forced call; its text
+			// is the call's own args JSON (round-trips as a plain string
+			// through every provider's tool-result wire encoding — see
+			// GenerateTextResult.Output's doc for the exact transcript
+			// shape this produces).
+			messages = append(messages, provider.Message{
+				Role: provider.RoleTool,
+				Content: []provider.ContentPart{provider.ToolResultPart{
+					ToolCallID: matched.ID,
+					Name:       matched.Name,
+					Result:     string(matched.Args),
+				}},
+			})
+
+			// The step's true finish reason is "the structured output
+			// completed", not "tool-calls": with ToolCalls now scrubbed to
+			// empty, reporting FinishToolCalls would leave FinishReason and
+			// ToolCalls contradicting each other. Use the underlying
+			// response's finish reason when it's informative (e.g. length,
+			// content-filter); map tool-calls itself to FinishStop.
+			if resp.FinishReason == provider.FinishToolCalls {
+				step.FinishReason = provider.FinishStop
+			}
+
 			steps = append(steps, step)
 			if opts.OnStepFinish != nil {
 				opts.OnStepFinish(step)
@@ -356,6 +417,19 @@ func runToolCalls(ctx context.Context, tools []Tool, calls []provider.ToolCallPa
 		results = append(results, result)
 	}
 	return results, nil
+}
+
+// findToolCallByName returns the first call in calls whose Name is name.
+// Used by GenerateText's Output tool-mode fallback to identify the forced
+// output-schema tool's call among (in principle, though the model is
+// supposed to only make one) the model's tool calls.
+func findToolCallByName(calls []provider.ToolCallPart, name string) (provider.ToolCallPart, bool) {
+	for _, c := range calls {
+		if c.Name == name {
+			return c, true
+		}
+	}
+	return provider.ToolCallPart{}, false
 }
 
 // buildStep converts a provider.Response into a Step.

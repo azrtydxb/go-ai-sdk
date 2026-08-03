@@ -399,12 +399,39 @@ a real tool: `GenerateText` decodes `Output` straight from that call's raw
 arguments and ends the loop in exactly one step, without running
 `OnToolExecutionStart`/`OnToolExecutionEnd` for it (see
 [Lifecycle callbacks](#lifecycle-callbacks-model-call-and-tool-execution)
-below).
+below). That step also does not evaluate `StopWhen` — the forced call *is*
+the structured output, so the loop ends there unconditionally (see
+`StopWhen`'s doc comment for this one exception).
+
+The forced call is scrubbed from the result so it can't be mistaken for a
+real, unanswered tool call:
+
+- `FinishReason` is never `"tool-calls"` for it — the underlying response's
+  finish reason is kept when it's something else (e.g. `"length"`);
+  `"tool-calls"` itself is mapped to `"stop"`.
+- `ToolCalls` is empty on both the final `Step` and the returned
+  `*GenerateTextResult`.
+- `Messages` ends with the assistant message carrying that tool call,
+  followed by a synthetic `RoleTool` message answering it — a single
+  `ToolResultPart` whose `Result` is the call's own args JSON, as a string.
+  This keeps the transcript well-formed for a round-trip resend: no
+  provider's wire format is left with a dangling (unanswered) tool call.
+
+If the model calls some other tool instead of the injected output-schema
+tool (or makes no tool calls at all when `Output`'s tool-mode fallback is
+in effect), `GenerateText` returns a `*ai.NoObjectGeneratedError` with
+`RawText` set to the response's text, rather than silently decoding the
+wrong call's arguments.
 
 A decode failure (the model's final text isn't valid JSON, or doesn't match
-`Output`'s schema) returns a `*ai.NoObjectGeneratedError` — the same type
-`GenerateObject` returns — with `RawText` set to what the model actually
-produced.
+`Output`'s schema) also returns a `*ai.NoObjectGeneratedError` — the same
+type `GenerateObject` returns — with `RawText` set to what the model
+actually produced. For `OutputChoice`, this includes a value outside the
+configured choice set: the schema's `enum` constraint isn't necessarily
+enforced by tool-mode providers, so `decode` checks membership itself.
+`OutputChoice()` called with zero choices is a configuration error returned
+up front (before any model call), rather than requesting an unsatisfiable
+`{"enum":[]}` schema.
 
 `GenerateObject`/`StreamObject` and `Output` modes solve overlapping
 problems; see

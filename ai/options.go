@@ -61,6 +61,12 @@ type GenerateTextOpts struct {
 	// still applies as a hard cap regardless of StopWhen: if MaxSteps is 0
 	// (unset) and StopWhen is non-nil, the hard cap defaults to 16 instead
 	// of the usual default of 1.
+	//
+	// One exception: the step that completes Output's tool-mode fallback
+	// (see Output's doc) ends the loop unconditionally and does NOT
+	// evaluate StopWhen at all — that step's forced tool call is the
+	// structured output itself, so the loop must end there regardless of
+	// what a StopWhen closure would otherwise decide.
 	StopWhen func(steps []Step) bool
 	// PrepareStep, when set, is called before each model call with the
 	// zero-based step index and the StepPlan about to be used: Call is the
