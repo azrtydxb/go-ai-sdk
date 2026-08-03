@@ -342,6 +342,26 @@ func TestNoCredentialsConfigured(t *testing.T) {
 	}
 }
 
+// TestHeadersDoesNotOverrideAuthorization covers that vertex's geminicompat
+// config protects the Authorization header it sets from being overridden by
+// an entry in Call.Headers: geminicompat.applyExtraHeaders skips any
+// Headers entry whose key case-insensitively matches the provider's
+// authHeaderName, which for vertex is "Authorization" (the default,
+// unoverridden by vertex.go's Config). The fixture server itself already
+// asserts the exact bearer token on every request (see newFixtureServer),
+// so a Call.Headers entry attempting to clobber it under a different-case
+// key would fail the request server-side if it leaked through.
+func TestHeadersDoesNotOverrideAuthorization(t *testing.T) {
+	model, _ := newTestModel(t)
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{provider.UserText("simple")},
+		Headers:  map[string]string{"authorization": "Bogus attacker-supplied-value"},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v (Authorization header was likely overridden by Call.Headers)", err)
+	}
+}
+
 func TestCancel(t *testing.T) {
 	model, _ := newTestModel(t)
 	ctx, cancel := context.WithCancel(context.Background())
