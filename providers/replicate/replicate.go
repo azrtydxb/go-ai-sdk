@@ -9,21 +9,24 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
 const (
-	providerName   = "replicate"
-	defaultBaseURL = "https://api.replicate.com"
+	providerName        = "replicate"
+	defaultBaseURL      = "https://api.replicate.com"
+	defaultPollInterval = 500 * time.Millisecond
 )
 
 // Provider is a Replicate-backed provider.ImageModel factory.
 type Provider struct {
-	apiKey     string
-	baseURL    string
-	httpClient *http.Client
+	apiKey       string
+	baseURL      string
+	httpClient   *http.Client
+	pollInterval time.Duration
 }
 
 // Option configures a Provider.
@@ -47,6 +50,14 @@ func WithHTTPClient(c *http.Client) Option {
 	return func(p *Provider) { p.httpClient = c }
 }
 
+// WithPollInterval overrides the interval between prediction status polls,
+// used by VideoModel when a create call's "Prefer: wait" response comes
+// back non-terminal (default 500ms). Primarily a test hook so fixtures can
+// poll fast.
+func WithPollInterval(d time.Duration) Option {
+	return func(p *Provider) { p.pollInterval = d }
+}
+
 // New creates a new Replicate Provider.
 func New(opts ...Option) *Provider {
 	p := &Provider{
@@ -58,6 +69,13 @@ func New(opts ...Option) *Provider {
 		opt(p)
 	}
 	return p
+}
+
+func (p *Provider) poll() time.Duration {
+	if p.pollInterval > 0 {
+		return p.pollInterval
+	}
+	return defaultPollInterval
 }
 
 // ImageModel returns a provider.ImageModel for the given Replicate model ID

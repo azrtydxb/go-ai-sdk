@@ -38,8 +38,11 @@ type imageInput struct {
 
 // predictionResponse matches Replicate's prediction object. Output may be a
 // single URL string or an array of URL strings depending on the model, so
-// it's decoded as json.RawMessage and disambiguated in outputURLs.
+// it's decoded as json.RawMessage and disambiguated in outputURLs. ID is
+// used by video.go to poll GET /v1/predictions/{id} when a create call's
+// "Prefer: wait" response comes back non-terminal (see resolvePrediction).
 type predictionResponse struct {
+	ID     string          `json:"id"`
 	Status string          `json:"status"`
 	Output json.RawMessage `json:"output"`
 	Error  json.RawMessage `json:"error"`

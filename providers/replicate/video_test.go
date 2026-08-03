@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
 	"github.com/azrtydxb/go-ai-sdk/provider"
@@ -271,6 +273,115 @@ func TestGenerateVideos_429Retryable(t *testing.T) {
 	}
 	if !apiErr.Retryable {
 		t.Error("429 should be classified as retryable")
+	}
+}
+
+// --- Fix wave IMPORTANT 3 — "Prefer: wait" alone fails typical multi-minute
+// video generations; poll GET /v1/predictions/{id} until a terminal status
+// instead of erroring (and risking a caller retry that creates a second,
+// paid prediction). ---
+
+func TestGenerateVideos_ProcessingStatusPollsUntilSucceeded(t *testing.T) {
+	var pollCount atomic.Int32
+	var srv *httptest.Server
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models/minimax/video-01/predictions", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"pred-1","status":"starting"}`))
+	})
+	mux.HandleFunc("/v1/predictions/pred-1", func(w http.ResponseWriter, r *http.Request) {
+		n := pollCount.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if n < 3 {
+			w.Write([]byte(`{"id":"pred-1","status":"processing"}`))
+			return
+		}
+		w.Write([]byte(`{"id":"pred-1","status":"succeeded","output":"` + srv.URL + `/vid.mp4"}`))
+	})
+	mux.HandleFunc("/vid.mp4", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "video/mp4")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("mp4data"))
+	})
+	srv = httptest.NewServer(mux)
+	defer srv.Close()
+
+	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
+	m := p.VideoModel("minimax/video-01")
+
+	resp, err := m.GenerateVideos(context.Background(), provider.VideoCall{Prompt: "a cat"})
+	if err != nil {
+		t.Fatalf("GenerateVideos: %v", err)
+	}
+	if pollCount.Load() != 3 {
+		t.Errorf("pollCount = %d, want 3", pollCount.Load())
+	}
+	if len(resp.Videos) != 1 || string(resp.Videos[0].Data) != "mp4data" {
+		t.Fatalf("unexpected videos: %+v", resp.Videos)
+	}
+}
+
+func TestGenerateVideos_PollFailedStatusError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models/minimax/video-01/predictions", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"pred-1","status":"processing"}`))
+	})
+	mux.HandleFunc("/v1/predictions/pred-1", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"pred-1","status":"failed","error":"NSFW content detected"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
+	m := p.VideoModel("minimax/video-01")
+
+	_, err := m.GenerateVideos(context.Background(), provider.VideoCall{Prompt: "a cat"})
+	if err == nil {
+		t.Fatal("expected error for failed status reached via polling")
+	}
+	if !strings.Contains(err.Error(), "failed") {
+		t.Errorf("error = %q, want it to mention status", err.Error())
+	}
+	if !strings.Contains(err.Error(), "NSFW content detected") {
+		t.Errorf("error = %q, want it to mention the error field", err.Error())
+	}
+}
+
+func TestGenerateVideos_CtxCancelMidPoll(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models/minimax/video-01/predictions", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"pred-1","status":"processing"}`))
+	})
+	mux.HandleFunc("/v1/predictions/pred-1", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"pred-1","status":"processing"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	// A poll interval long enough that the ctx will be cancelled while
+	// sleeping between polls, not while an HTTP call is in flight.
+	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(200*time.Millisecond))
+	m := p.VideoModel("minimax/video-01")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+
+	_, err := m.GenerateVideos(ctx, provider.VideoCall{Prompt: "a cat"})
+	if err == nil {
+		t.Fatal("expected error for context cancelled mid-poll")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("error = %v, want context.DeadlineExceeded", err)
 	}
 }
 

@@ -22,8 +22,10 @@ video := provider.VideoModel("minimax/video-01")
 `WithAPIKey` defaults to `os.Getenv("REPLICATE_API_TOKEN")`; `WithBaseURL`
 defaults to `"https://api.replicate.com"`; `WithHTTPClient` overrides the
 `*http.Client` used for both the prediction request and any resulting image
-URL downloads. Auth is sent as the standard `Authorization: Bearer <key>`
-header.
+URL downloads; `WithPollInterval` overrides the interval between
+`VideoModel` status polls (default 500ms — a test hook, mirroring
+`providers/luma`'s `WithPollInterval`). Auth is sent as the standard
+`Authorization: Bearer <key>` header.
 
 ## Capabilities
 
@@ -34,6 +36,12 @@ header.
 - `Provider.VideoModel(id)` — `provider.VideoModel`: the same
   `POST /v1/models/{modelID}/predictions` + `Prefer: wait` shape, with
   `Prompt`/`AspectRatio` nested under `input` (see ProviderOptions below).
+  Only `Prompt` and `AspectRatio` are wired first-class; `Resolution` and
+  `DurationSec` are not sent (pass them via `ProviderOptions` under
+  whatever field name the target model expects — see the
+  `applyProviderOptions` note below). Unlike `ImageModel`, a non-terminal
+  `Prefer: wait` response (`"starting"`/`"processing"`) is not an error —
+  see "Video polling" below.
 - No `Model`, `EmbeddingModel`, `SpeechModel`, or `TranscriptionModel`.
 
 ## Quirks
@@ -53,17 +61,44 @@ header.
   URL strings depending on the model; `outputURLs` in
   `providers/replicate/image.go` normalizes both shapes into a slice
   before fetching each URL.
-- **Non-`"succeeded"` status is an error**, even after the synchronous
-  wait — `predictionResponse.Status != "succeeded"` returns an error that
-  includes `predictionResponse.Error` when present (which itself may be a
-  JSON string or an arbitrary JSON value, handled by `errorText`).
+- **`ImageModel`: non-`"succeeded"` status is an error**, even after the
+  synchronous wait — `predictionResponse.Status != "succeeded"` returns an
+  error that includes `predictionResponse.Error` when present (which
+  itself may be a JSON string or an arbitrary JSON value, handled by
+  `errorText`). `VideoModel` does not share this behavior — see "Video
+  polling" below.
 - **`Prefer: wait` has a ~60s ceiling.** Replicate holds the HTTP connection
   open for at most about 60 seconds while waiting synchronously; a model
   that's still running when the window elapses legitimately returns a
-  `"processing"` status rather than `"succeeded"`, which this SDK surfaces
-  as the non-`"succeeded"` error above rather than as a failure — slow
+  `"starting"`/`"processing"` status rather than `"succeeded"` — slow
   models can hit this even on a correct call, so treat it as "still
-  running," not "broken."
+  running," not "broken." `ImageModel` surfaces this as the non-`"succeeded"`
+  error above; `VideoModel` instead polls (see below), since image
+  generations are fast enough that erroring is acceptable but multi-minute
+  video generations routinely outlast the ceiling.
+
+### Video polling
+
+Because a video generation can easily outlast `Prefer: wait`'s ~60s
+ceiling, `VideoModel.GenerateVideos` (`providers/replicate/video.go`,
+`resolvePrediction`) doesn't treat a non-terminal create response as an
+error: if the create call's response comes back `"starting"` or
+`"processing"`, it polls `GET /v1/predictions/{id}` — sleeping
+`WithPollInterval` (default 500ms) between requests, ctx-aware so a
+cancelled/expired ctx interrupts the wait — until the prediction reaches a
+terminal status: `"succeeded"` (fetches `output` as usual), or
+`"failed"`/`"canceled"` (an error including `predictionResponse.Error` when
+present, same as `ImageModel`'s non-`"succeeded"` error). This avoids
+forcing a caller to retry a slow-but-successful generation into a second,
+separately-billed prediction. This mirrors `providers/luma`'s
+create-then-poll discipline (`WithPollInterval`, ctx-aware `sleep`,
+terminal-status switch), even though Replicate's `Prefer: wait` usually
+makes the create call itself synchronous.
+
+`VideoCall.Resolution` and `VideoCall.DurationSec` are not wired to any
+first-class Replicate field — pass them via `ProviderOptions["replicate"]`
+under whatever field name the target model expects (see ProviderOptions
+below).
 - **Error body shapes.** Replicate's error responses use either
   `{"detail":"..."}` (e.g. auth errors) or an RFC-7807-style problem object
   with `"title"`/`"detail"`; `errorMessage` in
