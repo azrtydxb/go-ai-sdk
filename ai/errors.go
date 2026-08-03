@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/retry"
 )
@@ -114,6 +115,22 @@ func (e *ToolApprovalDeniedError) Error() string {
 		return fmt.Sprintf("ai: tool %q execution denied", e.ToolName)
 	}
 	return fmt.Sprintf("ai: tool %q execution denied: %s", e.ToolName, e.Reason)
+}
+
+// TimeoutError is returned when one of Timeout's SDK-imposed bounds (Total,
+// Step, or Chunk) elapses before a GenerateText or StreamText run completes.
+// It is distinct from the caller's own ctx being canceled or exceeding its
+// own deadline: THAT case is reported exactly as it always was (the ctx
+// error from GenerateText's return value; OnAbort in StreamText) — see
+// Timeout's doc for the precise distinction and how it's detected.
+type TimeoutError struct {
+	Dimension string        // "total", "step", or "chunk"
+	Limit     time.Duration // the Timeout bound that elapsed
+}
+
+// Error implements the error interface.
+func (e *TimeoutError) Error() string {
+	return fmt.Sprintf("ai: %s timeout exceeded (%s)", e.Dimension, e.Limit)
 }
 
 // RetryError is returned when retries are exhausted.

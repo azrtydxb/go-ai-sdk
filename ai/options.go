@@ -3,9 +3,41 @@ package ai
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
+
+// Timeout bounds a GenerateText/StreamText run more finely than a single
+// context deadline. Zero fields mean "no bound" for that dimension.
+//
+// Total, Step, and Chunk are SDK-imposed bounds, layered on top of (never
+// replacing) whatever ctx the caller passes to GenerateText/StreamText: the
+// earlier of the caller's own deadline and Total wins automatically, since
+// Total is implemented as a further context.WithTimeout derived from the
+// caller's ctx.
+//
+// The critical distinction Timeout makes is WHICH side caused a run to end:
+//
+//   - If one of Total/Step/Chunk elapses first, the run ends with a
+//     *TimeoutError (Dimension "total"/"step"/"chunk") delivered via
+//     OnError — this is an SDK-imposed limit, i.e. an error, not a user
+//     abort.
+//   - If the caller's own ctx is canceled or reaches its own deadline first,
+//     the run ends exactly as it always has: the ctx error from
+//     GenerateText's return value, or OnAbort in StreamText. Timeout never
+//     changes that path.
+//
+// This is detected by deriving each bound's context with
+// context.WithTimeoutCause using a distinct sentinel cause per dimension, so
+// context.Cause on the context actually used for a call reveals whether an
+// SDK bound fired (matches a sentinel) or the caller's own ctx did (does
+// not) — never by racing wall-clock time against the caller's deadline.
+type Timeout struct {
+	Total time.Duration // whole run (all steps); a derived context.WithTimeout at entry
+	Step  time.Duration // each individual model call/step; a derived per-step context.WithTimeout
+	Chunk time.Duration // StreamText only: max gap between yielded provider.StreamParts before the stream is aborted
+}
 
 // GenerateTextOpts configures a GenerateText call.
 type GenerateTextOpts struct {
@@ -65,6 +97,14 @@ type GenerateTextOpts struct {
 	// precedence (it never overrides the provider's auth header) and which
 	// request paths implement it.
 	Headers map[string]string
+
+	// Timeout, when set, bounds the run more finely than ctx alone — see
+	// Timeout's doc for the Total/Step/Chunk semantics and how an
+	// SDK-imposed bound (→ *TimeoutError via OnError) is distinguished from
+	// the caller's own ctx being canceled or exceeding its own deadline (→
+	// unchanged ctx-error/OnAbort path). Nil means no additional bound
+	// beyond whatever ctx the caller passes in.
+	Timeout *Timeout
 
 	// StopWhen, when set, decides after each completed step whether to stop
 	// the tool loop (return true = stop). It is evaluated after EVERY step,

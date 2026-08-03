@@ -147,6 +147,14 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 	// resume batch, if any) — see GenerateTextOpts.RuntimeContext.
 	ctx = withRuntimeContext(ctx, opts.RuntimeContext)
 
+	// Timeout.Total, if set, bounds the whole run (both the resume batch and
+	// every step below) — see Timeout's doc for how a run ended by THIS
+	// bound (→ *TimeoutError) is distinguished from the caller's own ctx
+	// being canceled or exceeding its own deadline (→ unchanged ctx-error
+	// path).
+	ctx, cancelTotal := withTotalTimeout(ctx, opts.Timeout)
+	defer cancelTotal()
+
 	maxRetries := defaultMaxRetries
 	if opts.MaxRetries != nil {
 		maxRetries = *opts.MaxRetries
@@ -206,10 +214,26 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 			opts.OnModelCallStart(stepIndex, stepCall)
 		}
 
-		resp, err := retry.Do(ctx, maxRetries, func() (*provider.Response, error) {
-			return model.Generate(ctx, stepCall)
+		// Timeout.Step, if set, bounds this step's model call alone, derived
+		// from the run's ctx (so it also inherits Total, and either bound
+		// firing is detected identically via timeoutErrorFor below).
+		stepCtx, cancelStep := withStepTimeout(ctx, opts.Timeout)
+		resp, err := retry.Do(stepCtx, maxRetries, func() (*provider.Response, error) {
+			return model.Generate(stepCtx, stepCall)
 		})
+		cancelStep()
 		callErr := translateRetryErr(err)
+		if callErr != nil {
+			// A step (or total) timeout is OUR bound firing — an error, not
+			// a user abort (GenerateText has no OnAbort notion at all; see
+			// GenerateTextOpts.OnAbort's doc) — so it's surfaced as a
+			// *TimeoutError in place of whatever raw ctx/retry error
+			// occurred. A genuine caller ctx cancellation leaves callErr
+			// unchanged.
+			if te, ok := timeoutErrorFor(stepCtx, opts.Timeout); ok {
+				callErr = te
+			}
+		}
 
 		if opts.OnModelCallEnd != nil {
 			end := ModelCallEnd{StepIndex: stepIndex, Err: callErr}

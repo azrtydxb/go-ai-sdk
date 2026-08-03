@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"iter"
+	"time"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/retry"
 	"github.com/azrtydxb/go-ai-sdk/provider"
@@ -27,6 +28,17 @@ type TextStream struct {
 	closed     bool
 	err        error
 	abortFired bool // OnAbort has fired for this stream; fires at most once
+
+	cancelTotal context.CancelFunc // releases Timeout.Total's derived ctx; always non-nil (no-op when Total unset)
+
+	// callCtx is the exact context used for the CURRENT step's model
+	// call/stream — the deepest of run ctx / Timeout.Step's derived ctx /
+	// Timeout.Chunk's watchdog-derived ctx. timeoutErrorFor(s.callCtx, ...)
+	// classifies a step's failure; stepCancel and chunkWD release/stop the
+	// per-step resources once that step is done being read.
+	callCtx    context.Context
+	stepCancel context.CancelFunc
+	chunkWD    *chunkWatchdog
 
 	steps         []Step
 	totalUsage    provider.Usage
@@ -72,6 +84,12 @@ func StreamText(ctx context.Context, opts GenerateTextOpts) (*TextStream, error)
 	// resume batch, if any) — see GenerateTextOpts.RuntimeContext.
 	ctx = withRuntimeContext(ctx, opts.RuntimeContext)
 
+	// Timeout.Total, if set, bounds the whole run — see Timeout's doc. Its
+	// cancel is released whenever this *TextStream's Parts() iteration ends
+	// (deferred there) or Close() is called; both are safe to call
+	// redundantly (context cancel funcs are idempotent).
+	ctx, cancelTotal := withTotalTimeout(ctx, opts.Timeout)
+
 	s := &TextStream{
 		ctx:         ctx,
 		opts:        opts,
@@ -80,6 +98,7 @@ func StreamText(ctx context.Context, opts GenerateTextOpts) (*TextStream, error)
 		messages:    messages,
 		model:       opts.Model,
 		activeTools: activeToolSet(opts.ActiveTools),
+		cancelTotal: cancelTotal,
 	}
 
 	// Resume: an unanswered assistant tool-call batch at the end of
@@ -91,6 +110,7 @@ func StreamText(ctx context.Context, opts GenerateTextOpts) (*TextStream, error)
 			// Mirrors the first-stream-start failure path below: no
 			// *TextStream has been returned to a caller yet, so this is
 			// reported solely via the returned error, not OnError.
+			cancelTotal()
 			return nil, berr
 		}
 		if len(batch.pending) > 0 {
@@ -117,8 +137,15 @@ func StreamText(ctx context.Context, opts GenerateTextOpts) (*TextStream, error)
 	if opts.OnModelCallStart != nil {
 		opts.OnModelCallStart(0, call)
 	}
-	stream, err := startStream(ctx, s.model, call, call.Messages, maxRetries)
+	stream, callCtx, cancelStep, wd, err := startStepStream(ctx, opts.Timeout, s.model, call, call.Messages, maxRetries)
 	if err != nil {
+		// A step (or total) timeout firing here is OUR bound, not a user
+		// abort — surfaced as *TimeoutError in place of the raw ctx/retry
+		// error, exactly like GenerateText's per-step handling. A genuine
+		// caller ctx cancellation leaves err unchanged.
+		if te, ok := timeoutErrorFor(callCtx, opts.Timeout); ok {
+			err = te
+		}
 		// No *TextStream has been returned to a caller yet at this point,
 		// so there is no possibility of the OnAbort path applying here (it
 		// requires an existing TextStream) — unlike the in-loop failures
@@ -128,11 +155,39 @@ func StreamText(ctx context.Context, opts GenerateTextOpts) (*TextStream, error)
 		if opts.OnModelCallEnd != nil {
 			opts.OnModelCallEnd(ModelCallEnd{StepIndex: 0, Err: err})
 		}
+		wd.Stop()
+		cancelStep()
+		cancelTotal()
 		return nil, err
 	}
 	s.current = stream
+	s.callCtx = callCtx
+	s.stepCancel = cancelStep
+	s.chunkWD = wd
 
 	return s, nil
+}
+
+// startStepStream starts a step's stream (through retry), deriving a
+// step-scoped context from runCtx that applies Timeout's Step bound and, if
+// Timeout.Chunk is set, arms a chunk-stall watchdog around it (see
+// chunkWatchdog). It returns the stream, the EXACT context used to make the
+// request — the deepest of runCtx/Step's/Chunk's derived contexts, which is
+// what timeoutErrorFor must be checked against to classify a later failure —
+// that context's cancel func, and the watchdog (nil if Timeout.Chunk is
+// unset). The caller must Reset() the watchdog on every yielded stream part
+// and Stop() both the watchdog and the returned cancel func once the step is
+// done being read (success, error, or abandoned iteration) — both are
+// nil/no-op-safe when Timeout (or the relevant field) is unset.
+func startStepStream(runCtx context.Context, t *Timeout, model provider.LanguageModel, call provider.Call, messages []provider.Message, maxRetries int) (provider.StreamResponse, context.Context, context.CancelFunc, *chunkWatchdog, error) {
+	stepCtx, cancelStep := withStepTimeout(runCtx, t)
+	var chunk time.Duration
+	if t != nil {
+		chunk = t.Chunk
+	}
+	callCtx, wd := newChunkWatchdog(stepCtx, chunk)
+	stream, err := startStream(callCtx, model, call, messages, maxRetries)
+	return stream, callCtx, cancelStep, wd, err
 }
 
 // startStream begins a model stream (through retry) using messages as the
@@ -159,6 +214,10 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 			return
 		}
 		s.started = true
+		// Releases Timeout.Total's derived ctx (a no-op if Total is unset)
+		// once this Parts() call ends, however it ends — natural finish,
+		// error, or abandoned iteration.
+		defer s.cancelTotal()
 
 		for {
 			stream := s.current
@@ -204,6 +263,12 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 			abandoned := false
 
 			for p := range stream.Parts() {
+				// Timeout.Chunk's watchdog resets on every yielded part — a
+				// stall (no part within Chunk) cancels s.callCtx with
+				// errChunkTimeout, which unblocks/errors the underlying
+				// provider stream (its Parts() range ends, normally via
+				// stream.Err() below).
+				s.chunkWD.Reset()
 				if s.opts.OnChunk != nil {
 					s.opts.OnChunk(p)
 				}
@@ -267,6 +332,14 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 				}
 			}
 
+			// The step's model-call phase is over either way past this
+			// point (abandoned, error, or success) — release Timeout.Step's
+			// and Timeout.Chunk's per-step resources now so they never
+			// outlive the step they were created for (no goroutine/timer
+			// leak). Both are nil/no-op-safe when unset.
+			s.chunkWD.Stop()
+			s.stepCancel()
+
 			if abandoned {
 				s.fireAbort()
 				_ = stream.Close()
@@ -275,6 +348,14 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 			}
 
 			if err := stream.Err(); err != nil {
+				// A step/chunk/total timeout firing here is OUR bound, not a
+				// user abort — surfaced as *TimeoutError so
+				// reportAbortOrError/fireModelCallEnd route it to OnError
+				// rather than OnAbort (see their doc comments and
+				// timeoutErrorFor).
+				if te, ok := timeoutErrorFor(s.callCtx, s.opts.Timeout); ok {
+					err = te
+				}
 				s.err = err
 				_ = stream.Close()
 				s.current = nil
@@ -443,15 +524,23 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 			if s.opts.OnModelCallStart != nil {
 				s.opts.OnModelCallStart(nextStepIndex, call)
 			}
-			next, err := startStream(s.ctx, s.model, call, call.Messages, s.maxRetries)
+			next, callCtx, cancelStep, wd, err := startStepStream(s.ctx, s.opts.Timeout, s.model, call, call.Messages, s.maxRetries)
 			if err != nil {
+				if te, ok := timeoutErrorFor(callCtx, s.opts.Timeout); ok {
+					err = te
+				}
 				s.err = err
 				s.current = nil
 				s.fireModelCallEnd(ModelCallEnd{StepIndex: nextStepIndex, Err: err})
 				s.reportAbortOrError(err)
+				wd.Stop()
+				cancelStep()
 				return
 			}
 			s.current = next
+			s.callCtx = callCtx
+			s.stepCancel = cancelStep
+			s.chunkWD = wd
 		}
 	}
 }
@@ -494,10 +583,25 @@ func assistantContent(respContent []provider.ContentPart) []provider.ContentPart
 // an abort too, since there is no way to distinguish "canceled because of
 // this error" from "canceled independently, moments before this error was
 // observed" from the information available here.
+//
+// Timeout carve-out: s.ctx is the RUN-level context — it only ever becomes
+// Done due to the caller's own ctx being canceled/expiring, or Timeout.Total
+// firing (Total's derived context IS s.ctx; see StreamText). A Step or Chunk
+// bound firing cancels a deeper, per-step context instead (s.callCtx) and
+// never touches s.ctx, so it can never reach this check at all — by the time
+// err reaches here it has already been substituted with the corresponding
+// *TimeoutError by the call site (see the stream.Err() and next-step-start
+// branches in Parts()), and falls straight through to the OnError call
+// below. When s.ctx IS Done, timeoutErrorFor tells apart the two remaining
+// cases: our own Total bound (falls through to OnError, same as
+// Step/Chunk — an SDK-imposed limit is an error, not a user abort) from the
+// caller's own ctx (fireAbort, unchanged from before Timeout existed).
 func (s *TextStream) reportAbortOrError(err error) {
 	if s.ctx.Err() != nil {
-		s.fireAbort()
-		return
+		if _, ok := timeoutErrorFor(s.ctx, s.opts.Timeout); !ok {
+			s.fireAbort()
+			return
+		}
 	}
 	if s.opts.OnError != nil {
 		s.opts.OnError(err)
@@ -512,12 +616,18 @@ func (s *TextStream) reportAbortOrError(err error) {
 // GenerateTextOpts.OnModelCallEnd and OnAbort), mirroring the same
 // ctx-cancellation check reportAbortOrError performs for OnError. When
 // end.Err is nil (the step's model call succeeded), it always fires.
+//
+// The same Timeout carve-out reportAbortOrError documents applies here: when
+// s.ctx is Done because of our OWN Total bound (not the caller's ctx), this
+// still fires — only a genuine caller-ctx abort suppresses it.
 func (s *TextStream) fireModelCallEnd(end ModelCallEnd) {
 	if s.opts.OnModelCallEnd == nil {
 		return
 	}
 	if end.Err != nil && s.ctx.Err() != nil {
-		return
+		if _, ok := timeoutErrorFor(s.ctx, s.opts.Timeout); !ok {
+			return
+		}
 	}
 	s.opts.OnModelCallEnd(end)
 }
@@ -624,6 +734,17 @@ func (s *TextStream) Close() error {
 		return nil
 	}
 	s.closed = true
+	// Releases Timeout's derived contexts/timers regardless of whether
+	// Parts() was ever called (its own defer covers the case where it was;
+	// these are idempotent/no-op-safe otherwise) — no goroutine/timer must
+	// outlive a stream the caller is done with.
+	s.chunkWD.Stop()
+	if s.stepCancel != nil {
+		s.stepCancel()
+	}
+	if s.cancelTotal != nil {
+		s.cancelTotal()
+	}
 	if s.current == nil {
 		return nil
 	}
