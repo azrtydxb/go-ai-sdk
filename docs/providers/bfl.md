@@ -52,7 +52,7 @@ generation-status polls (default 500ms), the same test-hook pattern as
 - **Terminal states are a fixed set.** `"Ready"` is success (the response's
   `result.sample` URL is fetched via `internal/fetchimage.Fetch`);
   `{"Error","Content Moderated","Request Moderated","Task not found"}` are
-  failure (`failureStatuses` in `providers/bfl/bfl.go`). Any other status
+  failure (`failureStatuses` in `providers/bfl/image.go`). Any other status
   (`"Pending"`, `"Queued"`, ...) keeps polling — BFL's full status
   vocabulary isn't fully enumerated in public docs, so an unrecognized
   status is treated as "still in progress" rather than erroring, the safer

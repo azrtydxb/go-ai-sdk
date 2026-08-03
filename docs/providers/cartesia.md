@@ -21,6 +21,13 @@ defaults to `"https://api.cartesia.ai"`; `WithHTTPClient` overrides the
 `*http.Client`. Auth is sent as `Authorization: Bearer <key>` plus a fixed
 `Cartesia-Version: 2024-11-13` header on every request.
 
+> **Note:** Cartesia's docs have historically shown both `Authorization:
+> Bearer <key>` and `X-API-Key: <key>` for authentication. This SDK sends
+> `Authorization: Bearer` (this is not currently configurable —
+> `ProviderOptions` only affects the JSON body, not headers). If requests
+> fail with an authentication error against your account/API version, check
+> whether Cartesia expects `X-API-Key` instead.
+
 ## Capabilities
 
 - `Provider.SpeechModel(id)` — `provider.SpeechModel`: `POST /tts/bytes`,
@@ -36,20 +43,24 @@ defaults to `"https://api.cartesia.ai"`; `WithHTTPClient` overrides the
 - **Voice is nested, not a bare wire field.** `SpeechCall.Voice` becomes
   `{"mode":"id","id":"<voice>"}` under the wire request's `voice` object,
   not a flat field.
-- **Output format is a nested object, mapped from `OutputFormat`.**
-  `SpeechCall.OutputFormat` selects both the `output_format.container` and
-  a fixed `output_format.encoding` per container, always at a fixed 44100
-  sample rate (`defaultSampleRate` in `providers/cartesia/speech.go`):
+- **Output format is a discriminated union, mapped from `OutputFormat`.**
+  Cartesia's `output_format` shape differs by container: `"mp3"` sends
+  `{"container","sample_rate","bit_rate"}` with **no `encoding` field** at
+  all (MP3 is itself a fixed encoding); `"wav"` and `"raw"` send
+  `{"container","encoding","sample_rate"}` with no `bit_rate` field. Sample
+  rate is always a fixed 44100 (`defaultSampleRate`); mp3 bit rate is
+  always a fixed 128000 (`defaultBitRate`), both in
+  `providers/cartesia/speech.go`:
 
-  | `OutputFormat` | `container` | `encoding` | `MediaType` |
-  |---|---|---|---|
-  | `"mp3"` or `""` (default) | `"mp3"` | `"mp3"` | `audio/mpeg` |
-  | `"wav"` | `"wav"` | `"pcm_s16le"` | `audio/wav` |
-  | anything else | passed through verbatim | `"pcm_f32le"` | `application/octet-stream` |
+  | `OutputFormat` | `container` | `encoding` | `bit_rate` | `MediaType` |
+  |---|---|---|---|---|
+  | `"mp3"` or `""` (default) | `"mp3"` | *(absent)* | `128000` | `audio/mpeg` |
+  | `"wav"` | `"wav"` | `"pcm_s16le"` | *(absent)* | `audio/wav` |
+  | anything else (e.g. `"raw"`) | passed through verbatim | `"pcm_f32le"` | *(absent)* | `application/octet-stream` |
 
-  This encoding-per-container mapping is a best-effort default (not spelled
-  out per-container in Cartesia's docs beyond "mp3"/"pcm_f32le") — flagged
-  the same way as the package's live-testing caveat.
+  This per-container mapping is a best-effort default (not spelled out
+  exhaustively in Cartesia's docs) — flagged the same way as the package's
+  live-testing caveat.
 - **Model ID is a wire field.** `SpeechModel(id)`'s `id` (e.g. `"sonic-2"`)
   is sent as the request's `model_id` field.
 - **`Language` passes through directly**, `omitempty`, with no

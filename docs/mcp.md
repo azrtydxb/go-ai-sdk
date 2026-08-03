@@ -216,6 +216,23 @@ if err := client.Initialize(ctx); err != nil {
   `elicitation/create`) gets a JSON-RPC `-32601 Method not found` error
   response — the dispatch mechanism is generic, elicitation is just the one
   method wired up today.
+- **Malformed `elicitation/create` params** (the request's `params` doesn't
+  decode into `{message, requestedSchema}`) get a JSON-RPC `-32602 Invalid
+  params` error response, not a synthesized `Action: "cancel"` result — a
+  protocol-level shape error is distinct from the handler declining/erroring
+  on a well-formed request.
+
+> **Version-negotiation caveat.** Elicitation is a **2025-06-18** MCP
+> feature, but this client negotiates and pins **`2025-03-26`** (stated at
+> the top of this page — `Initialize` rejects the handshake outright if the
+> server negotiates a different version) — a spec-conforming server
+> honoring that older version has no `elicitation/create` in its vocabulary
+> and simply won't send it. The dispatch path above is real and exercised
+> by this SDK's own tests, but today it's only reachable against servers
+> that send `elicitation/create` regardless of the negotiated version (or a
+> test harness, as in this package's tests). Reaching it against
+> spec-conforming servers would require a future change to widen the
+> negotiated/accepted protocol version range.
 
 **Server-initiated request dispatch and the response-matching path.** The
 client's receive loop discriminates every incoming message by shape: `id` +
