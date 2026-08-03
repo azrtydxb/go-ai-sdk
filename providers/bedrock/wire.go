@@ -545,6 +545,12 @@ func convertUserContent(parts []provider.ContentPart) ([]wireContentBlock, error
 				Source: wireImageSource{Bytes: base64.StdEncoding.EncodeToString(p.Data)},
 			}})
 		case provider.FilePart:
+			// Bedrock's Converse API has no file-reference-by-ID or by-URL
+			// primitive for document blocks — both FileID and URL are
+			// unsupported here; only inline Data is.
+			if p.FileID != "" || p.URL != "" {
+				return nil, fmt.Errorf("bedrock: unsupported content part %T with FileID/URL set in user message (only inline Data is supported)", part)
+			}
 			if len(p.Data) == 0 {
 				return nil, fmt.Errorf("bedrock: file parts require inline Data")
 			}

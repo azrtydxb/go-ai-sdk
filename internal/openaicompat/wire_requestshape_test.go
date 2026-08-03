@@ -292,6 +292,112 @@ func TestRequestShapeUserMessageFilePartNonPDFErrors(t *testing.T) {
 	}
 }
 
+// TestRequestShapeUserMessageFilePartFileID verifies a FilePart with FileID
+// set becomes a "file" content part with {"file":{"file_id":...}}.
+func TestRequestShapeUserMessageFilePartFileID(t *testing.T) {
+	model, srv := newTestLanguageModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			provider.UserText("simple"),
+			{
+				Role: provider.RoleUser,
+				Content: []provider.ContentPart{
+					provider.TextPart{Text: "also text"},
+					provider.FilePart{FileID: "file-abc123"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	var req chatRequest
+	if err := json.Unmarshal(lastRawBody(srv), &req); err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+	var parts []wireContentPart
+	if err := json.Unmarshal(req.Messages[1].Content, &parts); err != nil {
+		t.Fatalf("decode content parts: %v", err)
+	}
+	if len(parts) != 2 || parts[1].Type != "file" || parts[1].File == nil {
+		t.Fatalf("parts = %+v, want a text part followed by a file part", parts)
+	}
+	if parts[1].File.FileID != "file-abc123" {
+		t.Errorf("File.FileID = %q, want file-abc123", parts[1].File.FileID)
+	}
+}
+
+// TestRequestShapeUserMessageFilePartURLErrors verifies a FilePart with URL
+// set is rejected (openaicompat has no file-URL wire representation).
+func TestRequestShapeUserMessageFilePartURLErrors(t *testing.T) {
+	model, _ := newTestLanguageModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			{
+				Role: provider.RoleUser,
+				Content: []provider.ContentPart{provider.FilePart{
+					URL: "https://example.com/report.pdf",
+				}},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("Generate: want error for FilePart with URL set, got nil")
+	}
+	if !strings.Contains(err.Error(), "URL") {
+		t.Errorf("error = %q, want it to mention URL", err.Error())
+	}
+}
+
+// TestRequestShapeUserMessageFilePartNoVariantErrors verifies a FilePart with
+// none of Data/FileID/URL set is rejected.
+func TestRequestShapeUserMessageFilePartNoVariantErrors(t *testing.T) {
+	model, _ := newTestLanguageModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			{
+				Role:    provider.RoleUser,
+				Content: []provider.ContentPart{provider.FilePart{}},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("Generate: want error for FilePart with no variant set, got nil")
+	}
+	if !strings.Contains(err.Error(), "exactly one of") {
+		t.Errorf("error = %q, want it to mention exactly one of Data/FileID/URL", err.Error())
+	}
+}
+
+// TestRequestShapeUserMessageFilePartMultipleVariantsErrors verifies a
+// FilePart with more than one of Data/FileID/URL set is rejected.
+func TestRequestShapeUserMessageFilePartMultipleVariantsErrors(t *testing.T) {
+	model, _ := newTestLanguageModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			{
+				Role: provider.RoleUser,
+				Content: []provider.ContentPart{provider.FilePart{
+					Data:      []byte("data"),
+					MediaType: "application/pdf",
+					FileID:    "file-abc123",
+				}},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("Generate: want error for FilePart with multiple variants set, got nil")
+	}
+	if !strings.Contains(err.Error(), "exactly one of") {
+		t.Errorf("error = %q, want it to mention exactly one of Data/FileID/URL", err.Error())
+	}
+}
+
 func TestRequestShapeTools(t *testing.T) {
 	model, srv := newTestLanguageModel(t)
 

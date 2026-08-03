@@ -792,6 +792,130 @@ func TestRequestShapeUserMessageFilePartNonPDFErrors(t *testing.T) {
 	}
 }
 
+// TestRequestShapeUserMessageFilePartFileID verifies a FilePart with FileID
+// set becomes a document block whose source is {"type":"file","file_id":...}.
+func TestRequestShapeUserMessageFilePartFileID(t *testing.T) {
+	srv, fs := newFixtureServer(t)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			{
+				Role: provider.RoleUser,
+				Content: []provider.ContentPart{
+					provider.TextPart{Text: "simple"},
+					provider.FilePart{FileID: "file_abc123", Filename: "report.pdf"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	blocks := fs.lastRequest.Messages[0].Content
+	if len(blocks) != 2 || blocks[1].Type != "document" {
+		t.Fatalf("blocks = %+v, want a text block followed by a document block", blocks)
+	}
+	doc := blocks[1]
+	if doc.Title != "report.pdf" {
+		t.Errorf("block.Title = %q, want report.pdf", doc.Title)
+	}
+	if doc.Source == nil {
+		t.Fatalf("block.Source = nil, want set")
+	}
+	if doc.Source.Type != "file" {
+		t.Errorf("Source.Type = %q, want file", doc.Source.Type)
+	}
+	if doc.Source.FileID != "file_abc123" {
+		t.Errorf("Source.FileID = %q, want file_abc123", doc.Source.FileID)
+	}
+}
+
+// TestRequestShapeUserMessageFilePartURL verifies a FilePart with URL set
+// becomes a document block whose source is {"type":"url","url":...}.
+func TestRequestShapeUserMessageFilePartURL(t *testing.T) {
+	srv, fs := newFixtureServer(t)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			{
+				Role: provider.RoleUser,
+				Content: []provider.ContentPart{
+					provider.TextPart{Text: "simple"},
+					provider.FilePart{URL: "https://example.com/report.pdf"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	blocks := fs.lastRequest.Messages[0].Content
+	if len(blocks) != 2 || blocks[1].Type != "document" {
+		t.Fatalf("blocks = %+v, want a text block followed by a document block", blocks)
+	}
+	doc := blocks[1]
+	if doc.Source == nil {
+		t.Fatalf("block.Source = nil, want set")
+	}
+	if doc.Source.Type != "url" {
+		t.Errorf("Source.Type = %q, want url", doc.Source.Type)
+	}
+	if doc.Source.URL != "https://example.com/report.pdf" {
+		t.Errorf("Source.URL = %q, want https://example.com/report.pdf", doc.Source.URL)
+	}
+}
+
+// TestRequestShapeUserMessageFilePartNoVariantErrors verifies a FilePart with
+// none of Data/FileID/URL set is rejected.
+func TestRequestShapeUserMessageFilePartNoVariantErrors(t *testing.T) {
+	srv, _ := newFixtureServer(t)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			{
+				Role:    provider.RoleUser,
+				Content: []provider.ContentPart{provider.FilePart{}},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("Generate: want error for FilePart with no variant set, got nil")
+	}
+	if !strings.Contains(err.Error(), "exactly one of") {
+		t.Errorf("error = %q, want it to mention exactly one of Data/FileID/URL", err.Error())
+	}
+}
+
+// TestRequestShapeUserMessageFilePartMultipleVariantsErrors verifies a
+// FilePart with more than one of Data/FileID/URL set is rejected.
+func TestRequestShapeUserMessageFilePartMultipleVariantsErrors(t *testing.T) {
+	srv, _ := newFixtureServer(t)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			{
+				Role: provider.RoleUser,
+				Content: []provider.ContentPart{provider.FilePart{
+					Data:   []byte("data"),
+					FileID: "file_abc123",
+				}},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("Generate: want error for FilePart with multiple variants set, got nil")
+	}
+	if !strings.Contains(err.Error(), "exactly one of") {
+		t.Errorf("error = %q, want it to mention exactly one of Data/FileID/URL", err.Error())
+	}
+}
+
 func TestRequestShapeAssistantToolCallParsedInput(t *testing.T) {
 	srv, fs := newFixtureServer(t)
 	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")

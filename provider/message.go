@@ -31,9 +31,11 @@ type ImagePart struct {
 func (ImagePart) isContentPart() {}
 
 // FilePart is a file/attachment content part, valid only in user messages
-// (assistant-message FilePart is rejected by every provider).
+// (assistant-message FilePart is rejected by every provider). Exactly one of
+// Data, FileID, or URL should be set; a converter rejects a FilePart with
+// none set, or with more than one set.
 //
-// Support matrix:
+// Support matrix (inline Data):
 //   - anthropic: application/pdf only, sent as a "document" content block
 //     (Filename, if set, becomes the block's title).
 //   - google, vertex (geminicompat): any MediaType, sent inline via
@@ -54,10 +56,26 @@ func (ImagePart) isContentPart() {}
 // case-insensitive and ignores any MIME parameters (via
 // mime.ParseMediaType) — "Application/PDF" and "application/pdf; name=x"
 // both match "application/pdf".
+//
+// FileID references a previously-uploaded provider file (see
+// provider.FileStore). URL references an externally-hosted file. Support:
+//   - FileID — openaicompat (a "file" content part with
+//     {"file":{"file_id":...}}), anthropic (a "document" block with source
+//     {"type":"file","file_id":...}).
+//   - URL — geminicompat (a fileData part with fileUri; also accepts Gemini
+//     Files API URIs), anthropic PDFs (a "document" block with source
+//     {"type":"url","url":...}).
+//
+// Families without support for the set variant reject the message (same
+// rule as unsupported Data media types).
 type FilePart struct {
 	Data      []byte
 	MediaType string
 	Filename  string
+
+	// FileID and URL are documented on the type's doc comment above.
+	FileID string
+	URL    string
 }
 
 func (FilePart) isContentPart() {}

@@ -456,6 +456,130 @@ func TestRequestShapeUserMessageFilePartAudio(t *testing.T) {
 	}
 }
 
+// TestRequestShapeUserMessageFilePartURL verifies a FilePart with URL set
+// becomes a fileData part with fileUri/mimeType.
+func TestRequestShapeUserMessageFilePartURL(t *testing.T) {
+	model, srv := newTestLanguageModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			{
+				Role: provider.RoleUser,
+				Content: []provider.ContentPart{
+					provider.TextPart{Text: "simple"},
+					provider.FilePart{URL: "https://example.com/report.pdf", MediaType: "application/pdf"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	req := lastRequest(t, srv)
+	parts := req.Contents[0].Parts
+	if len(parts) != 2 || parts[1].FileData == nil {
+		t.Fatalf("Parts = %+v, want a text part followed by a fileData part", parts)
+	}
+	if parts[1].FileData.FileURI != "https://example.com/report.pdf" {
+		t.Errorf("FileData.FileURI = %q, want https://example.com/report.pdf", parts[1].FileData.FileURI)
+	}
+	if parts[1].FileData.MimeType != "application/pdf" {
+		t.Errorf("FileData.MimeType = %q, want application/pdf", parts[1].FileData.MimeType)
+	}
+}
+
+// TestRequestShapeUserMessageFilePartURLOmitsEmptyMimeType verifies the
+// fileData part's mimeType is omitted (not sent as an empty string) when the
+// FilePart carries no MediaType.
+func TestRequestShapeUserMessageFilePartURLOmitsEmptyMimeType(t *testing.T) {
+	model, srv := newTestLanguageModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			{
+				Role: provider.RoleUser,
+				Content: []provider.ContentPart{
+					provider.FilePart{URL: "https://example.com/f"},
+					provider.TextPart{Text: "simple"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if strings.Contains(string(lastRawBody(srv)), "mimeType") {
+		t.Error("raw request body contains mimeType; want it omitted when MediaType is empty")
+	}
+}
+
+// TestRequestShapeUserMessageFilePartFileIDErrors verifies a FilePart with
+// FileID set is rejected (geminicompat has no file-ID wire representation).
+func TestRequestShapeUserMessageFilePartFileIDErrors(t *testing.T) {
+	model, _ := newTestLanguageModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			{
+				Role:    provider.RoleUser,
+				Content: []provider.ContentPart{provider.FilePart{FileID: "file-abc123"}},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("Generate: want error for FilePart with FileID set, got nil")
+	}
+	if !strings.Contains(err.Error(), "FileID") {
+		t.Errorf("error = %q, want it to mention FileID", err.Error())
+	}
+}
+
+// TestRequestShapeUserMessageFilePartNoVariantErrors verifies a FilePart
+// with none of Data/FileID/URL set is rejected.
+func TestRequestShapeUserMessageFilePartNoVariantErrors(t *testing.T) {
+	model, _ := newTestLanguageModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			{
+				Role:    provider.RoleUser,
+				Content: []provider.ContentPart{provider.FilePart{}},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("Generate: want error for FilePart with no variant set, got nil")
+	}
+	if !strings.Contains(err.Error(), "exactly one of") {
+		t.Errorf("error = %q, want it to mention exactly one of Data/FileID/URL", err.Error())
+	}
+}
+
+// TestRequestShapeUserMessageFilePartMultipleVariantsErrors verifies a
+// FilePart with more than one of Data/FileID/URL set is rejected.
+func TestRequestShapeUserMessageFilePartMultipleVariantsErrors(t *testing.T) {
+	model, _ := newTestLanguageModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			{
+				Role: provider.RoleUser,
+				Content: []provider.ContentPart{provider.FilePart{
+					URL:    "https://example.com/f",
+					FileID: "file-abc123",
+				}},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("Generate: want error for FilePart with multiple variants set, got nil")
+	}
+	if !strings.Contains(err.Error(), "exactly one of") {
+		t.Errorf("error = %q, want it to mention exactly one of Data/FileID/URL", err.Error())
+	}
+}
+
 func TestRequestShapeAssistantToolCallParsedArgs(t *testing.T) {
 	model, srv := newTestLanguageModel(t)
 

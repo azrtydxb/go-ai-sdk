@@ -19,10 +19,11 @@ type wireMessage struct {
 }
 
 type wireImageSource struct {
-	Type      string `json:"type"` // "base64" | "url"
+	Type      string `json:"type"` // "base64" | "url" | "file"
 	MediaType string `json:"media_type,omitempty"`
 	Data      string `json:"data,omitempty"`
 	URL       string `json:"url,omitempty"`
+	FileID    string `json:"file_id,omitempty"`
 }
 
 // wireContentBlock is a union of every content block shape the Messages API
@@ -350,18 +351,47 @@ func userBlocks(parts []provider.ContentPart) ([]wireContentBlock, error) {
 			}
 			out = append(out, block)
 		case provider.FilePart:
-			if !isPDFMediaType(p.MediaType) {
-				return nil, fmt.Errorf("anthropic: unsupported content part %T with media type %q in user message (only application/pdf is supported)", part, p.MediaType)
+			variants := 0
+			if len(p.Data) > 0 {
+				variants++
 			}
-			out = append(out, wireContentBlock{
-				Type:  "document",
-				Title: p.Filename,
-				Source: &wireImageSource{
-					Type:      "base64",
-					MediaType: "application/pdf",
-					Data:      base64.StdEncoding.EncodeToString(p.Data),
-				},
-			})
+			if p.FileID != "" {
+				variants++
+			}
+			if p.URL != "" {
+				variants++
+			}
+			switch {
+			case variants == 0:
+				return nil, fmt.Errorf("anthropic: file part must set exactly one of Data, FileID, or URL")
+			case variants > 1:
+				return nil, fmt.Errorf("anthropic: file part must set exactly one of Data, FileID, or URL (got %d)", variants)
+			case p.FileID != "":
+				out = append(out, wireContentBlock{
+					Type:   "document",
+					Title:  p.Filename,
+					Source: &wireImageSource{Type: "file", FileID: p.FileID},
+				})
+			case p.URL != "":
+				out = append(out, wireContentBlock{
+					Type:   "document",
+					Title:  p.Filename,
+					Source: &wireImageSource{Type: "url", URL: p.URL},
+				})
+			default:
+				if !isPDFMediaType(p.MediaType) {
+					return nil, fmt.Errorf("anthropic: unsupported content part %T with media type %q in user message (only application/pdf is supported)", part, p.MediaType)
+				}
+				out = append(out, wireContentBlock{
+					Type:  "document",
+					Title: p.Filename,
+					Source: &wireImageSource{
+						Type:      "base64",
+						MediaType: "application/pdf",
+						Data:      base64.StdEncoding.EncodeToString(p.Data),
+					},
+				})
+			}
 		default:
 			return nil, fmt.Errorf("anthropic: unsupported content part %T in user message", part)
 		}

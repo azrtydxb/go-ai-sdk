@@ -20,6 +20,7 @@ type wireContent struct {
 type wirePart struct {
 	Text             string                `json:"text,omitempty"`
 	InlineData       *wireInlineData       `json:"inlineData,omitempty"`
+	FileData         *wireFileData         `json:"fileData,omitempty"`
 	FunctionCall     *wireFunctionCall     `json:"functionCall,omitempty"`
 	FunctionResponse *wireFunctionResponse `json:"functionResponse,omitempty"`
 }
@@ -27,6 +28,13 @@ type wirePart struct {
 type wireInlineData struct {
 	MimeType string `json:"mimeType"`
 	Data     string `json:"data"`
+}
+
+// wireFileData is Gemini's fileData part shape, used for FilePart.URL
+// references (an externally-hosted file, or a Gemini Files API URI).
+type wireFileData struct {
+	MimeType string `json:"mimeType,omitempty"`
+	FileURI  string `json:"fileUri"`
 }
 
 type wireFunctionCall struct {
@@ -321,14 +329,38 @@ func userParts(parts []provider.ContentPart) ([]wirePart, error) {
 				Data:     base64.StdEncoding.EncodeToString(p.Data),
 			}})
 		case provider.FilePart:
-			mediaType := p.MediaType
-			if mediaType == "" {
-				mediaType = "application/octet-stream"
+			variants := 0
+			if len(p.Data) > 0 {
+				variants++
 			}
-			out = append(out, wirePart{InlineData: &wireInlineData{
-				MimeType: mediaType,
-				Data:     base64.StdEncoding.EncodeToString(p.Data),
-			}})
+			if p.FileID != "" {
+				variants++
+			}
+			if p.URL != "" {
+				variants++
+			}
+			switch {
+			case variants == 0:
+				return nil, fmt.Errorf("geminicompat: file part must set exactly one of Data, FileID, or URL")
+			case variants > 1:
+				return nil, fmt.Errorf("geminicompat: file part must set exactly one of Data, FileID, or URL (got %d)", variants)
+			case p.URL != "":
+				out = append(out, wirePart{FileData: &wireFileData{
+					FileURI:  p.URL,
+					MimeType: p.MediaType,
+				}})
+			case p.FileID != "":
+				return nil, fmt.Errorf("geminicompat: unsupported content part %T with FileID set in user message (file references by ID are not supported; use URL or inline Data)", part)
+			default:
+				mediaType := p.MediaType
+				if mediaType == "" {
+					mediaType = "application/octet-stream"
+				}
+				out = append(out, wirePart{InlineData: &wireInlineData{
+					MimeType: mediaType,
+					Data:     base64.StdEncoding.EncodeToString(p.Data),
+				}})
+			}
 		default:
 			return nil, fmt.Errorf("geminicompat: unsupported content part %T in user message", part)
 		}

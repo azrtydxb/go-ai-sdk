@@ -1019,6 +1019,49 @@ func TestRequestShapeUserMessageFilePartUnsupportedTypeErrors(t *testing.T) {
 	}
 }
 
+// TestRequestShapeUserMessageFilePartFileIDErrors verifies a FilePart with
+// FileID set is rejected — Bedrock's Converse API has no file-reference
+// primitive.
+func TestRequestShapeUserMessageFilePartFileIDErrors(t *testing.T) {
+	model, _ := newTestModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			{
+				Role:    provider.RoleUser,
+				Content: []provider.ContentPart{provider.FilePart{FileID: "file-abc123"}},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("Generate: want error for FilePart with FileID set, got nil")
+	}
+	if !strings.Contains(err.Error(), "FileID") {
+		t.Errorf("error = %q, want it to mention FileID", err.Error())
+	}
+}
+
+// TestRequestShapeUserMessageFilePartURLErrors verifies a FilePart with URL
+// set is rejected — Bedrock's Converse API has no file-reference primitive.
+func TestRequestShapeUserMessageFilePartURLErrors(t *testing.T) {
+	model, _ := newTestModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			{
+				Role:    provider.RoleUser,
+				Content: []provider.ContentPart{provider.FilePart{URL: "https://example.com/f.pdf"}},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("Generate: want error for FilePart with URL set, got nil")
+	}
+	if !strings.Contains(err.Error(), "URL") {
+		t.Errorf("error = %q, want it to mention URL", err.Error())
+	}
+}
+
 func TestStream_TruncatedWithoutMessageStop(t *testing.T) {
 	model, _ := newTestModel(t)
 
