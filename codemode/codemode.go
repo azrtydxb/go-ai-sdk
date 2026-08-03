@@ -69,8 +69,8 @@ type Options struct {
 	// API docs. Purely prompting — the Sandbox defines what actually
 	// runs. Default "javascript".
 	Language string
-	// MaxOutputBytes truncates Result.Output sent to the model. 0 means
-	// the default of 16384.
+	// MaxOutputBytes truncates Result.Output sent to the model. Any value
+	// <= 0 (including a negative one) means the default of 16384.
 	MaxOutputBytes int
 }
 
@@ -117,7 +117,10 @@ func Tool(sandbox Sandbox, tools []ai.Tool, opts *Options) ai.Tool {
 		if opts.Language != "" {
 			language = opts.Language
 		}
-		if opts.MaxOutputBytes != 0 {
+		// <= 0 (not just == 0) falls back to the default: a negative value
+		// would otherwise reach truncateOutput as-is and panic slicing at a
+		// negative index.
+		if opts.MaxOutputBytes > 0 {
 			maxOutputBytes = opts.MaxOutputBytes
 		}
 	}
@@ -166,7 +169,7 @@ func (t *codeTool) Schema() json.RawMessage { return t.schema }
 func (t *codeTool) Execute(ctx context.Context, args json.RawMessage) (any, error) {
 	var a codeArgs
 	if err := json.Unmarshal(args, &a); err != nil {
-		return nil, err
+		return nil, &ai.InvalidToolArgumentsError{ToolName: t.Name(), Args: args, Cause: err}
 	}
 
 	env := Env{CallTool: t.dispatch}

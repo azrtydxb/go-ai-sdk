@@ -131,6 +131,28 @@ func TestOutputTruncation(t *testing.T) {
 	}
 }
 
+// TestExecuteMalformedArgsWrapsInvalidToolArgumentsError pins finding 7:
+// malformed {"code": ...} args must produce a typed
+// *ai.InvalidToolArgumentsError (so errors.As works, and so
+// GenerateTextOpts.RepairToolCall's bad-args repair path — which only
+// triggers on that specific type — is offered a chance to fix it), not a
+// raw encoding/json error.
+func TestExecuteMalformedArgsWrapsInvalidToolArgumentsError(t *testing.T) {
+	tool := Tool(&fakeSandbox{}, nil, nil)
+
+	_, err := tool.Execute(t.Context(), json.RawMessage(`not json`))
+	if err == nil {
+		t.Fatal("want error for malformed args")
+	}
+	var iae *ai.InvalidToolArgumentsError
+	if !errors.As(err, &iae) {
+		t.Fatalf("err = %v (%T), want *ai.InvalidToolArgumentsError", err, err)
+	}
+	if iae.ToolName != "run_code" {
+		t.Fatalf("ToolName = %q, want run_code", iae.ToolName)
+	}
+}
+
 func TestToolPanicsOnDuplicateToolName(t *testing.T) {
 	defer func() {
 		r := recover()
@@ -179,6 +201,23 @@ func TestOutputTruncationDoesNotSplitMultiByteRune(t *testing.T) {
 	}
 	if !utf8.ValidString(got.(string)) {
 		t.Fatalf("truncated output is not valid UTF-8: %q", got)
+	}
+}
+
+// TestNegativeMaxOutputBytesClampsToDefault pins finding 6: a negative
+// Options.MaxOutputBytes must not reach truncateOutput as-is — cutting a
+// string at a negative index panics (s[:negative]). <= 0 (not just == 0)
+// must fall back to the documented default of 16384.
+func TestNegativeMaxOutputBytesClampsToDefault(t *testing.T) {
+	sb := &fakeSandbox{result: &Result{Output: "short"}}
+	tool := Tool(sb, nil, &Options{MaxOutputBytes: -1})
+
+	got, err := tool.Execute(t.Context(), json.RawMessage(`{"code":"x"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "short" {
+		t.Fatalf("got %q, want %q (no truncation: well under the default limit)", got, "short")
 	}
 }
 

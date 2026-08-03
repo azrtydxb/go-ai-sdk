@@ -107,7 +107,8 @@ tool description and API doc, and has no effect on what actually runs (the
 `Sandbox` defines that). `MaxOutputBytes` bounds how much of `Result.Output`
 is sent back to the model — see
 [Output post-processing](#output-post-processing-truncation-and-logs)
-below. A `nil *Options` applies both defaults.
+below. A `nil *Options` applies both defaults. Any `MaxOutputBytes <= 0`
+(zero or negative) also falls back to the default of 16384.
 
 ## Tool: wrapping tools into run_code
 
@@ -157,6 +158,14 @@ and calls `sandbox.Execute(ctx, code, env)`. A **sandbox error is returned
 as-is, never wrapped** — the ai tool loop's usual `*ai.ToolExecutionError`
 wrapping applies exactly once, at that outer layer, not a second time
 inside `codemode`.
+
+Malformed `{"code": ...}` args, on the other hand, ARE wrapped — in
+`*ai.InvalidToolArgumentsError{ToolName: "run_code", Args, Cause}` — the
+same typed error every other `ai.Tool` produces for bad args (see
+[Tools § Execution error taxonomy](tools.md#execution-error-taxonomy)), so
+`errors.As` works and `GenerateTextOpts.RepairToolCall`'s bad-args repair
+path is offered a chance to fix it, exactly as it would be for a
+hand-written tool.
 
 ### Unknown tool name
 
