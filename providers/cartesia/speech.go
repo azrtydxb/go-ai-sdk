@@ -29,10 +29,17 @@ type voiceWire struct {
 	ID   string `json:"id"`
 }
 
+// outputFormatWire is Cartesia's discriminated-union output_format shape.
+// The "mp3" container takes {"container","sample_rate","bit_rate"} — NO
+// "encoding" field, since MP3 is itself a fixed encoding. The "wav" and
+// "raw" containers take {"container","encoding","sample_rate"} and carry no
+// bit_rate. Encoding/BitRate are omitted per-container by leaving the
+// unused field's zero value out via omitempty.
 type outputFormatWire struct {
 	Container  string `json:"container"`
-	Encoding   string `json:"encoding"`
+	Encoding   string `json:"encoding,omitempty"`
 	SampleRate int    `json:"sample_rate"`
+	BitRate    int    `json:"bit_rate,omitempty"`
 }
 
 type speechRequest struct {
@@ -57,7 +64,8 @@ func mediaTypeForContainer(container string) string {
 }
 
 // encodingForContainer maps a Cartesia output_format container to its
-// default encoding.
+// default encoding. Not applicable to "mp3", which has no encoding field
+// (see outputFormatForContainer).
 func encodingForContainer(container string) string {
 	switch container {
 	case "mp3", "":
@@ -69,7 +77,33 @@ func encodingForContainer(container string) string {
 	}
 }
 
-const defaultSampleRate = 44100
+const (
+	defaultSampleRate = 44100
+	defaultBitRate    = 128000
+)
+
+// outputFormatForContainer builds Cartesia's discriminated-union
+// output_format object for container: "mp3" sends {container, sample_rate,
+// bit_rate} with no "encoding" field; "wav" and "raw" send
+// {container, encoding, sample_rate} with no "bit_rate" field.
+func outputFormatForContainer(container string) outputFormatWire {
+	if container == "mp3" || container == "" {
+		c := container
+		if c == "" {
+			c = "mp3"
+		}
+		return outputFormatWire{
+			Container:  c,
+			SampleRate: defaultSampleRate,
+			BitRate:    defaultBitRate,
+		}
+	}
+	return outputFormatWire{
+		Container:  container,
+		Encoding:   encodingForContainer(container),
+		SampleRate: defaultSampleRate,
+	}
+}
 
 func (m *speechModel) GenerateSpeech(ctx context.Context, call provider.SpeechCall) (*provider.SpeechResponse, error) {
 	if call.Voice == "" {
@@ -88,12 +122,8 @@ func (m *speechModel) GenerateSpeech(ctx context.Context, call provider.SpeechCa
 			Mode: "id",
 			ID:   call.Voice,
 		},
-		OutputFormat: outputFormatWire{
-			Container:  container,
-			Encoding:   encodingForContainer(container),
-			SampleRate: defaultSampleRate,
-		},
-		Language: call.Language,
+		OutputFormat: outputFormatForContainer(container),
+		Language:     call.Language,
 	}
 	reqBody, err := json.Marshal(req)
 	if err != nil {
