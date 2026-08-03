@@ -87,6 +87,23 @@ type ToolExecutionError struct {
 
 Returned when a tool's `Execute` function itself returns an error.
 
+### `*ai.ToolApprovalDeniedError`
+
+```go
+type ToolApprovalDeniedError struct {
+	ToolName string
+	Reason   string
+}
+```
+
+Recorded on a `ToolResultRecord.Err` (never returned/raised directly) when a
+tool call requiring approval (see `ai.RequireApproval`/`ai.ApprovalRequirer`)
+was denied — via `GenerateTextOpts.Approvals` or `.ApproveToolCall`. `Error()`
+omits `Reason` from the message when it's empty:
+`ai: tool "delete_record" execution denied` vs.
+`ai: tool "delete_record" execution denied: not allowed`. See
+[Tools § Approvals for tool execution](tools.md#approvals-for-tool-execution).
+
 ### Required-field sentinel errors
 
 Several `ai.*Opts` structs validate required fields before making any call,
@@ -194,6 +211,7 @@ to retry.
 ## Source of truth
 
 - [`ai/errors.go`](../../ai/errors.go)
+- [`ai/approval.go`](../../ai/approval.go) (`ApprovalRequirer`, `RequireApproval`)
 - [`internal/retry/retry.go`](../../internal/retry/retry.go)
 - [`ai/embed.go`](../../ai/embed.go), [`ai/generate_image.go`](../../ai/generate_image.go),
   [`ai/generate_speech.go`](../../ai/generate_speech.go),

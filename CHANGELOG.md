@@ -8,15 +8,84 @@ once it reaches 1.0.
 
 ## [Unreleased]
 
-Wave 9 and wave 10 of the [AI SDK 6 parity roadmap](docs/superpowers/plans/2026-08-03-v6-parity-roadmap.md).
+Waves 9, 10, and 11 of the [AI SDK 6 parity roadmap](docs/superpowers/plans/2026-08-03-v6-parity-roadmap.md).
 Wave 9: v5 leftovers plus quick AI SDK 6 wins. Wave 10: output modes on
 `GenerateText`, reranking, a unified reasoning option, and the full
-lifecycle-callback event set. Full parity with the AI SDK 5 core is
-maintained; AI SDK 6 parity is in progress — see
+lifecycle-callback event set. Wave 11: tool-execution approvals with a
+resumable pending-approval flow, `RuntimeContext`, an `agent.Agent`
+package, and Code Mode (`codemode.Tool`/`Sandbox`). Full parity with the
+AI SDK 5 core is maintained; AI SDK 6 parity is in progress — see
 [Migrating from the Vercel AI SDK § AI SDK 6 delta](docs/migrating-from-vercel-ai-sdk.md#ai-sdk-6-delta)
 for the feature-by-feature status.
 
 ### Added
+
+**Wave 11**
+
+- `ai.RequireApproval(tool, when ...func(ctx, args) bool)` /
+  `ai.ApprovalRequirer`: tool-execution approvals. A wrapped tool's calls
+  require a decision before executing — resolved from
+  `GenerateTextOpts.Approvals` (checked first, matched by `ToolCallID`),
+  then `.ApproveToolCall` (called inline), else left pending. A pending
+  call suspends its **entire** batch atomically — no call in that batch
+  executes, even ones needing no approval or already decided.
+  `GenerateTextResult.PendingApprovals` (and `TextStream.PendingApprovals()`
+  for `StreamText`) reports the undecided calls; suspension is not an
+  error (`OnFinish` still fires, `FinishReason` is `tool-calls`). A denied
+  call is never executed; `*ai.ToolApprovalDeniedError` is recorded on its
+  `ToolResultRecord.Err` and sent to the model as an `IsError` tool result.
+  Resend the suspended `Messages` with `Approvals` set to resume. Does not
+  apply to `Output`'s tool-mode fallback synthetic call. See
+  [Tools § Approvals for tool execution](docs/core/tools.md#approvals-for-tool-execution).
+- Resume-from-Messages as a standalone loop-entry capability: `Messages`
+  ending in an unanswered assistant tool-call batch is now detected and
+  run through the tool loop (including approval rules) before any model
+  call, in both `GenerateText` and `StreamText` — independent of whether
+  approvals are involved. See
+  [Generating text § Resume-from-Messages is its own capability](docs/core/generating-text.md#resume-from-messages-is-its-own-capability).
+- `GenerateTextOpts.RuntimeContext` (`ai.RuntimeContext`, a
+  `map[string]any`) / `ai.RuntimeContextFrom(ctx)`: an arbitrary
+  application-value bag installed once per run and readable inside
+  `Tool.Execute`, `ApprovalRequirer.ApprovalRequired`, and
+  `ApproveToolCall`. See [Tools § RuntimeContext](docs/core/tools.md#runtimecontext).
+- `package agent`: `agent.Agent` (`Model`, `Instructions`, `Tools`,
+  `MaxSteps` — defaulting to 8, not `ai.GenerateTextOpts`'s 1/16 —
+  `StopWhen`, `Output`, `RuntimeContext`, `ApproveToolCall`,
+  `PrepareOpts`), `agent.RunOpts` (`Prompt`/`Messages`/`Approvals`), and
+  `Generate`/`Stream`, which assemble a `GenerateTextOpts` and delegate
+  entirely to `ai.GenerateText`/`ai.StreamText` — no loop logic of its own.
+  `agent.AsTool(a, name, description)` exposes an `Agent` as an `ai.Tool`
+  taking `{"task": string}`, returning the sub-agent's decoded `Output`
+  (else `Text`), with sub-agent errors wrapped in
+  `*ai.ToolExecutionError`. An unset sub-agent `RuntimeContext` inherits
+  the parent's (an explicitly empty `ai.RuntimeContext{}` isolates it
+  instead). The AI SDK's `ToolLoopAgent` is named plainly `Agent` here.
+  See [Agents](docs/core/agents.md).
+- `package codemode`: `codemode.Tool(sandbox, tools, opts)` wraps a set of
+  `ai.Tool`s into a single `run_code` tool; `codemode.Sandbox` is the
+  interface the caller implements against their own runtime — the SDK
+  ships no bundled code runtime, and sandboxing/security is entirely the
+  implementer's responsibility. `codemode.APIDoc` renders each tool's
+  schema as a one-level-nested parameter listing for the model
+  (alphabetically sorted properties, `object`-typed fields expanded one
+  level then collapsed, arrays recursing through the same rule,
+  properties-less schemas rendering `(args: object)`). `Tool` panics at
+  construction on a duplicate tool name. `Result.Output` is truncated
+  (default 16384 bytes, rune-safe, `"\n[truncated]"` suffix) and
+  `Result.Logs` appended as `"\nlog: "` lines; sandbox errors and unknown
+  tool-name errors propagate unwrapped (the `ai` tool loop's usual
+  `*ai.ToolExecutionError` wrapping applies exactly once, one layer up).
+  See [Code Mode](docs/core/code-mode.md).
+- `GenerateTextOpts.SchemaDescription`: describes the expected `Output`
+  schema; used as the injected output tool's `Description` in the
+  tool-mode fallback (no effect in native-JSON mode). See
+  [Generating text § SchemaDescription](docs/core/generating-text.md#schemadescription).
+- `provider.ResolveBudgetTokens(cfg *ReasoningConfig) (int, bool)`: the
+  shared `BudgetTokens`-else-`EffortBudgetTokens(Effort)` resolution used
+  by Anthropic, Google/Vertex AI (geminicompat), and Bedrock, replacing
+  three byte-identical private copies — an internal consolidation with no
+  behavior change, exported for reuse. See
+  [Reasoning § EffortBudgetTokens](docs/core/reasoning.md#effortbudgettokens-the-effort-token-budget-table).
 
 **Wave 10**
 

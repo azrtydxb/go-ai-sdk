@@ -81,6 +81,11 @@ Three typed errors cover everything that can go wrong with a tool call:
   `Tools` (or isn't in the active set — see `ActiveTools` below). This one
   aborts the whole tool-call batch rather than being recorded per-call: see
   [Generating text](generating-text.md) for how `GenerateText` handles it.
+- **`*ai.ToolApprovalDeniedError`** — recorded the same way as
+  `*ai.ToolExecutionError`/`*ai.InvalidToolArgumentsError` (on
+  `ToolResultRecord.Err`, never returned/raised directly) when a call
+  needing approval (see [Approvals for tool execution](#approvals-for-tool-execution)
+  below) was denied. `Execute` itself never runs for a denied call.
 
 ```go
 divide := ai.NewTool("divide", "Divide two integers",
@@ -197,6 +202,232 @@ image-capable one, prefer text-describable results, or attach the image via
 a separate, provider-agnostic mechanism instead (e.g. a `FilePart` on a
 subsequent user message — see [Media § FilePart attachment matrix](media.md#filepart-attachment-matrix)).
 
+## Approvals for tool execution
+
+Some tools should pause for human (or policy) sign-off before they run —
+sending an email, deleting a record, spending money. `ai.RequireApproval`
+wraps any `ai.Tool` to require approval before each call executes:
+
+```go
+deleteTool := ai.NewTool("delete_record", "Delete a record by ID",
+	func(ctx context.Context, args DeleteArgs) (any, error) {
+		return db.Delete(args.ID)
+	})
+
+// Every call to delete_record requires approval.
+guardedDelete := ai.RequireApproval(deleteTool)
+```
+
+`RequireApproval`'s optional second argument narrows *which* calls need
+approval, based on the call's own arguments:
+
+```go
+// Only calls targeting a record in the "prod" namespace require approval.
+guardedDelete := ai.RequireApproval(deleteTool, func(ctx context.Context, args json.RawMessage) bool {
+	var a DeleteArgs
+	_ = json.Unmarshal(args, &a)
+	return strings.HasPrefix(a.ID, "prod-")
+})
+```
+
+Under the hood, the wrapped tool implements `ai.ApprovalRequirer`:
+
+```go
+type ApprovalRequirer interface {
+	ApprovalRequired(ctx context.Context, args json.RawMessage) bool
+}
+```
+
+`GenerateText`/`StreamText` check every tool call's underlying `Tool` for
+this interface — a plain `ai.NewTool`-built tool (never wrapped in
+`RequireApproval`) never implements it, so it's never gated. This also
+means the interface works for any `ai.Tool`, including ones adapted from an
+MCP server — wrap the adapted tool the same way.
+
+### Decision order: Approvals, then ApproveToolCall, then pending
+
+For each call whose tool reports `ApprovalRequired() == true`, a decision is
+resolved in this order:
+
+1. **`GenerateTextOpts.Approvals`** — checked first, matched by
+   `ToolCallID`. Supplies out-of-band decisions, typically from a resumed
+   call (see [Resumable flow](#resumable-flow-suspend-then-resume) below),
+   but also consulted for approval-needing calls arising later in the same
+   run.
+2. **`GenerateTextOpts.ApproveToolCall`** — called only if `Approvals` had
+   no matching decision. Signature:
+   `func(ctx context.Context, req ai.ApprovalRequest) (ai.ApprovalDecision, bool)`.
+   Return `(decision, true)` to decide inline; `(_, false)` to leave it
+   pending.
+3. **Pending** — if neither source produces a decision, the call is left
+   undecided, which suspends the whole batch (see below).
+
+```go
+type ApprovalRequest struct {
+	StepIndex int
+	Call      ToolCallRecord
+}
+
+type ApprovalDecision struct {
+	ToolCallID string
+	Approved   bool
+	Reason     string // included in the denial tool result sent to the model
+}
+```
+
+### Batch atomicity
+
+If a step's tool-call batch has ANY call still undecided after checking
+`Approvals` then `ApproveToolCall`, **no call in that batch executes** —
+not the undecided one, and not any other call in the same batch that needed
+no approval or was already decided. The whole batch suspends together; see
+[Suspension result shape](#suspension-result-shape) below.
+
+### Denial: ToolApprovalDeniedError as an IsError tool result
+
+A denied call (an `ApprovalDecision{Approved: false}`) never reaches
+`Execute` — instead, `*ai.ToolApprovalDeniedError` is recorded on that
+call's `ToolResultRecord.Err`, and the model receives a
+`provider.ToolResultPart` with `IsError: true` whose text is the error's
+message:
+
+```
+ai: tool "delete_record" execution denied: not allowed
+```
+
+(`Reason` is omitted from the message when empty: `ai: tool "delete_record" execution denied`.)
+This is the same `IsError` convention every other tool-execution error uses
+— see [The IsError result convention](#the-iserror-result-convention) above
+— so a denial looks like any other tool failure to the model, which can
+explain the situation to the user or try something else.
+
+### Inline flow: ApproveToolCall decides synchronously
+
+The simplest flow never suspends at all — `ApproveToolCall` answers every
+approval-needing call as it's encountered:
+
+```go
+result, err := ai.GenerateText(ctx, ai.GenerateTextOpts{
+	Model:  model,
+	Prompt: "Delete the record for user 42.",
+	Tools:  []ai.Tool{guardedDelete},
+	MaxSteps: 2,
+	ApproveToolCall: func(ctx context.Context, req ai.ApprovalRequest) (ai.ApprovalDecision, bool) {
+		approved := policyAllows(req.Call) // your own logic, e.g. a UI prompt or policy check
+		return ai.ApprovalDecision{ToolCallID: req.Call.ID, Approved: approved}, true
+	},
+})
+```
+
+### Suspension result shape
+
+When a batch suspends, `*ai.GenerateTextResult` (or `TextStream`, for
+`StreamText`) reports:
+
+- **`PendingApprovals`** (`[]ai.ApprovalRequest`) — one entry per
+  approval-needing call left undecided, in call order.
+- **`Messages`** — ends with the assistant message carrying the suspended
+  tool-call batch. This is a complete, round-trippable transcript: resend
+  it as `Messages` on the next call (with `Approvals` set) to resume — no
+  provider's wire format is left with a dangling unanswered tool call in
+  the interim, because nothing was sent to the model yet for this batch.
+- **`FinishReason`** is `provider.FinishToolCalls` — the step's real finish
+  reason, not an error sentinel.
+- Not an error: suspension returns `err == nil`, and `OnFinish` still fires
+  (with `PendingApprovals` populated) — see
+  [Generating text § Approvals, PendingApprovals, and resume](generating-text.md#approvals-pendingapprovals-and-resume).
+
+### Resumable flow: suspend, then resume
+
+```go
+// First call: no Approvals/ApproveToolCall configured for this batch, so
+// the call needing approval suspends.
+result, err := ai.GenerateText(ctx, ai.GenerateTextOpts{
+	Model:    model,
+	Prompt:   "Delete the record for user 42.",
+	Tools:    []ai.Tool{guardedDelete},
+	MaxSteps: 2,
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+if len(result.PendingApprovals) > 0 {
+	fmt.Println("awaiting approval for:", result.PendingApprovals[0].Call.Name)
+
+	// ... later, once a human/policy decision is available ...
+
+	resumed, err := ai.GenerateText(ctx, ai.GenerateTextOpts{
+		Model:    model,
+		Messages: result.Messages, // ends in the unanswered tool-call batch
+		Tools:    []ai.Tool{guardedDelete},
+		MaxSteps: 2,
+		Approvals: []ai.ApprovalDecision{
+			{ToolCallID: result.PendingApprovals[0].Call.ID, Approved: true},
+		},
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(resumed.Text)
+}
+```
+
+Resuming and suspending again immediately (no decision supplied for the
+same call twice in a row) returns an empty `Steps` and the same
+`FinishReason`/`Messages` as before, without ever calling the model — see
+[Generating text § Resume-from-Messages is its own capability](generating-text.md#resume-from-messages-is-its-own-capability)
+for why this "resume detection" is more general than approvals alone.
+
+**Approvals do not apply to the `Output` tool-mode fallback's synthetic
+call.** When `GenerateTextOpts.Output` is set and the model has no native
+JSON mode, `GenerateText` forces a single injected output-schema tool call
+that it decodes directly — that call is never checked against
+`ApprovalRequirer`, `Approvals`, or `ApproveToolCall`, even if one of your
+own tools happens to share a name with the injected one (it doesn't; the
+injected tool's name is chosen internally). See
+[Generating text § Output modes](generating-text.md#output-modes).
+
+## RuntimeContext
+
+`ai.RuntimeContext` (a `map[string]any`) is an arbitrary bag of application
+values made available to tools during execution — request-scoped state
+(a user ID, a database transaction, a request-tracing ID) that a
+`Tool.Execute` function needs but shouldn't have to be threaded through
+`Args`.
+
+```go
+opts := ai.GenerateTextOpts{
+	Model:  model,
+	Prompt: "Look up my account balance.",
+	Tools:  []ai.Tool{balanceTool},
+	RuntimeContext: ai.RuntimeContext{
+		"userID": "u_42",
+	},
+}
+
+balanceTool := ai.NewTool("get_balance", "Get the current user's account balance",
+	func(ctx context.Context, args struct{}) (any, error) {
+		rc := ai.RuntimeContextFrom(ctx)
+		userID, _ := rc["userID"].(string)
+		return db.Balance(userID)
+	})
+```
+
+Set `GenerateTextOpts.RuntimeContext` to have it installed on the `ctx`
+passed to `Tool.Execute` for the run — retrieve it inside a tool (or an
+`ApprovalRequirer.ApprovalRequired`, or an `ApproveToolCall` callback, both
+of which receive the same `ctx`) with `ai.RuntimeContextFrom(ctx)`. It is
+installed **once**, before the tool loop begins (both `GenerateText` and
+`StreamText`), so every step and every resumed batch inside one call sees
+the identical value. `RuntimeContextFrom` returns `nil` when no
+`RuntimeContext` was configured, or when `ctx` is unrelated to any
+`GenerateText`/`StreamText` call.
+
+`RuntimeContextFrom` is unexported-key-backed, so the only way to read it
+is through the accessor — nothing outside package `ai` (or code holding the
+right `ctx`) can install a spoofed value.
+
 ## Tools from MCP servers
 
 An [MCP](../mcp.md) server's tools can be adapted into `ai.Tool`s and passed
@@ -207,6 +438,17 @@ into `Tools` the same way as any hand-written tool — see the
 
 - [`ai/tool.go`](../../ai/tool.go)
 - [`ai/tool_result_content.go`](../../ai/tool_result_content.go) (`ToolResultContent`)
-- [`ai/generate_text.go`](../../ai/generate_text.go) (tool loop, `runToolCalls`)
-- [`ai/errors.go`](../../ai/errors.go)
+- [`ai/generate_text.go`](../../ai/generate_text.go) (tool loop, `runToolCalls`,
+  `runApprovalAwareToolCalls`)
+- [`ai/approval.go`](../../ai/approval.go) (`ApprovalRequirer`,
+  `RequireApproval`, `ApprovalRequest`, `ApprovalDecision`)
+- [`ai/runtime_context.go`](../../ai/runtime_context.go) (`RuntimeContext`,
+  `RuntimeContextFrom`)
+- [`ai/errors.go`](../../ai/errors.go) (including `ToolApprovalDeniedError`)
 - [`internal/schema/schema.go`](../../internal/schema/schema.go)
+
+See also: [Generating text § Approvals, PendingApprovals, and resume](generating-text.md#approvals-pendingapprovals-and-resume)
+for the full opts/result field reference; [Streaming § Suspension in streams](streaming.md#suspension-in-streams)
+for `StreamText`'s suspension behavior; [Agents](agents.md) for
+`Agent.ApproveToolCall`/`RunOpts.Approvals` passthrough and
+`Agent.RuntimeContext` sub-agent scoping.

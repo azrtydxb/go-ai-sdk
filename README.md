@@ -99,6 +99,23 @@ in [`examples/`](examples/), each compiled by CI.
 - **Tool calling** — typed tools via `ai.NewTool[Args]` with a
   reflection-derived JSON Schema, `ActiveTools`, `RepairToolCall`, and a
   typed error taxonomy. See [Tools](docs/core/tools.md).
+- **Tool-execution approvals** — `ai.RequireApproval`/`ai.ApprovalRequirer`
+  gate a tool call on an inline decision (`ApproveToolCall`) or a
+  suspend-then-resume flow (`PendingApprovals`/`Approvals`), with denials
+  surfaced as a typed `*ai.ToolApprovalDeniedError` tool result. See
+  [Tools § Approvals for tool execution](docs/core/tools.md#approvals-for-tool-execution).
+- **RuntimeContext** — an arbitrary application-value bag
+  (`GenerateTextOpts.RuntimeContext`, `ai.RuntimeContextFrom(ctx)`) threaded
+  into every tool call, approval check, and inline approval decision for a
+  run. See [Tools § RuntimeContext](docs/core/tools.md#runtimecontext).
+- **Agents** — `agent.Agent` bundles a model, instructions, tools, and loop
+  options for repeated runs (`Generate`/`Stream`), and `agent.AsTool`
+  exposes one agent as a tool for another to delegate to. See
+  [Agents](docs/core/agents.md).
+- **Code Mode** — `codemode.Tool` wraps a set of tools into a single
+  `run_code` tool the model writes short programs against, executed by a
+  caller-supplied `Sandbox` (the SDK ships no runtime). See
+  [Code Mode](docs/core/code-mode.md).
 - **Structured output** — `ai.GenerateObject[T]`/`ai.StreamObject[T]`,
   native-JSON where a provider supports it and forced-tool-call mode
   otherwise. See [Structured output](docs/core/structured-output.md).
@@ -152,6 +169,7 @@ in [`examples/`](examples/), each compiled by CI.
 - **Core guides**: [Generating text](docs/core/generating-text.md) ·
   [Tools](docs/core/tools.md) ·
   [Structured output](docs/core/structured-output.md) ·
+  [Agents](docs/core/agents.md) · [Code Mode](docs/core/code-mode.md) ·
   [Embeddings](docs/core/embeddings.md) · [Media](docs/core/media.md) ·
   [Streaming](docs/core/streaming.md) · [Reasoning](docs/core/reasoning.md) ·
   [Middleware and registry](docs/core/middleware-and-registry.md) ·

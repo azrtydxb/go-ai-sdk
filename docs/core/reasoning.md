@@ -69,7 +69,12 @@ Reasoning: &provider.ReasoningConfig{
 
 For the three token-budget providers (Anthropic, geminicompat, Bedrock),
 `Effort` is resolved to an explicit budget via the exported
-`provider.EffortBudgetTokens` table:
+`provider.EffortBudgetTokens` table. The full resolution (`BudgetTokens` if
+set, else `EffortBudgetTokens(Effort)`) is itself a shared, exported helper,
+`provider.ResolveBudgetTokens(cfg *ReasoningConfig) (n int, ok bool)` — all
+three wire packages call it instead of each keeping its own private copy.
+The resolution logic and per-provider mapping below are unchanged by that
+consolidation.
 
 | `Effort` | Budget tokens |
 |---|---|
@@ -250,12 +255,12 @@ unresolved prefix carries over between feeds.
 ## Source of truth
 
 - [`provider/call.go`](../../provider/call.go) (`Call.Reasoning`,
-  `ReasoningConfig`, `EffortBudgetTokens`)
+  `ReasoningConfig`, `EffortBudgetTokens`, `ResolveBudgetTokens`)
 - [`ai/options.go`](../../ai/options.go) (`GenerateTextOpts.Reasoning`)
 - [`internal/openaicompat/wire.go`](../../internal/openaicompat/wire.go)
   (`reasoning_effort`)
 - [`providers/anthropic/wire.go`](../../providers/anthropic/wire.go)
-  (`wireThinking`, `resolveBudgetTokens`)
+  (`wireThinking`, calls `provider.ResolveBudgetTokens`)
 - [`internal/geminicompat/wire.go`](../../internal/geminicompat/wire.go)
   (`wireThinkingConfig`)
 - [`providers/bedrock/wire.go`](../../providers/bedrock/wire.go)

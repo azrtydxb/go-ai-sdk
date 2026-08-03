@@ -15,11 +15,13 @@ exists — the SDK's public API is implemented and documented end-to-end (see
 ## Core guides
 
 - [Generating text](core/generating-text.md) — `GenerateText`, the multi-step tool loop, conversation continuation
-- [Tools](core/tools.md) — `NewTool`, schema derivation, error taxonomy, `RepairToolCall`
+- [Tools](core/tools.md) — `NewTool`, schema derivation, error taxonomy, `RepairToolCall`, approvals, `RuntimeContext`
 - [Structured output](core/structured-output.md) — `GenerateObject` / `StreamObject`, native-JSON vs tool-mode
+- [Agents](core/agents.md) — `agent.Agent`, `RunOpts`, `AsTool` sub-agent delegation
+- [Code Mode](core/code-mode.md) — `codemode.Tool`, the `Sandbox` contract, `APIDoc`
 - [Embeddings](core/embeddings.md) — `Embed` / `EmbedMany`, batching, similarity
 - [Media](core/media.md) — image, speech, and transcription generation
-- [Streaming](core/streaming.md) — `StreamPart` reference, `SmoothStream`, iterator semantics
+- [Streaming](core/streaming.md) — `StreamPart` reference, `SmoothStream`, iterator semantics, suspension in streams
 - [Reasoning](core/reasoning.md) — thinking/reasoning content across providers
 - [Middleware and registry](core/middleware-and-registry.md) — `WrapModel`, built-in middlewares, `Registry`
 - [Provider options](core/provider-options.md) — the raw-wire-key escape hatch, `ProviderMetadata`

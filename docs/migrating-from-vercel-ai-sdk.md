@@ -22,7 +22,7 @@ page.
 parity (ai-sdk.dev, snapshot 2026-08-03) is in progress, tracked wave by
 wave in the
 [v6 parity roadmap](superpowers/plans/2026-08-03-v6-parity-roadmap.md). This
-table is the feature-by-feature status as of the current wave (10):
+table is the feature-by-feature status as of the current wave (11):
 
 | AI SDK 6 feature | Status |
 |---|---|
@@ -38,9 +38,10 @@ table is the feature-by-feature status as of the current wave (10):
 | Reranking (`rerank`, `RerankingModel`, Cohere/Voyage/Mixedbread) | **Shipped for Cohere** — `ai.Rerank`, `provider.RerankingModel`, `Registry.RerankingModel`; see [Embeddings § Reranking](core/embeddings.md#reranking). Voyage and Mixedbread are planned alongside their providers in wave 13 (the roadmap lists them here too, but wave 13 governs since those provider packages don't exist yet). |
 | Unified `reasoning` option (effort/budget, per-provider mapping) | **Shipped** — `GenerateTextOpts.Reasoning`/`provider.ReasoningConfig{Effort, BudgetTokens}`, mapped to `reasoning_effort` (openaicompat), a resolved token budget via `provider.EffortBudgetTokens` (Anthropic, Google/Vertex AI, Bedrock), or ignored (Cohere, Mistral); see [Reasoning § Requesting reasoning](core/reasoning.md#requesting-reasoning-generatetextoptsreasoning). Unlike the roadmap's original framing, `ProviderOptions` still merges last and wins over `Reasoning` on a wire-key collision — the repo-wide `ProviderOptions` precedence convention was not special-cased for this option; see [Provider options § Reasoning is no exception](core/provider-options.md#reasoning-is-no-exception). |
 | Full lifecycle-callback event set (call-start/end, tool-execution start/end, embed/rerank events) | **Shipped** — `GenerateTextOpts.OnModelCallStart`/`OnModelCallEnd`, `OnToolExecutionStart`/`OnToolExecutionEnd` (see [Generating text § Lifecycle callbacks](core/generating-text.md#lifecycle-callbacks-model-call-and-tool-execution)); `EmbedOpts`/`EmbedManyOpts.OnEmbedStart`/`OnEmbedEnd` (see [Embeddings § Embed](core/embeddings.md#embed)); `RerankOpts.OnRerankStart`/`OnRerankEnd` (see [Embeddings § Reranking](core/embeddings.md#reranking)). Every End-callback's error is the SAME error the caller's function returns (retry exhaustion already translated to `*ai.RetryError`). |
-| Agents (`ToolLoopAgent` equivalent, agent-as-tool subagents) | Planned — wave 11. |
-| Tool-execution approvals (approval func, policy hook, resumable pending-approval flow) | Planned — wave 11. |
-| Sandbox interface / Code Mode | Planned — wave 11 (a `Sandbox` interface the caller implements, not a bundled code runtime). |
+| RuntimeContext / application context passed into tool execution | **Shipped** — `GenerateTextOpts.RuntimeContext` (an `ai.RuntimeContext` map), read inside a tool's `Execute` (and inside `ApprovalRequirer.ApprovalRequired`/`ApproveToolCall`) via `ai.RuntimeContextFrom(ctx)`. Installed once per run, before the tool loop begins, so every step and resumed batch sees the same value. See [Tools § RuntimeContext](core/tools.md#runtimecontext). |
+| Agents (`ToolLoopAgent` equivalent, agent-as-tool subagents) | **Shipped** — `agent.Agent` (`Generate`/`Stream`, `RunOpts`), `agent.AsTool` for agent-as-tool sub-agent delegation. Named plainly `Agent`, not `ToolLoopAgent` — see [Agents § Naming](core/agents.md#naming-toolloopagent-vs-agent). Contains no loop logic of its own; assembles a `GenerateTextOpts` and delegates entirely to `ai.GenerateText`/`ai.StreamText`. See [Agents](core/agents.md). |
+| Tool-execution approvals (approval func, policy hook, resumable pending-approval flow) | **Shipped** — `ai.RequireApproval`/`ai.ApprovalRequirer`, `GenerateTextOpts.ApproveToolCall`/`.Approvals`, `GenerateTextResult.PendingApprovals`. Decision order is `Approvals` then `ApproveToolCall` then pending; a pending call suspends its whole batch atomically; denial is recorded as `*ai.ToolApprovalDeniedError` on an `IsError` tool result, never raised. Vercel models a pending approval as a special message part surfaced to a UI stream; `go-ai-sdk` has no UI layer, so it models the same idea as a suspended result (`PendingApprovals`) plus `Approvals` on the resume call instead — see [Tools § Approvals for tool execution](core/tools.md#approvals-for-tool-execution). |
+| Sandbox interface / Code Mode | **Shipped** — `codemode.Tool(sandbox, tools, opts)` wraps a set of `ai.Tool`s into a single `run_code` tool; `codemode.Sandbox` is the interface the caller implements against their own runtime (subprocess, container, embedded interpreter) — the SDK ships no bundled code runtime, and security/isolation is entirely the sandbox implementer's responsibility. See [Code Mode](core/code-mode.md). |
 | Video generation (`GenerateVideo`) | Planned — wave 12. |
 | Realtime/streaming transcription and translation (`StreamTranscribe`, `StreamTranslate`, a minimal realtime voice session) | Planned — wave 12, over a stdlib WebSocket client — Vercel's WebRTC realtime transport is out of scope (see below). |
 | File/skill upload (`uploadFile`, `uploadSkill`) | Planned — wave 12. |
@@ -306,6 +307,10 @@ and known transport deviations are in [MCP § Limitations](mcp.md#limitations-v1
 - [`ai/tool_result_content.go`](../ai/tool_result_content.go),
   [`ai/middleware_json.go`](../ai/middleware_json.go) — multi-modal tool
   results and `ExtractJSONMiddleware`
+- [`ai/approval.go`](../ai/approval.go), [`ai/runtime_context.go`](../ai/runtime_context.go) —
+  tool-execution approvals and `RuntimeContext`
+- [`agent/`](../agent/) — `agent.Agent`, `agent.AsTool`
+- [`codemode/`](../codemode/) — `codemode.Tool`, the `Sandbox` contract, `APIDoc`
 - [`docs/core/`](core/) — the per-topic guides each divergence above is
   drawn from
 - [`docs/mcp.md`](mcp.md) — MCP client scope and transport deviations

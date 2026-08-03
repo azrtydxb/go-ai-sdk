@@ -513,6 +513,47 @@ result, err := ai.GenerateText(context.Background(), ai.GenerateTextOpts{
   (what was actually executed). Correlate the pair by call order within the
   step, not by `ID`, if `RepairToolCall` may rename calls.
 
+## Approvals, PendingApprovals, and resume
+
+`GenerateTextOpts.ApproveToolCall`/`.Approvals` and
+`GenerateTextResult.PendingApprovals` implement tool-execution approvals —
+see [Tools § Approvals for tool execution](tools.md#approvals-for-tool-execution)
+for the full walkthrough (decision order, batch atomicity, denial shape,
+a complete resume example). Summarized as an opts/result reference:
+
+- **`ApproveToolCall func(ctx context.Context, req ApprovalRequest) (ApprovalDecision, bool)`**
+  — decides approval-needing calls inline. Checked only after `Approvals`
+  has no matching decision for that call's `ToolCallID`.
+- **`Approvals []ApprovalDecision`** — out-of-band decisions, matched by
+  `ToolCallID`. Checked first, both against the resumed batch at the start
+  of `Messages` (see below) and against any approval-needing call arising
+  later in the same run.
+- **`PendingApprovals []ApprovalRequest`** (on the result) — non-empty when
+  the loop suspended because some call(s) needed approval and neither
+  `Approvals` nor `ApproveToolCall` produced a decision. Not an error:
+  `err == nil`, `OnFinish` still fires, `FinishReason` is the step's real
+  finish reason (`provider.FinishToolCalls`).
+
+### Resume-from-Messages is its own capability
+
+`Messages`, when its **last** message is an assistant message carrying tool
+calls (necessarily unanswered, since nothing follows it), is treated as a
+**resume**: both `GenerateText` and `StreamText` run that trailing batch
+first — through the same approval rules as any other batch — before making
+any model call, then proceed with the loop as usual. This resume-detection
+is new loop-entry behavior in its own right, independent of whether
+approvals are involved at all: **any** transcript that ends in an
+unanswered assistant tool-call batch becomes resumable this way, including
+one built up manually rather than returned from a suspended
+`GenerateText`/`StreamText` call.
+
+If that leading batch is *itself* still pending after resume (no decision
+available for some call in it), the run suspends again immediately —
+`Steps` is empty, `Messages` is unchanged, `FinishReason` is
+`provider.FinishToolCalls` — without ever calling the model. This is
+symmetric with a fresh (non-resumed) suspension in every way except that no
+new step is appended, since no new model call happened.
+
 ## Result anatomy
 
 `*GenerateTextResult` reflects the *last* step's text/tool calls/finish
@@ -588,9 +629,15 @@ error from the final attempt (`RetryError` also implements `Unwrap()`, so
 - [`ai/stream_text.go`](../../ai/stream_text.go)
 - [`ai/output.go`](../../ai/output.go) (`Output`, `OutputObject`/`OutputArray`/
   `OutputChoice`/`OutputJSON`, `OutputAs`)
+- [`ai/approval.go`](../../ai/approval.go), [`ai/runtime_context.go`](../../ai/runtime_context.go)
 - [`ai/errors.go`](../../ai/errors.go)
 - [`provider/message.go`](../../provider/message.go)
 
 See also: [Structured output](structured-output.md#generateobject-vs-output-modes)
 for `GenerateObject` vs `Output` modes; [Reasoning](reasoning.md) for the
-unified `Reasoning` call option.
+unified `Reasoning` call option; [Tools § Approvals for tool execution](tools.md#approvals-for-tool-execution)
+and [§ RuntimeContext](tools.md#runtimecontext) for the full approval/
+context-passing mechanics; [Streaming § Suspension in streams](streaming.md#suspension-in-streams)
+for how suspension surfaces in `StreamText`; [Agents](agents.md) and
+[Code Mode](code-mode.md) for two higher-level constructs built on top of
+this loop.

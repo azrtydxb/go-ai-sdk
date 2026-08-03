@@ -105,6 +105,60 @@ Valid once `Parts()` has been iterated (fully or partially):
   [Conversation continuation](generating-text.md#conversation-continuation)).
   Before any iteration, it's just the initial request messages.
 
+## Suspension in streams
+
+`StreamText` suspends the same way `GenerateText` does when a tool call
+needs approval and none is available — see
+[Tools § Approvals for tool execution](tools.md#approvals-for-tool-execution)
+for the full mechanics. Two entry points into that behavior:
+
+- **Suspending mid-stream:** if a step's tool-call batch has an
+  undecided approval-needing call, `TextStream` records that step (with no
+  `ToolResults`), fires `OnStepFinish`, and ends iteration — the same as a
+  natural end, not an error. `stream.Err()` is `nil`.
+- **Suspending immediately on resume:** if `Messages`'s trailing unanswered
+  tool-call batch (see [Generating text § Resume-from-Messages is its own capability](generating-text.md#resume-from-messages-is-its-own-capability))
+  is itself still pending, `StreamText` returns a `*TextStream` that has
+  never started a provider stream at all — `Parts()` yields zero parts,
+  and iterating it (even zero times) is enough to make the accessors
+  below valid.
+
+In both cases:
+
+- **`stream.PendingApprovals() []ai.ApprovalRequest`** reports the same
+  value `GenerateTextResult.PendingApprovals` would for the equivalent
+  `GenerateText` call — non-empty exactly when suspended.
+- **`OnFinish`** still fires (with a `*GenerateTextResult` whose
+  `PendingApprovals` is populated) — suspension is not an error, so it
+  goes through the same finish path as natural completion, not `OnError`/
+  `OnAbort`.
+- **`Steps()`** is empty for the immediate-resume-suspension case (no model
+  call ever happened), or ends with the tool-result-less suspended step for
+  the mid-stream case.
+- **`FinishReason()`** is `provider.FinishToolCalls` in both cases.
+- **`Messages()`** ends with the assistant message carrying the suspended
+  batch — round-trippable the same way as `GenerateTextResult.Messages`.
+
+```go
+stream, err := ai.StreamText(ctx, ai.GenerateTextOpts{
+	Model:  model,
+	Prompt: "Delete the record for user 42.",
+	Tools:  []ai.Tool{guardedDelete},
+	MaxSteps: 2,
+})
+if err != nil {
+	log.Fatal(err)
+}
+defer stream.Close()
+
+for range stream.Parts() {
+	// consume as usual; a suspending run ends iteration here with Err() == nil
+}
+if pending := stream.PendingApprovals(); len(pending) > 0 {
+	fmt.Println("awaiting approval for:", pending[0].Call.Name)
+}
+```
+
 ## SmoothStream
 
 `ai.SmoothStream(parts iter.Seq[provider.StreamPart], opts ai.SmoothOpts) iter.Seq[provider.StreamPart]`
@@ -160,7 +214,9 @@ former, `SmoothStream(stream.Parts(), ...)` for the latter.
 - [`provider/stream.go`](../../provider/stream.go)
 - [`ai/stream_text.go`](../../ai/stream_text.go)
 - [`ai/smooth.go`](../../ai/smooth.go)
+- [`ai/approval.go`](../../ai/approval.go), [`ai/runtime_context.go`](../../ai/runtime_context.go)
 
 See also: [Generating text](generating-text.md) for `StreamText`'s options
 and the tool loop; [Reasoning](reasoning.md) for how `ReasoningDelta`/
-`ReasoningEnd` map to signed/redacted content.
+`ReasoningEnd` map to signed/redacted content; [Tools § Approvals for tool execution](tools.md#approvals-for-tool-execution)
+for the full approval mechanics behind [Suspension in streams](#suspension-in-streams).
