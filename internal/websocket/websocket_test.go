@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -62,11 +63,17 @@ func writeRawHeaderOnly(conn net.Conn, opcode uint8, length uint64) error {
 
 // fakeConn is a minimal net.Conn test double for whitebox tests that need
 // to observe or control Write/Close/SetDeadline behavior directly, without
-// a real socket.
+// a real socket. Deadline calls are tracked per axis (SetDeadline touches
+// both) so tests can assert that a direction-scoped runWithContext call
+// only ever touches its own axis.
 type fakeConn struct {
-	writeErr      error
-	closed        bool
-	deadlineCalls []time.Time
+	writeErr error
+	closed   bool
+
+	mu                 sync.Mutex
+	deadlineCalls      []time.Time
+	readDeadlineCalls  []time.Time
+	writeDeadlineCalls []time.Time
 }
 
 func (f *fakeConn) Read(p []byte) (int, error)  { return 0, io.EOF }
@@ -75,11 +82,31 @@ func (f *fakeConn) Close() error                { f.closed = true; return nil }
 func (f *fakeConn) LocalAddr() net.Addr         { return nil }
 func (f *fakeConn) RemoteAddr() net.Addr        { return nil }
 func (f *fakeConn) SetDeadline(t time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.deadlineCalls = append(f.deadlineCalls, t)
 	return nil
 }
-func (f *fakeConn) SetReadDeadline(time.Time) error  { return nil }
-func (f *fakeConn) SetWriteDeadline(time.Time) error { return nil }
+func (f *fakeConn) SetReadDeadline(t time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.readDeadlineCalls = append(f.readDeadlineCalls, t)
+	return nil
+}
+func (f *fakeConn) SetWriteDeadline(t time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.writeDeadlineCalls = append(f.writeDeadlineCalls, t)
+	return nil
+}
+
+func (f *fakeConn) snapshot() (deadline, read, write []time.Time) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]time.Time(nil), f.deadlineCalls...),
+		append([]time.Time(nil), f.readDeadlineCalls...),
+		append([]time.Time(nil), f.writeDeadlineCalls...)
+}
 
 func TestDial_HandshakeSuccess(t *testing.T) {
 	l, wsURL := newTestServer(t)
@@ -753,7 +780,7 @@ func TestRunWithContext_AlreadyDoneButFnSucceeds_ResetsDeadline(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // already done before runWithContext is even called
 
-	err := runWithContext(ctx, fc, func() error {
+	err := runWithContext(ctx, fc, dirBoth, func() error {
 		// Give the watcher goroutine time to observe the already-done ctx
 		// and call SetDeadline before fn returns, deterministically
 		// reproducing "ctx fires while fn is in flight but fn succeeds".
@@ -764,17 +791,101 @@ func TestRunWithContext_AlreadyDoneButFnSucceeds_ResetsDeadline(t *testing.T) {
 		t.Fatalf("runWithContext returned %v, want nil (fn succeeded)", err)
 	}
 
-	if len(fc.deadlineCalls) < 2 {
-		t.Fatalf("expected at least 2 SetDeadline calls (poison + reset), got %d: %v", len(fc.deadlineCalls), fc.deadlineCalls)
+	deadlineCalls, _, _ := fc.snapshot()
+	if len(deadlineCalls) < 2 {
+		t.Fatalf("expected at least 2 SetDeadline calls (poison + reset), got %d: %v", len(deadlineCalls), deadlineCalls)
 	}
-	poisoned := fc.deadlineCalls[len(fc.deadlineCalls)-2]
-	reset := fc.deadlineCalls[len(fc.deadlineCalls)-1]
+	poisoned := deadlineCalls[len(deadlineCalls)-2]
+	reset := deadlineCalls[len(deadlineCalls)-1]
 	if !poisoned.Equal(time.Unix(0, 0)) {
 		t.Errorf("expected the watcher to have set a past deadline, got %v", poisoned)
 	}
 	if !reset.IsZero() {
 		t.Errorf("expected the deadline to be reset to the zero value since fn succeeded, got %v", reset)
 	}
+}
+
+// --- Fix wave IMPORTANT 1 — runWithContext must scope deadline touches to
+// one direction only, so a concurrent write's "succeeded despite ctx
+// firing" cleanup (SetDeadline(time.Time{})) can never erase a concurrent
+// read's poisoned deadline (or vice versa) on a full-duplex conn. Before
+// the fix, both poison and reset went through the conn-global SetDeadline,
+// so whichever call's cleanup ran last silently won — if that was an
+// unrelated write's benign-race reset, a read that was relying on its own
+// ctx-driven poison (e.g. because it's momentarily parked on writeMu for
+// an automatic pong while a concurrent Send holds it) would be left
+// blocked forever with no deadline and no watcher left to fix it.
+func TestRunWithContext_WriteSuccessCleanup_DoesNotEraseConcurrentReadPoison(t *testing.T) {
+	fc := &fakeConn{}
+
+	readCtx, readCancel := context.WithCancel(context.Background())
+	readFnEntered := make(chan struct{})
+	releaseReadFn := make(chan struct{})
+	readDone := make(chan error, 1)
+	go func() {
+		readDone <- runWithContext(readCtx, fc, dirRead, func() error {
+			close(readFnEntered)
+			<-releaseReadFn
+			// Simulate the read's blocked socket call finally noticing the
+			// (still-poisoned, in the fixed world) deadline and failing.
+			return errors.New("simulated: interrupted by deadline")
+		})
+	}()
+
+	// Let the read's fn actually start (it's "parked", analogous to being
+	// blocked on writeMu for an auto-pong) before cancelling its ctx.
+	<-readFnEntered
+	readCancel()
+	waitForCalls(t, func() int { _, reads, _ := fc.snapshot(); return len(reads) }, 1)
+
+	// Now a concurrent Write whose own ctx has *also* already fired, but
+	// whose underlying I/O nonetheless completes successfully — the
+	// documented benign race already covered in isolation by
+	// TestRunWithContext_AlreadyDoneButFnSucceeds_ResetsDeadline. The bug
+	// here is specifically about this write's cleanup crossing over onto
+	// the read's axis.
+	writeCtx, writeCancel := context.WithCancel(context.Background())
+	writeCancel()
+	if err := runWithContext(writeCtx, fc, dirWrite, func() error {
+		// Give the watcher goroutine time to observe the already-done ctx
+		// before fn returns, deterministically reproducing "ctx fires
+		// while fn is in flight but fn succeeds" (same technique as
+		// TestRunWithContext_AlreadyDoneButFnSucceeds_ResetsDeadline).
+		time.Sleep(20 * time.Millisecond)
+		return nil // "succeeded despite ctx firing"
+	}); err != nil {
+		t.Fatalf("write runWithContext = %v, want nil (fn succeeded)", err)
+	}
+
+	// Let the parked read fn finish and observe the overall result.
+	close(releaseReadFn)
+	if err := <-readDone; !errors.Is(err, context.Canceled) {
+		t.Fatalf("read runWithContext = %v, want context.Canceled", err)
+	}
+
+	_, readCalls, writeCalls := fc.snapshot()
+	if len(readCalls) != 1 || !readCalls[0].Equal(time.Unix(0, 0)) {
+		t.Fatalf("read deadline calls = %v, want exactly one poison (past); the write's cleanup must not have touched it", readCalls)
+	}
+	if len(writeCalls) == 0 || !writeCalls[len(writeCalls)-1].IsZero() {
+		t.Fatalf("write deadline calls = %v, want to end with a reset (zero value)", writeCalls)
+	}
+}
+
+// waitForCalls polls get() until it returns >= want, failing the test if
+// that doesn't happen within a short bound (used to deterministically wait
+// for a background watcher goroutine to have run, without a hangable
+// unconditional wait).
+func waitForCalls(t *testing.T, get func() int, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if get() >= want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %d call(s), got %d", want, get())
 }
 
 // --- Review round: IMPORTANT 1 — a protocolErr from readFrameHeader must abort (1002 + close socket) ---
@@ -894,6 +1005,50 @@ func TestServerInitiatedClose_EmptyPayloadEchoedEmpty(t *testing.T) {
 	}
 
 	conn.Close(CloseNormal, "")
+}
+
+// --- Fix wave MINOR 4 — a close frame with exactly a 1-byte payload is not
+// a valid RFC 6455 §7.4.1 encoding (0 bytes, or >=2 bytes for a status
+// code) and must abort with 1002 rather than being echoed back. ---
+
+func TestServerInitiatedClose_OneBytePayloadAborts(t *testing.T) {
+	l, wsURL := newTestServer(t)
+	resultCh := make(chan closeInfo, 1)
+	go func() {
+		conn, err := websockettest.Accept(l)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		websockettest.WriteFrame(conn, true, websockettest.OpClose, []byte{0x03})
+
+		op, payload, err := websockettest.ReadMessage(conn)
+		if err == nil && op == websockettest.OpClose && len(payload) >= 2 {
+			resultCh <- closeInfo{code: int(binary.BigEndian.Uint16(payload[:2]))}
+		} else {
+			resultCh <- closeInfo{code: -1}
+		}
+	}()
+
+	ctx := dialCtx(t)
+	conn, err := Dial(ctx, wsURL, DialOptions{})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer conn.Close(CloseNormal, "")
+
+	if _, _, err := conn.Read(ctx); err == nil {
+		t.Fatal("expected an error for the 1-byte close payload")
+	}
+
+	select {
+	case info := <-resultCh:
+		if info.code != CloseProtocolError {
+			t.Errorf("server observed close code = %d, want %d (never echoed)", info.code, CloseProtocolError)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the 1002 abort")
+	}
 }
 
 // --- Review round: MINOR (b) — a failed automatic pong write must shut down the conn ---

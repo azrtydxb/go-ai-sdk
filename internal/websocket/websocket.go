@@ -174,7 +174,7 @@ func Dial(ctx context.Context, wsURL string, opts DialOptions) (*Conn, error) {
 	}
 
 	var result *Conn
-	err = runWithContext(ctx, conn, func() error {
+	err = runWithContext(ctx, conn, dirBoth, func() error {
 		c, herr := handshake(conn, u, opts.Header)
 		result = c
 		return herr
@@ -289,10 +289,39 @@ func computeAccept(key string) string {
 	return base64.StdEncoding.EncodeToString(h.Sum(nil))
 }
 
+// ioDirection tells runWithContext which half of a full-duplex conn a call
+// affects, so its deadline poisoning/reset touches only that axis.
+type ioDirection int
+
+const (
+	// dirRead scopes runWithContext to SetReadDeadline only (Conn.Read).
+	dirRead ioDirection = iota
+	// dirWrite scopes runWithContext to SetWriteDeadline only
+	// (WriteText/WriteBinary and the control frames sharing writeMu).
+	dirWrite
+	// dirBoth scopes runWithContext to SetDeadline (both halves) — used
+	// only by the handshake, which both writes the upgrade request and
+	// reads the response over the same still-shared conn before Read/Write
+	// have split responsibility for their own deadlines.
+	dirBoth
+)
+
+// setDeadline applies t to conn, scoped to dir.
+func setDeadline(conn net.Conn, dir ioDirection, t time.Time) {
+	switch dir {
+	case dirRead:
+		_ = conn.SetReadDeadline(t)
+	case dirWrite:
+		_ = conn.SetWriteDeadline(t)
+	default:
+		_ = conn.SetDeadline(t)
+	}
+}
+
 // runWithContext runs fn, arranging for a blocked conn I/O call inside fn
-// to be interrupted (via SetDeadline) if ctx is done before fn returns. If
-// ctx has no deadline/cancellation (e.g. context.Background()), fn runs
-// with no extra overhead.
+// to be interrupted (via a deadline scoped to dir) if ctx is done before fn
+// returns. If ctx has no deadline/cancellation (e.g. context.Background()),
+// fn runs with no extra overhead.
 //
 // runWithContext always waits for the watcher goroutine to fully finish
 // touching conn's deadline before returning — this closes a race where a
@@ -304,18 +333,24 @@ func computeAccept(key string) string {
 //
 // If fn failed because the watcher's deadline actually interrupted it,
 // the returned error is ctx.Err() and, per Read/Write's documented
-// contract, the connection is left unusable (deadline still in the past).
-// If the watcher fired but fn nonetheless succeeded (a benign race between
-// the ctx deadline and the underlying I/O completing), the deadline is
-// reset so the connection remains usable — ctx cancellation must not fail
-// an operation that actually completed.
+// contract, the connection is left unusable (deadline still in the past)
+// for that direction. If the watcher fired but fn nonetheless succeeded (a
+// benign race between the ctx deadline and the underlying I/O completing),
+// the deadline is reset so the connection remains usable — ctx
+// cancellation must not fail an operation that actually completed.
 //
-// Because SetDeadline affects both halves of a full-duplex conn, a Read
-// cancelled by ctx can transiently surface a deadline-exceeded error to a
-// concurrent in-flight Write on the same Conn (and vice versa); callers
-// relying on one-reader/one-writer concurrency should treat any such
-// error the same as "the connection is now unusable".
-func runWithContext(ctx context.Context, conn net.Conn, fn func() error) error {
+// dir scopes every deadline touch (poison and reset) to one half of the
+// full-duplex conn: dirRead only ever calls SetReadDeadline, dirWrite only
+// ever calls SetWriteDeadline. This matters because a plain SetDeadline is
+// conn-global — without this scoping, a concurrent Read and Write on the
+// same Conn (an explicitly supported usage pattern) could otherwise have
+// one call's cleanup silently erase the deadline the other call's watcher
+// had just set to interrupt it, leaving that other call blocked forever
+// with no deadline and no watcher left to fix it. dirBoth preserves the
+// old conn-global behavior for call sites (the handshake) that
+// legitimately both read and write before Read/Write's own per-direction
+// contracts apply.
+func runWithContext(ctx context.Context, conn net.Conn, dir ioDirection, fn func() error) error {
 	if ctx.Done() == nil {
 		return fn()
 	}
@@ -328,7 +363,7 @@ func runWithContext(ctx context.Context, conn net.Conn, fn func() error) error {
 		select {
 		case <-ctx.Done():
 			interrupted.Store(true)
-			_ = conn.SetDeadline(time.Unix(0, 0))
+			setDeadline(conn, dir, time.Unix(0, 0))
 		case <-stop:
 		}
 	}()
@@ -341,7 +376,7 @@ func runWithContext(ctx context.Context, conn net.Conn, fn func() error) error {
 		if err == nil {
 			// fn completed despite the ctx firing; don't leave a stale
 			// past deadline on an otherwise-healthy connection.
-			_ = conn.SetDeadline(time.Time{})
+			setDeadline(conn, dir, time.Time{})
 		} else {
 			return ctx.Err()
 		}
@@ -355,7 +390,7 @@ func runWithContext(ctx context.Context, conn net.Conn, fn func() error) error {
 // returns *CloseError. ctx cancels a blocked read (the connection is then
 // unusable). Read must only be called from one goroutine.
 func (c *Conn) Read(ctx context.Context) (messageType int, data []byte, err error) {
-	err = runWithContext(ctx, c.conn, func() error {
+	err = runWithContext(ctx, c.conn, dirRead, func() error {
 		mt, d, rerr := c.readMessage()
 		messageType, data = mt, d
 		return rerr
@@ -396,6 +431,14 @@ func (c *Conn) readMessage() (int, []byte, error) {
 			case opPong:
 				// ignored
 			case opClose:
+				if len(payload) == 1 {
+					// RFC 6455 §7.4.1: a close payload carries either no
+					// status code (0 bytes) or a 2-byte code plus optional
+					// reason (>=2 bytes) — exactly 1 byte is not a valid
+					// encoding of either. Abort rather than echo it back.
+					c.abort(CloseProtocolError, "invalid close frame payload length")
+					return 0, nil, errors.New("websocket: invalid close frame payload length (1 byte)")
+				}
 				code, reason := parseClosePayload(payload)
 				c.closeFrameOnce.Do(func() {
 					// Echo back exactly what the peer sent. In particular,
@@ -573,7 +616,7 @@ func (c *Conn) WriteBinary(ctx context.Context, data []byte) error {
 }
 
 func (c *Conn) writeMessage(ctx context.Context, opcode uint8, data []byte) error {
-	return runWithContext(ctx, c.conn, func() error {
+	return runWithContext(ctx, c.conn, dirWrite, func() error {
 		key, err := newMaskKey()
 		if err != nil {
 			return err
@@ -587,6 +630,9 @@ func (c *Conn) writeMessage(ctx context.Context, opcode uint8, data []byte) erro
 // Close sends a close frame with the given code and reason (best effort),
 // then closes the underlying connection. Idempotent, and safe to call
 // concurrently with a blocked Read (which will then return an error).
+// Close blocks behind an in-flight write (writeMu) — if a write may be
+// stuck (e.g. a slow or unresponsive peer), use a per-call ctx deadline on
+// writes rather than relying on Close to return promptly.
 func (c *Conn) Close(code int, reason string) error {
 	c.closeFrameOnce.Do(func() {
 		_ = c.writeControl(opClose, closePayload(code, reason))
