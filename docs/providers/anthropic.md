@@ -13,7 +13,7 @@ p := anthropic.New(
 	anthropic.WithHTTPClient(http.DefaultClient),
 )
 
-model := p.Model("claude-sonnet-4-20250514")
+model := p.Model("claude-sonnet-5")
 ```
 
 Every request is sent with two headers, not an `Authorization: Bearer`
@@ -81,7 +81,7 @@ Enabled per call via `ProviderOptions`, not a typed field — set
 
 ```go
 result, err := ai.GenerateText(context.Background(), ai.GenerateTextOpts{
-	Model:  p.Model("claude-sonnet-4-20250514"),
+	Model:  p.Model("claude-sonnet-5"),
 	Prompt: "What is 17 * 24? Think it through.",
 	ProviderOptions: map[string]any{
 		"anthropic": map[string]any{
@@ -109,7 +109,7 @@ not otherwise exposed by the SDK (`top_k`) passes straight through:
 
 ```go
 result, err := ai.GenerateText(context.Background(), ai.GenerateTextOpts{
-	Model:  p.Model("claude-sonnet-4-20250514"),
+	Model:  p.Model("claude-sonnet-5"),
 	Prompt: "Explain the Go scheduler in one sentence.",
 	ProviderOptions: map[string]any{
 		"anthropic": map[string]any{

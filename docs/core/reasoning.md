@@ -30,7 +30,7 @@ not a typed option — set `ProviderOptions["anthropic"]["thinking"]` to
 
 ```go
 result, err := ai.GenerateText(context.Background(), ai.GenerateTextOpts{
-	Model:  anthropic.New().Model("claude-sonnet-4-20250514"),
+	Model:  anthropic.New().Model("claude-sonnet-5"),
 	Prompt: "What is 17 * 24? Think it through.",
 	ProviderOptions: map[string]any{
 		"anthropic": map[string]any{

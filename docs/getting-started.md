@@ -59,7 +59,7 @@ import (
 )
 
 func main() {
-	model := anthropic.New().Model("claude-sonnet-4-5")
+	model := anthropic.New().Model("claude-sonnet-5")
 
 	result, err := ai.GenerateText(context.Background(), ai.GenerateTextOpts{
 		Model:  model,
