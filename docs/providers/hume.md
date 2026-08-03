@@ -58,6 +58,39 @@ Auth is sent as the `X-Hume-Api-Key` header on every request.
 - **Error body shapes.** Hume's error responses use `{"message":"..."}` or
   a fallback `{"error":"..."}`; `errorMessage` in `providers/hume/hume.go`
   tries both before falling back to the raw body.
+- **`Voice` resolves against your CUSTOM voices by default.** Hume's wire
+  `voice.provider` field defaults to `CUSTOM_VOICE` when omitted, so a bare
+  `SpeechCall.Voice` looks up a voice you created, not one from Hume's
+  shared Voice Library. To resolve `Voice` as a Voice Library voice, set
+  `voice.provider` to `"HUME_AI"`. This SDK exposes a convenience key,
+  `ProviderOptions["hume"]["voice_provider"]`, for exactly that — set it to
+  `"HUME_AI"` and (when `Voice` is also non-empty) `extractVoiceProvider`
+  in `providers/hume/speech.go` adds `"provider": "HUME_AI"` inside
+  `utterances[0].voice` before the generic options merge runs:
+
+  ```go
+  _, err := ai.GenerateSpeech(context.Background(), ai.GenerateSpeechOpts{
+  	Model: speech,
+  	Text:  "hello",
+  	Voice: "some-library-voice-id",
+  	ProviderOptions: map[string]any{
+  		"hume": map[string]any{
+  			"voice_provider": "HUME_AI",
+  		},
+  	},
+  })
+  ```
+
+  `voice_provider` is a provider-local key consumed entirely by the SDK —
+  it's extracted from `ProviderOptions["hume"]` before the generic merge
+  and never appears as a top-level field in the wire request (there is no
+  such field in Hume's `/v0/tts` format); it's silently ignored if `Voice`
+  is empty, since `voice.provider` has no effect without a `voice.name` to
+  resolve. If you need finer control than a single voice/provider pair —
+  e.g. multiple utterances, or other `voice` sub-fields Hume supports —
+  override `utterances` wholesale via
+  `ProviderOptions["hume"]["utterances"]` instead, which the generic
+  top-level merge described below already supports.
 
 ## ProviderOptions
 
@@ -72,15 +105,19 @@ _, err := ai.GenerateSpeech(context.Background(), ai.GenerateSpeechOpts{
 	ProviderOptions: map[string]any{
 		"hume": map[string]any{
 			// passthrough key with no typed field
-			"num_generations": 2,
+			"split_utterances": false,
 		},
 	},
 })
 ```
 
-`ProviderOptions["hume"]` entries are merged top-level into the marshaled
-JSON request body, winning over whatever the SDK built
-(`applyProviderOptions` in `providers/hume/hume.go`).
+`ProviderOptions["hume"]` entries (other than the SDK-local
+`voice_provider` convenience key described above) are merged top-level
+into the marshaled JSON request body, winning over whatever the SDK built
+(`applyProviderOptions` in `providers/hume/hume.go`). Note that only
+`generations[0]` of Hume's response is ever decoded, so passthrough keys
+that request additional generations (e.g. `num_generations`) won't
+surface beyond the first one through this SDK.
 
 ## Source of truth
 

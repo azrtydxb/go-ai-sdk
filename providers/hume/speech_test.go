@@ -187,6 +187,83 @@ func TestGenerateSpeech_ProviderOptionsMerge(t *testing.T) {
 	}
 }
 
+func TestGenerateSpeech_VoiceProviderOption(t *testing.T) {
+	var raw map[string]any
+	encoded := base64.StdEncoding.EncodeToString([]byte("x"))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &raw)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(speechResponseWire{Generations: []generationWire{{Audio: encoded}}})
+	}))
+	defer srv.Close()
+
+	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
+	m := p.SpeechModel("some-model")
+
+	_, err := m.GenerateSpeech(context.Background(), provider.SpeechCall{
+		Text:  "hi",
+		Voice: "some-library-voice",
+		ProviderOptions: map[string]any{
+			"hume": map[string]any{"voice_provider": "HUME_AI"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("GenerateSpeech: %v", err)
+	}
+
+	utterances, ok := raw["utterances"].([]any)
+	if !ok || len(utterances) != 1 {
+		t.Fatalf("utterances = %v", raw["utterances"])
+	}
+	utt := utterances[0].(map[string]any)
+	voice, ok := utt["voice"].(map[string]any)
+	if !ok {
+		t.Fatalf("voice = %v, want object", utt["voice"])
+	}
+	if voice["name"] != "some-library-voice" {
+		t.Errorf("voice.name = %v", voice["name"])
+	}
+	if voice["provider"] != "HUME_AI" {
+		t.Errorf("voice.provider = %v, want HUME_AI", voice["provider"])
+	}
+	// voice_provider must not leak into the wire body as a top-level key.
+	if _, ok := raw["voice_provider"]; ok {
+		t.Errorf("voice_provider should not appear top-level, got %v", raw["voice_provider"])
+	}
+}
+
+func TestGenerateSpeech_VoiceProviderOptionIgnoredWithoutVoice(t *testing.T) {
+	var raw map[string]any
+	encoded := base64.StdEncoding.EncodeToString([]byte("x"))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &raw)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(speechResponseWire{Generations: []generationWire{{Audio: encoded}}})
+	}))
+	defer srv.Close()
+
+	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
+	m := p.SpeechModel("some-model")
+
+	_, err := m.GenerateSpeech(context.Background(), provider.SpeechCall{
+		Text: "hi",
+		ProviderOptions: map[string]any{
+			"hume": map[string]any{"voice_provider": "HUME_AI"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("GenerateSpeech: %v", err)
+	}
+
+	utterances := raw["utterances"].([]any)
+	utt := utterances[0].(map[string]any)
+	if _, ok := utt["voice"]; ok {
+		t.Errorf("voice should be omitted when call.Voice is empty, got %v", utt["voice"])
+	}
+}
+
 func TestMediaTypeForFormat(t *testing.T) {
 	tests := []struct {
 		in, want string
