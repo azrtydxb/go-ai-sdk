@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"testing"
 
@@ -788,5 +789,143 @@ func TestDefaultSettingsMiddleware_PerCallReasoningWins(t *testing.T) {
 	got := mock.Calls[0]
 	if got.Reasoning != callReasoning {
 		t.Errorf("Reasoning = %v, want per-call value %v (per-call should win)", got.Reasoning, callReasoning)
+	}
+}
+
+// ---------------------------------------------------------------------
+// AddToolInputExamplesMiddleware
+// ---------------------------------------------------------------------
+
+func TestAddToolInputExamplesMiddleware_AppendsAndClears(t *testing.T) {
+	mock := &aitest.MockModel{Responses: []*provider.Response{{}}}
+	wrapped := AddToolInputExamplesMiddleware(mock)
+
+	examples := []json.RawMessage{
+		json.RawMessage(`{"city":"Ghent"}`),
+		json.RawMessage(`{"city":"Paris"}`),
+	}
+	call := provider.Call{
+		Tools: []provider.ToolDef{
+			{
+				Name:          "get_weather",
+				Description:   "Get the weather for a city.",
+				Schema:        json.RawMessage(`{"type":"object"}`),
+				InputExamples: examples,
+			},
+			{
+				Name:        "no_examples_tool",
+				Description: "Has no examples.",
+				Schema:      json.RawMessage(`{"type":"object"}`),
+			},
+		},
+	}
+
+	_, err := wrapped.Generate(context.Background(), call)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mock.Calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+	}
+	got := mock.Calls[0]
+	if len(got.Tools) != 2 {
+		t.Fatalf("len(Tools) = %d, want 2", len(got.Tools))
+	}
+
+	wt := got.Tools[0]
+	if wt.InputExamples != nil {
+		t.Errorf("InputExamples = %v, want nil (cleared)", wt.InputExamples)
+	}
+	wantDesc := "Get the weather for a city.\n\nExample inputs:\n" +
+		`{"city":"Ghent"}` + "\n" + `{"city":"Paris"}`
+	if wt.Description != wantDesc {
+		t.Errorf("Description = %q, want %q", wt.Description, wantDesc)
+	}
+
+	// The tool with no examples is passed through unchanged.
+	nt := got.Tools[1]
+	if nt.Description != "Has no examples." {
+		t.Errorf("no_examples_tool Description = %q, want unchanged", nt.Description)
+	}
+	if nt.InputExamples != nil {
+		t.Errorf("no_examples_tool InputExamples = %v, want nil", nt.InputExamples)
+	}
+
+	// The caller's original Call/Tools must not have been mutated.
+	if call.Tools[0].InputExamples == nil {
+		t.Errorf("caller's original Tools[0].InputExamples was mutated (should be untouched)")
+	}
+	if call.Tools[0].Description != "Get the weather for a city." {
+		t.Errorf("caller's original Tools[0].Description was mutated: %q", call.Tools[0].Description)
+	}
+}
+
+func TestAddToolInputExamplesMiddleware_NoTools(t *testing.T) {
+	mock := &aitest.MockModel{Responses: []*provider.Response{{}}}
+	wrapped := AddToolInputExamplesMiddleware(mock)
+
+	_, err := wrapped.Generate(context.Background(), provider.Call{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := mock.Calls[0]; got.Tools != nil {
+		t.Errorf("Tools = %v, want nil", got.Tools)
+	}
+}
+
+func TestAddToolInputExamplesMiddleware_Stream(t *testing.T) {
+	mock := &aitest.MockModel{Streams: [][]provider.StreamPart{nil}}
+	wrapped := AddToolInputExamplesMiddleware(mock)
+
+	call := provider.Call{
+		Tools: []provider.ToolDef{
+			{
+				Name:          "t",
+				Description:   "d",
+				InputExamples: []json.RawMessage{json.RawMessage(`{"a":1}`)},
+			},
+		},
+	}
+	sr, err := wrapped.Stream(context.Background(), call)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	collectStreamParts(t, sr)
+
+	got := mock.Calls[0]
+	if got.Tools[0].InputExamples != nil {
+		t.Errorf("InputExamples = %v, want nil (cleared)", got.Tools[0].InputExamples)
+	}
+	if got.Tools[0].Description == "d" {
+		t.Errorf("Description was not updated with examples")
+	}
+}
+
+// TestAddToolInputExamplesMiddleware_Idempotent covers that running the
+// middleware's transform twice in a row (e.g. double-wrapped) produces the
+// same result as running it once, since InputExamples is cleared after the
+// first pass.
+func TestAddToolInputExamplesMiddleware_Idempotent(t *testing.T) {
+	mock := &aitest.MockModel{Responses: []*provider.Response{{}, {}}}
+	inner := AddToolInputExamplesMiddleware(mock)
+	outer := AddToolInputExamplesMiddleware(inner)
+
+	call := provider.Call{
+		Tools: []provider.ToolDef{
+			{
+				Name:          "t",
+				Description:   "d",
+				InputExamples: []json.RawMessage{json.RawMessage(`{"a":1}`)},
+			},
+		},
+	}
+	_, err := outer.Generate(context.Background(), call)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := mock.Calls[0]
+	wantDesc := "d\n\nExample inputs:\n" + `{"a":1}`
+	if got.Tools[0].Description != wantDesc {
+		t.Errorf("Description = %q, want %q (examples folded exactly once)", got.Tools[0].Description, wantDesc)
 	}
 }

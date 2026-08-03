@@ -660,6 +660,9 @@ func convertTools(tools []provider.ToolDef) []wireTool {
 			Name:        t.Name,
 			Description: t.Description,
 			InputSchema: wireInputSchema{JSON: t.Schema},
+			// Strict and InputExamples are unsupported on the wire (the
+			// Converse toolSpec format has no schema-strictness or
+			// example-inputs knob) — intentionally ignored.
 		}})
 	}
 	return out

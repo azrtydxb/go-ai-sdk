@@ -463,6 +463,10 @@ func convertTools(tools []provider.ToolDef) []wireFunctionDeclaration {
 			Name:        t.Name,
 			Description: t.Description,
 			Parameters:  stripAdditionalProperties(t.Schema),
+			// Strict and InputExamples are unsupported on the wire (the
+			// Gemini/Vertex function-declaration format has no
+			// schema-strictness or example-inputs knob) — intentionally
+			// ignored.
 		})
 	}
 	return out

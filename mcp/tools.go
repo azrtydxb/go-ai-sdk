@@ -42,6 +42,14 @@ func (t *mcpTool) Description() string { return t.def.Description }
 // Schema implements ai.Tool.
 func (t *mcpTool) Schema() json.RawMessage { return t.def.InputSchema }
 
+// Strict always returns false: MCP tool definitions have no strict-mode
+// concept.
+func (t *mcpTool) Strict() bool { return false }
+
+// InputExamples always returns nil: MCP tool definitions carry no example
+// inputs.
+func (t *mcpTool) InputExamples() []json.RawMessage { return nil }
+
 // Execute implements ai.Tool. args passes through as raw JSON, unmodified;
 // it is not unmarshaled here since the server owns the schema. Both
 // transport failures and a ToolResult with IsError=true are turned into an

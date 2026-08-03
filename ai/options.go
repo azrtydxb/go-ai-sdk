@@ -403,9 +403,11 @@ func buildCall(opts GenerateTextOpts) (provider.Call, error) {
 			continue
 		}
 		toolDefs = append(toolDefs, provider.ToolDef{
-			Name:        t.Name(),
-			Description: t.Description(),
-			Schema:      t.Schema(),
+			Name:          t.Name(),
+			Description:   t.Description(),
+			Schema:        t.Schema(),
+			Strict:        t.Strict(),
+			InputExamples: t.InputExamples(),
 		})
 	}
 

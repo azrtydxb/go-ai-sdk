@@ -363,6 +363,10 @@ func convertTools(tools []provider.ToolDef) []wireTool {
 				Name:        t.Name,
 				Description: t.Description,
 				Parameters:  t.Schema,
+				// Strict and InputExamples are unsupported on the wire
+				// (Cohere v2's tool-function format has no
+				// schema-strictness or example-inputs knob) —
+				// intentionally ignored.
 			},
 		})
 	}

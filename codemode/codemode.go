@@ -160,6 +160,14 @@ func (t *codeTool) Description() string { return t.description }
 // Schema implements ai.Tool.
 func (t *codeTool) Schema() json.RawMessage { return t.schema }
 
+// Strict implements ai.Tool. The generated run_code tool never requests
+// provider-enforced strict schema conformance.
+func (t *codeTool) Strict() bool { return false }
+
+// InputExamples implements ai.Tool. The generated run_code tool carries no
+// example inputs.
+func (t *codeTool) InputExamples() []json.RawMessage { return nil }
+
 // Execute implements ai.Tool. It decodes {"code": string}, runs it in the
 // sandbox with a CallTool binding that dispatches to the wrapped tools by
 // name, and returns the sandbox's Result rendered as a single string

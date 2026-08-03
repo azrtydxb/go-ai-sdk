@@ -54,3 +54,47 @@ func TestNewToolRejectsTrailingGarbage(t *testing.T) {
 		t.Fatalf("err = %v; want InvalidToolArgumentsError", err)
 	}
 }
+
+func TestNewToolDefaultsStrictAndInputExamplesAreZero(t *testing.T) {
+	tool := NewTool("t", "", func(_ context.Context, a weatherArgs) (any, error) { return nil, nil })
+	if tool.Strict() {
+		t.Errorf("Strict() = true, want false by default")
+	}
+	if tool.InputExamples() != nil {
+		t.Errorf("InputExamples() = %v, want nil by default", tool.InputExamples())
+	}
+}
+
+func TestNewToolWithToolStrict(t *testing.T) {
+	tool := NewTool("t", "", func(_ context.Context, a weatherArgs) (any, error) { return nil, nil },
+		WithToolStrict())
+	if !tool.Strict() {
+		t.Errorf("Strict() = false, want true")
+	}
+}
+
+func TestNewToolWithToolInputExamples(t *testing.T) {
+	tool := NewTool("t", "", func(_ context.Context, a weatherArgs) (any, error) { return nil, nil },
+		WithToolInputExamples(weatherArgs{City: "Ghent"}, weatherArgs{City: "Paris"}))
+	examples := tool.InputExamples()
+	if len(examples) != 2 {
+		t.Fatalf("len(InputExamples()) = %d, want 2", len(examples))
+	}
+	if !strings.Contains(string(examples[0]), `"Ghent"`) {
+		t.Errorf("examples[0] = %s, want it to contain Ghent", examples[0])
+	}
+	if !strings.Contains(string(examples[1]), `"Paris"`) {
+		t.Errorf("examples[1] = %s, want it to contain Paris", examples[1])
+	}
+}
+
+func TestNewToolWithBothOptions(t *testing.T) {
+	tool := NewTool("t", "", func(_ context.Context, a weatherArgs) (any, error) { return nil, nil },
+		WithToolStrict(), WithToolInputExamples(weatherArgs{City: "Ghent"}))
+	if !tool.Strict() {
+		t.Errorf("Strict() = false, want true")
+	}
+	if len(tool.InputExamples()) != 1 {
+		t.Errorf("len(InputExamples()) = %d, want 1", len(tool.InputExamples()))
+	}
+}

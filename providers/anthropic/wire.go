@@ -69,6 +69,9 @@ type wireTool struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	InputSchema json.RawMessage `json:"input_schema,omitempty"`
+	// InputExamples carries example argument payloads natively supported by
+	// Anthropic's tool object.
+	InputExamples []json.RawMessage `json:"input_examples,omitempty"`
 }
 
 type messagesRequest struct {
@@ -535,6 +538,9 @@ func convertTools(tools []provider.ToolDef) []wireTool {
 			Name:        t.Name,
 			Description: t.Description,
 			InputSchema: t.Schema,
+			// Strict is unsupported on the wire (Anthropic's tool object
+			// has no schema-strictness knob) — intentionally ignored.
+			InputExamples: t.InputExamples,
 		})
 	}
 	return out

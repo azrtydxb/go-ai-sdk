@@ -86,6 +86,13 @@ func (t *asToolTool) Description() string { return t.description }
 // Schema implements ai.Tool.
 func (t *asToolTool) Schema() json.RawMessage { return t.schema }
 
+// Strict implements ai.Tool. AsTool never requests provider-enforced strict
+// schema conformance.
+func (t *asToolTool) Strict() bool { return false }
+
+// InputExamples implements ai.Tool. AsTool carries no example inputs.
+func (t *asToolTool) InputExamples() []json.RawMessage { return nil }
+
 // Execute implements ai.Tool.
 func (t *asToolTool) Execute(ctx context.Context, args json.RawMessage) (any, error) {
 	var a asToolArgs

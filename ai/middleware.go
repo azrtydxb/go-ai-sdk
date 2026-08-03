@@ -10,6 +10,79 @@ import (
 )
 
 // ---------------------------------------------------------------------
+// AddToolInputExamplesMiddleware
+// ---------------------------------------------------------------------
+
+// AddToolInputExamplesMiddleware wraps model so that every outgoing Call's
+// tools have their InputExamples folded into their Description as text,
+// then cleared. For each tool with a non-empty InputExamples, it appends
+// "\n\nExample inputs:\n" followed by each example's compact JSON on its
+// own line to the tool's Description, then clears InputExamples so a
+// provider with native support for the field (e.g. Anthropic's
+// input_examples) doesn't also receive — and double-count — the same
+// examples via its wire field. This mirrors the AI SDK v6 middleware that
+// serializes examples into description text for providers without native
+// support.
+//
+// The wrapped Call's Tools is always a fresh slice; the caller's original
+// Tools slice (and its ToolDef values) are never mutated, so calling this
+// middleware repeatedly (or wrapping an already-wrapped model) is
+// idempotent per call — each invocation starts again from the original
+// Description plus the original InputExamples supplied by the caller.
+func AddToolInputExamplesMiddleware(model provider.LanguageModel) provider.LanguageModel {
+	return &addToolInputExamplesModel{model: model}
+}
+
+type addToolInputExamplesModel struct {
+	model provider.LanguageModel
+}
+
+func (m *addToolInputExamplesModel) ModelID() string      { return m.model.ModelID() }
+func (m *addToolInputExamplesModel) ProviderName() string { return m.model.ProviderName() }
+func (m *addToolInputExamplesModel) Capabilities() provider.Capabilities {
+	return m.model.Capabilities()
+}
+
+func (m *addToolInputExamplesModel) Generate(ctx context.Context, call provider.Call) (*provider.Response, error) {
+	return m.model.Generate(ctx, foldToolInputExamples(call))
+}
+
+func (m *addToolInputExamplesModel) Stream(ctx context.Context, call provider.Call) (provider.StreamResponse, error) {
+	return m.model.Stream(ctx, foldToolInputExamples(call))
+}
+
+// foldToolInputExamples returns a copy of call whose Tools slice has each
+// tool's InputExamples folded into its Description and cleared. Tools with
+// no InputExamples are copied through unchanged. call.Tools itself is never
+// mutated.
+func foldToolInputExamples(call provider.Call) provider.Call {
+	if len(call.Tools) == 0 {
+		return call
+	}
+	tools := make([]provider.ToolDef, len(call.Tools))
+	for i, t := range call.Tools {
+		if len(t.InputExamples) == 0 {
+			tools[i] = t
+			continue
+		}
+		var b strings.Builder
+		b.WriteString(t.Description)
+		b.WriteString("\n\nExample inputs:\n")
+		for j, ex := range t.InputExamples {
+			if j > 0 {
+				b.WriteString("\n")
+			}
+			b.Write(ex)
+		}
+		t.Description = b.String()
+		t.InputExamples = nil
+		tools[i] = t
+	}
+	call.Tools = tools
+	return call
+}
+
+// ---------------------------------------------------------------------
 // ExtractReasoningMiddleware
 // ---------------------------------------------------------------------
 

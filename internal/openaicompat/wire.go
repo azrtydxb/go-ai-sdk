@@ -58,6 +58,10 @@ type wireToolFunc struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	Parameters  json.RawMessage `json:"parameters,omitempty"`
+	// Strict requests OpenAI strict function calling (provider-enforced
+	// schema conformance). Omitted when false so tools that don't opt in
+	// don't send a spurious "strict":false.
+	Strict bool `json:"strict,omitempty"`
 }
 
 type wireToolChoiceObj struct {
@@ -529,8 +533,12 @@ func convertTools(tools []provider.ToolDef) []wireTool {
 				Name:        t.Name,
 				Description: t.Description,
 				Parameters:  t.Schema,
+				Strict:      t.Strict,
 			},
 		})
+		// InputExamples has no wire equivalent here; providers without
+		// native support rely on AddToolInputExamplesMiddleware (ai
+		// package) to fold examples into Description text instead.
 	}
 	return out
 }

@@ -6,6 +6,23 @@ type ToolDef struct {
 	Name        string
 	Description string
 	Schema      json.RawMessage // JSON Schema for args
+
+	// Strict requests provider-enforced schema conformance for the tool's
+	// arguments. Supported by openaicompat-based providers, which set
+	// "strict":true inside the function object (OpenAI strict function
+	// calling). Ignored (not sent, no error) by anthropic, geminicompat,
+	// bedrock, cohere, and mistral — those wire formats have no equivalent
+	// knob — see each provider's wire.go for the specific ignore comment.
+	Strict bool
+
+	// InputExamples carries example argument payloads for the tool, each a
+	// complete JSON object matching Schema. Supported natively only by
+	// anthropic, which sends it as the tool object's "input_examples"
+	// field. Every other provider's wire format has no equivalent field, so
+	// InputExamples is not serialized there directly; AddToolInputExamplesMiddleware
+	// (ai package) instead folds examples into the tool Description as text
+	// for providers without native support.
+	InputExamples []json.RawMessage
 }
 
 type ToolChoiceMode string
