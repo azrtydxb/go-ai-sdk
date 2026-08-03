@@ -92,22 +92,38 @@ in [`examples/`](examples/), each compiled by CI.
 
 - **Text generation** — `ai.GenerateText`/`ai.StreamText`, with an
   automatic multi-step tool-calling loop (`StopWhen`, `PrepareStep`,
-  `OnStepFinish`) and conversation continuation. See
-  [Generating text](docs/core/generating-text.md).
+  `OnStepFinish`) and conversation continuation. Lifecycle callbacks
+  (`OnModelCallStart`/`OnModelCallEnd`, `OnToolExecutionStart`/
+  `OnToolExecutionEnd`) bracket each underlying model request and tool
+  execution. See [Generating text](docs/core/generating-text.md).
 - **Tool calling** — typed tools via `ai.NewTool[Args]` with a
   reflection-derived JSON Schema, `ActiveTools`, `RepairToolCall`, and a
   typed error taxonomy. See [Tools](docs/core/tools.md).
 - **Structured output** — `ai.GenerateObject[T]`/`ai.StreamObject[T]`,
   native-JSON where a provider supports it and forced-tool-call mode
   otherwise. See [Structured output](docs/core/structured-output.md).
+- **Output modes on `GenerateText`** — `GenerateTextOpts.Output`
+  (`OutputObject[T]`, `OutputArray[T]`, `OutputChoice`, `OutputJSON`) decodes
+  a `GenerateText` call's final text into a typed value, extracted via
+  `ai.OutputAs[T]`, without a separate `GenerateObject` call
+  (`GenerateText`-only for now; `StreamText` returns a typed error if
+  `Output` is set). See
+  [Generating text § Output modes](docs/core/generating-text.md#output-modes).
 - **Streaming** — a `StreamPart` sequence (`iter.Seq`) covering text, tool
   calls, reasoning, and sources uniformly, plus `ai.SmoothStream` for
   steady-cadence UI rendering. See [Streaming](docs/core/streaming.md).
 - **Reasoning/thinking** — surfaced uniformly as `ReasoningPart`/
-  `ReasoningDelta`/`ReasoningEnd` across every provider that supports it.
-  See [Reasoning](docs/core/reasoning.md).
+  `ReasoningDelta`/`ReasoningEnd` across every provider that supports it,
+  and requestable uniformly too: `GenerateTextOpts.Reasoning` maps a single
+  `Effort`/`BudgetTokens` option onto each provider's native reasoning knob
+  (`reasoning_effort`, `thinking`, `thinkingConfig`, or
+  `additionalModelRequestFields.thinking`). See
+  [Reasoning](docs/core/reasoning.md).
 - **Embeddings** — `ai.Embed`/`ai.EmbedMany` with automatic batching and
   `ai.CosineSimilarity`. See [Embeddings](docs/core/embeddings.md).
+- **Reranking** — `ai.Rerank` ranks documents by relevance to a query via
+  `provider.RerankingModel` (Cohere this wave). See
+  [Embeddings § Reranking](docs/core/embeddings.md#reranking).
 - **Media** — image generation, speech synthesis, and transcription
   behind the same provider-agnostic pattern. See [Media](docs/core/media.md).
 - **Middleware and registry** — compose behavior onto any
@@ -162,6 +178,7 @@ All supported providers, by capability:
 | Tool calling | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `GenerateObject` / `StreamObject` | ✅ native | ✅ tool-mode | ✅ native | ✅ native | ✅ native | ✅ native | ✅ native | ✅ native | ✅ native | ✅ native | ✅ native | ✅ native | ✅ native | ✅ native | ✅ tool-mode⁴ |
 | `Embed` / `EmbedMany` | ✅ | — | ✅ | — | — | — | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `Rerank`⁵ | — | — | — | — | — | — | — | — | — | — | — | ✅ | — | — | — |
 
 **Structured output notes:**
 - "Native" means the provider supports schema-constrained JSON output directly via native JSON mode.
@@ -170,6 +187,7 @@ All supported providers, by capability:
 - ² Mistral: `GenerateObject` uses `json_object` mode only; schema is not sent on the wire but enforced by the core-side decode step.
 - ³ DeepSeek: `GenerateObject` uses `json_object` mode only (DeepSeek rejects `json_schema`); schema is not sent on the wire but enforced by the core-side decode step.
 - ⁴ Bedrock: the Converse API has no schema-constrained JSON response mode (`Capabilities().NativeJSON` is `false`); `GenerateObject` falls back to a forced tool call, same as Anthropic.
+- ⁵ `Rerank`: Cohere-only this wave (`ai.Rerank`, `provider.RerankingModel`); Voyage and Mixedbread are planned alongside their providers in a later wave. See [Embeddings § Reranking](docs/core/embeddings.md#reranking).
 
 Supported providers for media capabilities:
 

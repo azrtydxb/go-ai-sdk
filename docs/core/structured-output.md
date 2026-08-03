@@ -152,6 +152,33 @@ fmt.Println("final:", final.Name)
   abandonment). Calling `defer stream.Close()` right after `StreamObject`
   returns is always safe.
 
+## GenerateObject vs Output modes
+
+`ai.GenerateObject[T]`/`ai.StreamObject[T]` and `GenerateTextOpts.Output`
+(see [Generating text § Output modes](generating-text.md#output-modes)) both
+decode a model's response into a typed Go value using the native-JSON/
+tool-mode strategy above — they share the same fallback logic and the same
+`*ai.NoObjectGeneratedError` failure mode. Which to reach for:
+
+- **`GenerateObject[T]`/`StreamObject[T]`** — the call's *only* output is a
+  structured object; no text response, no tool calls of your own, and (with
+  `StreamObject`) you want incremental `Partials()` as the object accumulates.
+- **`GenerateTextOpts.Output`** — you're already using `GenerateText`
+  (possibly with your own `Tools` and a multi-step tool loop) and want the
+  *final* step's text decoded into a Go value at the end, without a second
+  call. It adds four shapes `GenerateObject` doesn't have on its own
+  (`OutputArray[T]`, `OutputChoice`, `OutputJSON`, and reusing whatever tool
+  loop already ran) — but `Output` is `GenerateText`-only: `StreamText`
+  returns `ai.ErrOutputWithStreamText` immediately if `Output` is set, so use
+  `StreamObject[T]` when you need streaming.
+
+Both fall back to a forced single tool call on the same condition
+(`Capabilities().NativeJSON == false`); `Output`'s tool-mode fallback
+additionally requires `GenerateTextOpts.Tools` to be empty, since the
+injected output tool and your own tools can't both be forced-or-offered on a
+model with no other way to constrain JSON output —
+`ai.ErrOutputRequiresJSONOrNoTools` otherwise.
+
 ## Source of truth
 
 - [`ai/generate_object.go`](../../ai/generate_object.go)

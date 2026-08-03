@@ -294,6 +294,182 @@ mid-stream error (a real provider failure, not caused by ctx) fires
 an error — `Err()` reports `nil` in that case, same as before `OnAbort`
 existed — so only `OnAbort` fires for it.
 
+## Output modes
+
+`GenerateTextOpts.Output` selects a structured-output mode for
+`GenerateText` — decode the model's final text straight into a Go value,
+without switching to `ai.GenerateObject[T]`. It's `GenerateText`-only:
+`StreamText` returns `ErrOutputWithStreamText` immediately when `Output` is
+set (partial-output streaming is future work — see
+[Migrating from the Vercel AI SDK](../migrating-from-vercel-ai-sdk.md)).
+
+Four constructors build an `Output`:
+
+- **`OutputObject[T]()`** — decode into a single `T`, schema derived the
+  same way `ai.GenerateObject[T]` does.
+- **`OutputArray[T]()`** — decode into a `[]T`. The requested schema wraps
+  the per-element schema in an object with a single `"elements"` array
+  property (most providers' schema-constrained JSON modes require a
+  top-level object, not a bare array) — this is transparent to you; `OutputAs`
+  still gives back a plain `[]T`.
+- **`OutputChoice(choices ...string)`** — decode into one of `choices`,
+  enforced via a JSON schema enum.
+- **`OutputJSON()`** — schemaless: decode into `any` (`map[string]any`,
+  `[]any`, `string`, `float64`, `bool`, or `nil`, per
+  `encoding/json`'s default unmarshal-into-any rules). Always requests
+  `ResponseFormat{Type: "json"}` with no schema, regardless of
+  `Model.Capabilities().NativeJSON`.
+
+```go
+type Recipe struct {
+	Name        string   `json:"name"`
+	Ingredients []string `json:"ingredients"`
+}
+
+result, err := ai.GenerateText(context.Background(), ai.GenerateTextOpts{
+	Model:  model,
+	Prompt: "Give me a simple pancake recipe.",
+	Output: ai.OutputObject[Recipe](),
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+recipe, err := ai.OutputAs[Recipe](result)
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(recipe.Name)
+```
+
+`OutputAs[T](result)` extracts `result.Output` (typed `any` on
+`*GenerateTextResult`) as a concrete `T`, returning a descriptive error
+(never a panic) if `result.Output` is `nil` or its dynamic type doesn't
+match `T`. For `OutputArray[T]`, extract as `[]T` (not `T`):
+
+```go
+result, err := ai.GenerateText(context.Background(), ai.GenerateTextOpts{
+	Model:  model,
+	Prompt: "List three pancake toppings.",
+	Output: ai.OutputArray[Recipe](),
+})
+recipes, err := ai.OutputAs[[]Recipe](result)
+```
+
+`OutputChoice` decodes into a plain `string`, and `OutputJSON` into `any`:
+
+```go
+result, err := ai.GenerateText(context.Background(), ai.GenerateTextOpts{
+	Model:  model,
+	Prompt: "Is this review positive or negative? 'Loved it!'",
+	Output: ai.OutputChoice("positive", "negative"),
+})
+choice, err := ai.OutputAs[string](result)
+```
+
+### Native JSON vs tool-mode fallback
+
+Just like `GenerateObject`, the wire strategy depends on
+`opts.Model.Capabilities().NativeJSON` (see
+[Structured output § Native JSON vs tool mode](structured-output.md#native-json-vs-tool-mode)
+for the full capability matrix):
+
+- **Native JSON** (`NativeJSON: true`) — the schema is sent via
+  `Call.ResponseFormat`; the loop runs its normal single step.
+- **Tool mode** (`NativeJSON: false`) — a single tool is injected and
+  `ToolChoice` forced to it, exactly like `GenerateObject`'s fallback. This
+  requires `opts.Tools` to be empty: if the model has no native JSON mode
+  **and** you've also set `Tools`, `GenerateText` returns
+  `ErrOutputRequiresJSONOrNoTools` up front, before calling the model — the
+  injected output tool can't coexist with your own tools on a model that has
+  no other way to force a schema-constrained response.
+
+```go
+_, err := ai.GenerateText(context.Background(), ai.GenerateTextOpts{
+	Model:  anthropicModel, // NativeJSON: false
+	Prompt: "What's the weather, structured please.",
+	Output: ai.OutputObject[Recipe](),
+	Tools:  []ai.Tool{weatherTool},
+})
+// err is ai.ErrOutputRequiresJSONOrNoTools
+```
+
+In the tool-mode fallback, the forced output-tool call is never executed as
+a real tool: `GenerateText` decodes `Output` straight from that call's raw
+arguments and ends the loop in exactly one step, without running
+`OnToolExecutionStart`/`OnToolExecutionEnd` for it (see
+[Lifecycle callbacks](#lifecycle-callbacks-model-call-and-tool-execution)
+below).
+
+A decode failure (the model's final text isn't valid JSON, or doesn't match
+`Output`'s schema) returns a `*ai.NoObjectGeneratedError` — the same type
+`GenerateObject` returns — with `RawText` set to what the model actually
+produced.
+
+`GenerateObject`/`StreamObject` and `Output` modes solve overlapping
+problems; see
+[Structured output § GenerateObject vs Output modes](structured-output.md#generateobject-vs-output-modes)
+for when to reach for which.
+
+## Lifecycle callbacks: model call and tool execution
+
+Two more callback pairs bracket the lower-level events inside a step, below
+`OnStepFinish`: one around each underlying model request, one around each
+tool execution.
+
+```go
+result, err := ai.GenerateText(context.Background(), ai.GenerateTextOpts{
+	Model:  model,
+	Prompt: "What's the weather in Paris?",
+	Tools:  []ai.Tool{weatherTool},
+	OnModelCallStart: func(stepIndex int, call provider.Call) {
+		fmt.Println("model call starting, step", stepIndex)
+	},
+	OnModelCallEnd: func(end ai.ModelCallEnd) {
+		fmt.Println("model call finished, step", end.StepIndex, "err:", end.Err)
+	},
+	OnToolExecutionStart: func(stepIndex int, call ai.ToolCallRecord) {
+		fmt.Println("executing tool", call.Name)
+	},
+	OnToolExecutionEnd: func(stepIndex int, result ai.ToolResultRecord, err error) {
+		fmt.Println("tool finished", result.Name, err)
+	},
+})
+```
+
+- **`OnModelCallStart(stepIndex int, call provider.Call)`** fires exactly
+  once per step, immediately before the underlying model request — before
+  the FIRST attempt, regardless of how many retries that step's call ends
+  up needing. Fires in both `GenerateText` and `StreamText`.
+- **`OnModelCallEnd(end ModelCallEnd)`** fires exactly once per step, after
+  the FINAL attempt (success or retry exhaustion). In `GenerateText`,
+  `end.Response` is the provider response (`nil` on error) and `end.Err` —
+  when non-nil — is the SAME error `GenerateText` itself returns for that
+  failure (retry exhaustion already translated to `*ai.RetryError`, never
+  the raw retry-internal error). In `StreamText`, `end.Response` is always
+  `nil`; `end.Usage`/`end.FinishReason` carry what that step's `FinishPart`
+  reported. **`OnModelCallEnd` does NOT fire on `StreamText`'s abort
+  path** — the consumer abandoning `Parts()` iteration early, or ctx
+  cancellation — `OnAbort` covers that instead, so a step's Start/End pair
+  either both fire, or (on abort) neither Err-bearing End fires alone.
+- **`OnToolExecutionStart(stepIndex int, call ToolCallRecord)`** /
+  **`OnToolExecutionEnd(stepIndex int, result ToolResultRecord, err error)`**
+  bracket each tool call's `Execute`. Exactly one Start/End pair fires per
+  tool call record, including when `RepairToolCall` retries a failed
+  `Execute` once — the whole execute-and-maybe-repair sequence counts as one
+  execution, not two. Neither callback fires for a call that never reaches
+  `Execute` at all (e.g. an unknown-tool call that aborts the batch with no
+  successful repair), nor for the tool-mode `Output` fallback's synthetic
+  forced call (see [Output modes](#output-modes) above).
+
+  **ID/Name caveat after repair:** if `RepairToolCall`'s bad-args repair
+  path changes a call's `ID` or `Name`, the pair does NOT agree on those
+  fields — `OnToolExecutionStart` fires with the ORIGINAL (pre-repair) `ID`/
+  `Name` (before `Execute` is first attempted), while
+  `OnToolExecutionEnd`'s `ToolResultRecord` carries the REPAIRED `ID`/`Name`
+  (what was actually executed). Correlate the pair by call order within the
+  step, not by `ID`, if `RepairToolCall` may rename calls.
+
 ## Result anatomy
 
 `*GenerateTextResult` reflects the *last* step's text/tool calls/finish
@@ -367,5 +543,11 @@ error from the final attempt (`RetryError` also implements `Unwrap()`, so
 - [`ai/options.go`](../../ai/options.go)
 - [`ai/generate_text.go`](../../ai/generate_text.go)
 - [`ai/stream_text.go`](../../ai/stream_text.go)
+- [`ai/output.go`](../../ai/output.go) (`Output`, `OutputObject`/`OutputArray`/
+  `OutputChoice`/`OutputJSON`, `OutputAs`)
 - [`ai/errors.go`](../../ai/errors.go)
 - [`provider/message.go`](../../provider/message.go)
+
+See also: [Structured output](structured-output.md#generateobject-vs-output-modes)
+for `GenerateObject` vs `Output` modes; [Reasoning](reasoning.md) for the
+unified `Reasoning` call option.

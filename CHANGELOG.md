@@ -8,13 +8,60 @@ once it reaches 1.0.
 
 ## [Unreleased]
 
-Wave 9 of the [AI SDK 6 parity roadmap](docs/superpowers/plans/2026-08-03-v6-parity-roadmap.md):
-v5 leftovers plus quick AI SDK 6 wins. Full parity with the AI SDK 5 core is
+Wave 9 and wave 10 of the [AI SDK 6 parity roadmap](docs/superpowers/plans/2026-08-03-v6-parity-roadmap.md).
+Wave 9: v5 leftovers plus quick AI SDK 6 wins. Wave 10: output modes on
+`GenerateText`, reranking, a unified reasoning option, and the full
+lifecycle-callback event set. Full parity with the AI SDK 5 core is
 maintained; AI SDK 6 parity is in progress — see
 [Migrating from the Vercel AI SDK § AI SDK 6 delta](docs/migrating-from-vercel-ai-sdk.md#ai-sdk-6-delta)
 for the feature-by-feature status.
 
 ### Added
+
+**Wave 10**
+
+- `GenerateTextOpts.Output`: structured-output modes on `GenerateText` —
+  `ai.OutputObject[T]`, `ai.OutputArray[T]`, `ai.OutputChoice`, `ai.OutputJSON`,
+  extracted via `ai.OutputAs[T]`. Uses the same native-JSON/forced-tool-call
+  fallback as `GenerateObject`; the tool-mode fallback requires `Tools` to be
+  empty (`ai.ErrOutputRequiresJSONOrNoTools` otherwise) and decodes the
+  forced tool call's arguments directly without executing it as a real tool
+  call. `StreamText` returns `ai.ErrOutputWithStreamText` immediately if
+  `Output` is set — partial-output streaming is deferred to a later wave.
+  See [Generating text § Output modes](docs/core/generating-text.md#output-modes).
+- `ai.Rerank` / `provider.RerankingModel` / `Registry.RerankingModel`:
+  document reranking — rank a set of documents by relevance to a query.
+  Cohere implements it (`Provider.RerankingModel(id)`, `POST /rerank`);
+  Cohere bills reranking in search units, not tokens, so
+  `RerankResponse.Usage` is left zero and the raw response body (including
+  billing metadata) is preserved in `RerankResponse.Raw`. See
+  [Embeddings § Reranking](docs/core/embeddings.md#reranking).
+- `GenerateTextOpts.Reasoning` / `provider.ReasoningConfig{Effort, BudgetTokens}`:
+  a unified reasoning/thinking request option, mapped to each provider's
+  native knob — `reasoning_effort` (openaicompat-based providers), a token
+  budget resolved via the new exported `provider.EffortBudgetTokens` table
+  (`minimal`→1024, `low`→4096, `medium`→8192, `high`→16384) for Anthropic
+  (`thinking`), Google/Vertex AI (`thinkingConfig`), and Bedrock
+  (`additionalModelRequestFields.thinking`); a no-op for Cohere and Mistral.
+  `ProviderOptions` still merges last and wins on a wire-key collision, the
+  same as every other `Call` field. `DefaultSettingsMiddleware` fills
+  `Reasoning` from its defaults when a per-call value is unset. See
+  [Reasoning § Requesting reasoning](docs/core/reasoning.md#requesting-reasoning-generatetextoptsreasoning).
+- Full lifecycle-callback event set: `GenerateTextOpts.OnModelCallStart`/
+  `OnModelCallEnd` (once per step, around the retried model call);
+  `OnToolExecutionStart`/`OnToolExecutionEnd` (once per tool call record,
+  collapsing a `RepairToolCall` retry into a single pair); `EmbedOpts`/
+  `EmbedManyOpts.OnEmbedStart`/`OnEmbedEnd` (once per call, or once per
+  batch for `EmbedMany`); `RerankOpts.OnRerankStart`/`OnRerankEnd`. Every
+  End-callback's error is the same error the caller's function returns
+  (retry exhaustion already translated to `*ai.RetryError`, never the raw
+  retry-internal error) — see the new shared `translateRetryErr` helper in
+  `ai/errors.go`. `OnModelCallEnd` does not fire on `StreamText`'s abort
+  path (consumer abandonment or ctx cancellation); `OnAbort` covers that
+  case instead. See
+  [Generating text § Lifecycle callbacks](docs/core/generating-text.md#lifecycle-callbacks-model-call-and-tool-execution).
+
+**Wave 9**
 
 - `GenerateTextOpts`/`provider.Call`: first-class `TopK`, `PresencePenalty`,
   `FrequencyPenalty`, and `Seed` sampling settings, threaded through to
@@ -46,6 +93,8 @@ for the feature-by-feature status.
 
 ### Changed
 
+**Wave 9**
+
 - `GenerateTextOpts.StopWhen` is now consulted after **every** completed
   step, not only steps that requested tool calls — this removes the
   previously-documented divergence from Vercel's `stopWhen`, which is
@@ -53,6 +102,15 @@ for the feature-by-feature status.
   ends the loop naturally regardless of what `StopWhen` returns for it.
 
 ### Fixed
+
+**Wave 10**
+
+- `ai.Rerank`: `OnRerankEnd` now receives the same translated `*ai.RetryError`
+  that `Rerank` itself returns on retry exhaustion, instead of the raw
+  retry-internal error (an asymmetry introduced when reranking first
+  shipped, fixed before this wave's lifecycle-callback work was final).
+
+**Wave 9**
 
 - `providers/revai`: documented that `"unknown"`-type transcript elements
   (unintelligible speech) are intentionally omitted from both `Text` and

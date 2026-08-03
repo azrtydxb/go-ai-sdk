@@ -20,7 +20,93 @@ required to round-trip the block back to the API on a later turn; a
 redacted block sets `Redacted` true and puts the opaque encrypted payload
 in `Text` rather than readable reasoning.
 
-## Enabling it per provider
+## Requesting reasoning: GenerateTextOpts.Reasoning
+
+`GenerateTextOpts.Reasoning` (`*provider.ReasoningConfig`) is a single,
+provider-agnostic way to request more (or less) reasoning effort, mapped by
+each provider to its own native knob:
+
+```go
+type ReasoningConfig struct {
+	Effort       string // "", "minimal", "low", "medium", "high" — passed through, not validated
+	BudgetTokens *int   // explicit thinking-token budget
+}
+```
+
+```go
+result, err := ai.GenerateText(context.Background(), ai.GenerateTextOpts{
+	Model:  anthropic.New().Model("claude-sonnet-5"),
+	Prompt: "What is 17 * 24? Think it through.",
+	Reasoning: &provider.ReasoningConfig{
+		Effort: "high",
+	},
+})
+```
+
+`Effort` and `BudgetTokens` may be set together — a provider that only
+understands one of the two uses that one; where both map to the same knob
+(anthropic, geminicompat, bedrock), an explicit `BudgetTokens` wins over
+`Effort`. Set `BudgetTokens` directly when you want an exact token count
+instead of one of the four named efforts:
+
+```go
+Reasoning: &provider.ReasoningConfig{
+	BudgetTokens: ptr(2000),
+},
+```
+
+### Per-provider mapping
+
+| Provider | Wire mechanism | Notes |
+|---|---|---|
+| openaicompat-based (OpenAI, Azure, Groq, xAI, DeepSeek, Cerebras, Together, Fireworks, Perplexity) | `reasoning_effort` | Sends `Effort` verbatim; `BudgetTokens` has no wire equivalent here and is ignored. |
+| Anthropic | `thinking: {"type": "enabled", "budget_tokens": N}` | `N` is `BudgetTokens` if set, else resolved from `Effort` via `EffortBudgetTokens` (below). Omits `thinking` entirely if neither resolves. |
+| Google / Vertex AI (geminicompat) | `generationConfig.thinkingConfig: {"thinkingBudget": N, "includeThoughts": true}` | Same budget resolution as Anthropic; `includeThoughts` is always `true` whenever a budget resolves (not independently configurable via `ReasoningConfig`). |
+| Amazon Bedrock | `additionalModelRequestFields.thinking: {"type": "enabled", "budget_tokens": N}` | Same budget resolution and wire shape as Anthropic, nested under Bedrock's Converse-specific `additionalModelRequestFields`. Merged per sub-key with any `additionalModelRequestFields` set via `ProviderOptions` — see the precedence note below. |
+| Cohere, Mistral | — (no-op) | Neither has a reasoning/thinking knob; `Reasoning` is silently ignored, no wire field is sent. |
+
+### EffortBudgetTokens: the effort → token-budget table
+
+For the three token-budget providers (Anthropic, geminicompat, Bedrock),
+`Effort` is resolved to an explicit budget via the exported
+`provider.EffortBudgetTokens` table:
+
+| `Effort` | Budget tokens |
+|---|---|
+| `"minimal"` | 1024 |
+| `"low"` | 4096 |
+| `"medium"` | 8192 |
+| `"high"` | 16384 |
+| `""` or unrecognized | not resolved (`ok == false`) — no budget sent |
+
+```go
+budget, ok := provider.EffortBudgetTokens("medium") // 8192, true
+```
+
+Anthropic and Bedrock do **not** validate `max_tokens > budget_tokens` or
+Anthropic's temperature restriction under extended thinking — an
+out-of-range value passes through and surfaces as a provider
+`*ai.APICallError`, not a client-side validation error.
+
+### ProviderOptions precedence
+
+`ProviderOptions` still merges last and wins on a wire-key collision — the
+repo-wide convention (see [Provider options](provider-options.md)) applies
+to `Reasoning`'s output exactly like every other `Call` field. Setting
+`ProviderOptions["anthropic"]["thinking"]` (or the equivalent
+`additionalModelRequestFields` on bedrock) overrides whatever `Reasoning`
+would otherwise have produced. On Bedrock specifically, the merge is scoped
+per sub-key within `additionalModelRequestFields`: a `Reasoning`-derived
+`"thinking"` entry and an unrelated `ProviderOptions`-set entry under a
+different sub-key coexist; only an exact key collision (both setting
+`"thinking"`) lets `ProviderOptions` win.
+
+## Enabling it per provider (manual ProviderOptions)
+
+The examples below predate `GenerateTextOpts.Reasoning` and still work
+unchanged as a manual escape hatch — useful for a provider-specific field
+`ReasoningConfig` doesn't expose (e.g. Anthropic's `type` values other than
+`"enabled"`).
 
 ### Anthropic: extended thinking
 
@@ -163,6 +249,18 @@ unresolved prefix carries over between feeds.
 
 ## Source of truth
 
+- [`provider/call.go`](../../provider/call.go) (`Call.Reasoning`,
+  `ReasoningConfig`, `EffortBudgetTokens`)
+- [`ai/options.go`](../../ai/options.go) (`GenerateTextOpts.Reasoning`)
+- [`internal/openaicompat/wire.go`](../../internal/openaicompat/wire.go)
+  (`reasoning_effort`)
+- [`providers/anthropic/wire.go`](../../providers/anthropic/wire.go)
+  (`wireThinking`, `resolveBudgetTokens`)
+- [`internal/geminicompat/wire.go`](../../internal/geminicompat/wire.go)
+  (`wireThinkingConfig`)
+- [`providers/bedrock/wire.go`](../../providers/bedrock/wire.go)
+  (`additionalModelRequestFields.thinking`, `applyProviderOptions` per-sub-key
+  merge)
 - [`provider/message.go`](../../provider/message.go) (`ReasoningPart`,
   `SourcePart`)
 - [`provider/response.go`](../../provider/response.go) (`ReasoningText()`)

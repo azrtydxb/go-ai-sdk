@@ -89,6 +89,20 @@ provider actually being called — passing a map keyed for every provider you
 might use, unconditionally, is the intended usage pattern (see the
 composed example above).
 
+### Reasoning is no exception
+
+`GenerateTextOpts.Reasoning`/`Call.Reasoning` (see
+[Reasoning](reasoning.md#requesting-reasoning-generatetextoptsreasoning))
+follows the same rule as every other typed `Call` field: `ProviderOptions`
+merges in **after** the SDK builds the request from `Reasoning`, so a
+`ProviderOptions["anthropic"]["thinking"]` entry (or the equivalent
+`additionalModelRequestFields` shape on Bedrock) always wins over whatever
+`Reasoning` would otherwise have produced for that same wire key. This
+holds even though the roadmap that introduced `Reasoning` initially
+described the opposite precedence — the repo-wide "`ProviderOptions` merges
+last and wins" convention documented on this page takes priority, and is
+what actually shipped.
+
 ## ProviderMetadata
 
 ```go

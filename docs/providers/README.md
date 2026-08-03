@@ -28,33 +28,38 @@ hatch used throughout the pages below) are documented once, generically, in
 ✓ = supported · ✗ = not exposed by this package · ⚠ = supported with a
 caveat, see that provider's page
 
-| Provider | Chat & streaming | Tool calling | Structured output | Embeddings | Images | Speech (TTS) | Transcription (STT) |
-|---|---|---|---|---|---|---|---|
-| [OpenAI](openai.md) | ✓ | ✓ | ✓ native | ✓ | ✓ | ✓ | ✓ |
-| [Azure OpenAI](azure.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✗ | ✗ |
-| [Groq](groq.md) | ✓ | ✓ | ✓ native | ✗ | ✗ | ✗ | ✓ |
-| [xAI](xai.md) | ✓ | ✓ | ✓ native | ✗ | ✓ ⚠¹ | ✗ | ✗ |
-| [DeepSeek](deepseek.md) | ✓ | ✓ | ⚠² `json_object`-only | ✗ | ✗ | ✗ | ✗ |
-| [Cerebras](cerebras.md) | ✓ | ✓ | ✓ native | ✗ | ✗ | ✗ | ✗ |
-| [Together](together.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✗ | ✗ |
-| [Fireworks](fireworks.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✗ | ✗ |
-| [Perplexity](perplexity.md) | ✓ | ⚠³ no live tools | ✓ native | ✗ | ✗ | ✗ | ✗ |
-| [Mistral](mistral.md) | ✓ | ✓ | ⚠⁴ schema dropped | ✓ | ✗ | ✗ | ✗ |
-| [Cohere](cohere.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✗ | ✗ |
-| [ElevenLabs](elevenlabs.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ |
-| [Anthropic](anthropic.md) | ✓ | ✓ | ⚠⁵ tool-mode | ✗ | ✗ | ✗ | ✗ |
-| [Google](google.md) | ✓ | ✓ | ✓ native | ✓ | ✓ | ✗ | ✗ |
-| [Vertex AI](vertex.md) | ✓ | ✓ | ✓ native | ✓ | ✓ | ✗ | ✗ |
-| [Amazon Bedrock](bedrock.md) | ✓ | ✓ | ⚠⁵ tool-mode | ✓ | ✗ | ✗ | ✗ |
-| [fal](fal.md) | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ |
-| [Replicate](replicate.md) | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ |
-| [Luma](luma.md) | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ |
-| [Deepgram](deepgram.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
-| [LMNT](lmnt.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
-| [Hume](hume.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
-| [AssemblyAI](assemblyai.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
-| [Gladia](gladia.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
-| [Rev.ai](revai.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
+| Provider | Chat & streaming | Tool calling | Structured output | Embeddings | Reranking | Images | Speech (TTS) | Transcription (STT) |
+|---|---|---|---|---|---|---|---|---|
+| [OpenAI](openai.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✓ | ✓ | ✓ |
+| [Azure OpenAI](azure.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✗ | ✗ | ✗ |
+| [Groq](groq.md) | ✓ | ✓ | ✓ native | ✗ | ✗ | ✗ | ✗ | ✓ |
+| [xAI](xai.md) | ✓ | ✓ | ✓ native | ✗ | ✗ | ✓ ⚠¹ | ✗ | ✗ |
+| [DeepSeek](deepseek.md) | ✓ | ✓ | ⚠² `json_object`-only | ✗ | ✗ | ✗ | ✗ | ✗ |
+| [Cerebras](cerebras.md) | ✓ | ✓ | ✓ native | ✗ | ✗ | ✗ | ✗ | ✗ |
+| [Together](together.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✗ | ✗ | ✗ |
+| [Fireworks](fireworks.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✗ | ✗ | ✗ |
+| [Perplexity](perplexity.md) | ✓ | ⚠³ no live tools | ✓ native | ✗ | ✗ | ✗ | ✗ | ✗ |
+| [Mistral](mistral.md) | ✓ | ✓ | ⚠⁴ schema dropped | ✓ | ✗ | ✗ | ✗ | ✗ |
+| [Cohere](cohere.md) | ✓ | ✓ | ✓ native | ✓ | ✓ | ✗ | ✗ | ✗ |
+| [ElevenLabs](elevenlabs.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ |
+| [Anthropic](anthropic.md) | ✓ | ✓ | ⚠⁵ tool-mode | ✗ | ✗ | ✗ | ✗ | ✗ |
+| [Google](google.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✓ | ✗ | ✗ |
+| [Vertex AI](vertex.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✓ | ✗ | ✗ |
+| [Amazon Bedrock](bedrock.md) | ✓ | ✓ | ⚠⁵ tool-mode | ✓ | ✗ | ✗ | ✗ | ✗ |
+| [fal](fal.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ |
+| [Replicate](replicate.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ |
+| [Luma](luma.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ |
+| [Deepgram](deepgram.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
+| [LMNT](lmnt.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
+| [Hume](hume.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
+| [AssemblyAI](assemblyai.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
+| [Gladia](gladia.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
+| [Rev.ai](revai.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
+
+Reranking (`ai.Rerank`, `provider.RerankingModel`) is Cohere-only this wave;
+Voyage and Mixedbread are planned alongside their providers in a later wave
+— see [Reranking](../core/embeddings.md#reranking) and
+[Cohere § Reranking](cohere.md#reranking).
 
 ¹ xAI's image endpoint rejects the `size` parameter — see
 [xAI quirks](xai.md#quirks-and-notes).
@@ -83,7 +88,14 @@ Anthropic (`thinking`/`redacted_thinking`), Bedrock (`reasoningContent`),
 and DeepSeek (`reasoning_content`) each surface a "thinking" channel,
 unified as `provider.ReasoningPart` — see [Reasoning](../core/reasoning.md)
 for the cross-provider mechanics and the Anthropic `budget_tokens` worked
-example.
+example. Requesting more (or less) reasoning effort is likewise unified
+across providers, via `GenerateTextOpts.Reasoning`/`provider.Call.Reasoning`
+— openaicompat-based providers map it to `reasoning_effort`; Anthropic,
+Google/Vertex AI, and Bedrock map it to a token budget (an explicit one, or
+resolved from an effort level via `provider.EffortBudgetTokens`); Cohere and
+Mistral have no reasoning knob and ignore it. See
+[Reasoning § Requesting reasoning](../core/reasoning.md#requesting-reasoning-generatetextoptsreasoning)
+for the full per-provider mapping table.
 
 ## Construction at a glance
 

@@ -22,7 +22,7 @@ page.
 parity (ai-sdk.dev, snapshot 2026-08-03) is in progress, tracked wave by
 wave in the
 [v6 parity roadmap](superpowers/plans/2026-08-03-v6-parity-roadmap.md). This
-table is the feature-by-feature status as of the current wave (9):
+table is the feature-by-feature status as of the current wave (10):
 
 | AI SDK 6 feature | Status |
 |---|---|
@@ -34,10 +34,10 @@ table is the feature-by-feature status as of the current wave (9):
 | Image-model middleware (`wrapImageModel` equivalent) | **Shipped as a naming hook** — `ai.WrapImageModel`; no built-in image middlewares ship yet, and Vercel's full image-middleware interface (which can also rewrite `params`/results) isn't modeled — see [Middleware and registry § WrapImageModel](core/middleware-and-registry.md#wrapimagemodel). |
 | AssemblyAI, Gladia, Rev.ai transcription providers | **Shipped** — see [Provider overview](providers/README.md) and each provider's page. |
 | `stopWhen` consultation on every step | **Shipped, and now Vercel-consistent** — `StopWhen` is consulted after every completed step (not only ones that requested tool calls); this matches Vercel's documented behavior and removes what would otherwise have been a divergence. See [Generating text § The multi-step tool loop](core/generating-text.md#the-multi-step-tool-loop). |
-| Output modes on `generateText` (`text`/`object`/`array`/`choice`/`json`, `Experimental_Output`) | Planned — wave 10. |
-| Reranking (`rerank`, `RerankingModel`, Cohere/Voyage/Mixedbread) | Planned — wave 10. |
-| Unified `reasoning` option (effort/budget, per-provider mapping) | Planned — wave 10. |
-| Full lifecycle-callback event set (call-start/end, tool-execution start/end, embed/rerank events) | Planned — wave 10. |
+| Output modes on `generateText` (`text`/`object`/`array`/`choice`/`json`, `Experimental_Output`) | **Shipped for `GenerateText`** — `GenerateTextOpts.Output` (`ai.OutputObject[T]`/`ai.OutputArray[T]`/`ai.OutputChoice`/`ai.OutputJSON`), extracted via `ai.OutputAs[T]`; see [Generating text § Output modes](core/generating-text.md#output-modes). **Not shipped for `StreamText`**: Vercel's `Experimental_Output` also streams partial output incrementally as a stream mode; `go-ai-sdk`'s `StreamText` returns the typed `ai.ErrOutputWithStreamText` immediately if `Output` is set — partial-output streaming is deferred to a later wave. |
+| Reranking (`rerank`, `RerankingModel`, Cohere/Voyage/Mixedbread) | **Shipped for Cohere** — `ai.Rerank`, `provider.RerankingModel`, `Registry.RerankingModel`; see [Embeddings § Reranking](core/embeddings.md#reranking). Voyage and Mixedbread are planned alongside their providers in wave 13 (the roadmap lists them here too, but wave 13 governs since those provider packages don't exist yet). |
+| Unified `reasoning` option (effort/budget, per-provider mapping) | **Shipped** — `GenerateTextOpts.Reasoning`/`provider.ReasoningConfig{Effort, BudgetTokens}`, mapped to `reasoning_effort` (openaicompat), a resolved token budget via `provider.EffortBudgetTokens` (Anthropic, Google/Vertex AI, Bedrock), or ignored (Cohere, Mistral); see [Reasoning § Requesting reasoning](core/reasoning.md#requesting-reasoning-generatetextoptsreasoning). Unlike the roadmap's original framing, `ProviderOptions` still merges last and wins over `Reasoning` on a wire-key collision — the repo-wide `ProviderOptions` precedence convention was not special-cased for this option; see [Provider options § Reasoning is no exception](core/provider-options.md#reasoning-is-no-exception). |
+| Full lifecycle-callback event set (call-start/end, tool-execution start/end, embed/rerank events) | **Shipped** — `GenerateTextOpts.OnModelCallStart`/`OnModelCallEnd`, `OnToolExecutionStart`/`OnToolExecutionEnd` (see [Generating text § Lifecycle callbacks](core/generating-text.md#lifecycle-callbacks-model-call-and-tool-execution)); `EmbedOpts`/`EmbedManyOpts.OnEmbedStart`/`OnEmbedEnd` (see [Embeddings § Embed](core/embeddings.md#embed)); `RerankOpts.OnRerankStart`/`OnRerankEnd` (see [Embeddings § Reranking](core/embeddings.md#reranking)). Every End-callback's error is the SAME error the caller's function returns (retry exhaustion already translated to `*ai.RetryError`). |
 | Agents (`ToolLoopAgent` equivalent, agent-as-tool subagents) | Planned — wave 11. |
 | Tool-execution approvals (approval func, policy hook, resumable pending-approval flow) | Planned — wave 11. |
 | Sandbox interface / Code Mode | Planned — wave 11 (a `Sandbox` interface the caller implements, not a bundled code runtime). |
@@ -300,6 +300,9 @@ and known transport deviations are in [MCP § Limitations](mcp.md#limitations-v1
 - [`ai/options.go`](../ai/options.go), [`ai/generate_text.go`](../ai/generate_text.go),
   [`ai/stream_text.go`](../ai/stream_text.go) — `GenerateTextOpts` and the
   tool loop
+- [`ai/output.go`](../ai/output.go) — `Output` modes on `GenerateText`
+- [`ai/rerank.go`](../ai/rerank.go), [`provider/rerank.go`](../provider/rerank.go) —
+  `ai.Rerank`/`provider.RerankingModel`
 - [`ai/tool_result_content.go`](../ai/tool_result_content.go),
   [`ai/middleware_json.go`](../ai/middleware_json.go) — multi-modal tool
   results and `ExtractJSONMiddleware`

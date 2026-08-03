@@ -2,6 +2,8 @@
 
 `ai.Embed` and `ai.EmbedMany` turn text into vectors using any
 `provider.EmbeddingModel`. `ai.CosineSimilarity` compares two vectors.
+`ai.Rerank` ranks documents by relevance using a `provider.RerankingModel`
+(see [Reranking](#reranking) below).
 
 ## Embed
 
@@ -11,6 +13,12 @@ model := openai.New().EmbeddingModel("text-embedding-3-small")
 result, err := ai.Embed(context.Background(), ai.EmbedOpts{
 	Model: model,
 	Value: "hello world",
+	OnEmbedStart: func(values []string) {
+		fmt.Println("embedding started for", len(values), "value(s)")
+	},
+	OnEmbedEnd: func(resp *provider.EmbeddingResponse, err error) {
+		fmt.Println("embedding finished, err:", err)
+	},
 })
 if err != nil {
 	log.Fatal(err)
@@ -30,6 +38,12 @@ fmt.Println(result.Usage.TotalTokens)
 - **`ProviderOptions`** (`map[string]any`) — only takes effect if `Model`
   also implements `provider.EmbeddingModelWithOptions` (see below);
   otherwise silently ignored.
+- **`OnEmbedStart`/`OnEmbedEnd`** — fire once around the (retried) provider
+  call: `OnEmbedStart` before the first attempt, `OnEmbedEnd` after the
+  final one. `OnEmbedEnd`'s `err`, when non-nil, is the SAME error `Embed`
+  itself returns (retry exhaustion already translated to `*ai.RetryError`);
+  `resp` is `nil` on error. `EmbedManyOpts` has the same pair, firing once
+  per batch (see below).
 
 `Embed` wraps a single value into a one-element batch and returns an error
 (`fmt.Errorf`, not one of the typed errors) if the model returns a different
@@ -59,6 +73,10 @@ result (`Embeddings: [][]float64{}`) without calling the model at all. If a
 chunk call returns a different number of embeddings than values sent for
 that chunk, `EmbedMany` returns an error and the whole call fails — there is
 no partial result.
+
+`EmbedManyOpts.OnEmbedStart`/`OnEmbedEnd` fire once **per batch**, in batch
+order — same start-before-first-attempt/end-after-final-attempt semantics
+and error-translation guarantee as `EmbedOpts`'s pair.
 
 ### MaxBatchSize by provider
 
@@ -129,12 +147,109 @@ different lengths, or if either vector has zero magnitude (cosine
 similarity is undefined for a zero vector) — it never panics or silently
 returns `0` for a malformed input.
 
+## Reranking
+
+`ai.Rerank` ranks `Documents` by relevance to `Query` using any
+`provider.RerankingModel` — useful for narrowing a larger embedding-search
+candidate set down to the few most relevant results before feeding them to
+a model.
+
+```go
+model := cohere.New().RerankingModel("rerank-v3.5")
+
+result, err := ai.Rerank(context.Background(), ai.RerankOpts{
+	Model: model,
+	Query: "What's the capital of France?",
+	Documents: []string{
+		"Paris is the capital of France.",
+		"The Eiffel Tower is in Paris.",
+		"Berlin is the capital of Germany.",
+	},
+	TopN: 2,
+})
+if err != nil {
+	log.Fatal(err)
+}
+for _, r := range result.Results {
+	fmt.Println(r.Index, r.Score, r.Document)
+}
+```
+
+`RerankOpts`:
+
+- **`Model`** (`provider.RerankingModel`, required) — a `nil` model returns
+  `ai.ErrModelRequired`.
+- **`Query`** (`string`, required) — a `nil`/empty query returns
+  `ai.ErrQueryRequired`.
+- **`Documents`** (`[]string`, required, non-empty) — an empty slice returns
+  `ai.ErrDocumentsRequired`.
+- **`TopN`** (`int`, optional) — `0` means "provider default" (typically all
+  documents, ranked).
+- **`MaxRetries`** (`*int`, default `2`) — same retry wrapper as `Embed`; on
+  exhaustion `Rerank` returns a `*ai.RetryError`.
+- **`ProviderOptions`** (`map[string]any`) — the usual raw-wire-key escape
+  hatch (see [Provider options](provider-options.md)), merged into the
+  provider's rerank request the same way as for language-model calls.
+- **`OnRerankStart`/`OnRerankEnd`** — fire once around the retried call,
+  same start/end and error-translation semantics as `Embed`'s pair:
+
+```go
+_, err := ai.Rerank(context.Background(), ai.RerankOpts{
+	Model:     model,
+	Query:     "capital of France",
+	Documents: []string{"Paris.", "Berlin."},
+	OnRerankStart: func(query string, documents []string) {
+		fmt.Println("reranking", len(documents), "documents")
+	},
+	OnRerankEnd: func(resp *provider.RerankResponse, err error) {
+		fmt.Println("rerank finished, err:", err)
+	},
+})
+```
+
+`RerankResult.Results` is `[]ai.RankedDocument{Index, Score, Document}`,
+sorted most-relevant first as returned by the provider — `Document` is the
+resolved text from `opts.Documents[Index]` (an out-of-range `Index` from the
+provider is defensively skipped rather than causing a panic).
+`RerankResult.Usage` is a `provider.Usage`.
+
+### Cohere
+
+Cohere is the only rerank-capable provider this wave (Voyage and Mixedbread
+are planned alongside their providers in a later wave — see
+[Migrating from the Vercel AI SDK](../migrating-from-vercel-ai-sdk.md)).
+`Provider.RerankingModel(id)` constructs one, e.g.
+`cohere.New().RerankingModel("rerank-v3.5")`. Cohere bills reranking in
+"search units," not tokens: `RerankResult.Usage`/`provider.RerankResponse.Usage`
+are left zero, and `provider.RerankResponse.Raw` carries the full response
+body (including Cohere's own billing metadata) for callers that need it.
+See [Cohere § Reranking](../providers/cohere.md#reranking) for the wire
+details.
+
+### Via the registry
+
+```go
+reg := ai.NewRegistry()
+reg.Register("cohere", cohere.New())
+
+model, err := reg.RerankingModel("cohere:rerank-v3.5")
+```
+
+`Registry.RerankingModel` resolves the same way as the other four lookups
+(`LanguageModel`, `EmbeddingModel`, `ImageModel`, `SpeechModel`,
+`TranscriptionModel`) — see
+[Middleware and registry § Registry](middleware-and-registry.md#registry).
+
 ## Source of truth
 
 - [`ai/embed.go`](../../ai/embed.go)
+- [`ai/rerank.go`](../../ai/rerank.go)
 - [`ai/similarity.go`](../../ai/similarity.go)
+- [`ai/registry.go`](../../ai/registry.go) (`RerankingModel`)
 - [`provider/model.go`](../../provider/model.go)
+- [`provider/rerank.go`](../../provider/rerank.go)
 - [`providers/vertex/embedding.go`](../../providers/vertex/embedding.go)
+- [`providers/cohere/rerank.go`](../../providers/cohere/rerank.go)
 
 See also: [Generating text](generating-text.md) for the shared retry
 wrapper, [Provider options](provider-options.md) for the general

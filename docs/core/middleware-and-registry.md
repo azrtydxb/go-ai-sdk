@@ -60,16 +60,18 @@ func DefaultSettingsMiddleware(model provider.LanguageModel, defaults provider.C
 
 Fills in a call's zero-valued fields from `defaults` before it reaches
 `model`: `Temperature`/`TopP`/`MaxTokens`/`TopK`/`PresencePenalty`/
-`FrequencyPenalty`/`Seed` (nil pointers), `StopSequences` (empty slice),
-`Headers` (merged per header key, with per-call keys winning over the
-matching default key), and `ProviderOptions` (merged per provider-name
-namespace, with per-call entries winning over the matching default entries
-within a namespace — see [Provider options](provider-options.md) for the
-namespace convention). Every other `Call` field (`Messages`, `Tools`,
-`ToolChoice`, `ResponseFormat`) passes through unmodified. Per-call values
-always win — zero-valued/unset fields are replaced outright, while
-`Headers` and `ProviderOptions` are merged key-by-key/namespace-by-namespace
-with the per-call side winning on conflicts.
+`FrequencyPenalty`/`Seed`/`Reasoning` (nil pointers — `Reasoning` fills as a
+whole `*ReasoningConfig` pointer, not merged field-by-field within it),
+`StopSequences` (empty slice), `Headers` (merged per header key, with
+per-call keys winning over the matching default key), and `ProviderOptions`
+(merged per provider-name namespace, with per-call entries winning over the
+matching default entries within a namespace — see
+[Provider options](provider-options.md) for the namespace convention).
+Every other `Call` field (`Messages`, `Tools`, `ToolChoice`,
+`ResponseFormat`) passes through unmodified. Per-call values always win —
+zero-valued/unset fields are replaced outright, while `Headers` and
+`ProviderOptions` are merged key-by-key/namespace-by-namespace with the
+per-call side winning on conflicts.
 
 ### ExtractJSONMiddleware
 
@@ -194,15 +196,18 @@ func (r *Registry) EmbeddingModel(id string) (provider.EmbeddingModel, error)
 func (r *Registry) ImageModel(id string) (provider.ImageModel, error)
 func (r *Registry) SpeechModel(id string) (provider.SpeechModel, error)
 func (r *Registry) TranscriptionModel(id string) (provider.TranscriptionModel, error)
+func (r *Registry) RerankingModel(id string) (provider.RerankingModel, error)
 ```
 
 `Register` stores `p` (typically a provider package's `*Provider` value,
 e.g. `openai.New()`) under `name`. `p`'s capabilities — which of
 `LanguageModelProvider`, `EmbeddingModelProvider`, `ImageModelProvider`,
-`SpeechModelProvider`, `TranscriptionModelProvider` it implements — are
-checked lazily at lookup time via a type assertion, so `p` need not
-implement every capability interface (Bedrock, for instance, has no
-`ImageModel` method).
+`SpeechModelProvider`, `TranscriptionModelProvider`, `RerankingModelProvider`
+it implements — are checked lazily at lookup time via a type assertion, so
+`p` need not implement every capability interface (Bedrock, for instance,
+has no `ImageModel` method; only Cohere implements
+`RerankingModelProvider` this wave — see
+[Embeddings § Reranking](embeddings.md#reranking)).
 
 ```go
 reg := ai.NewRegistry()
@@ -213,7 +218,7 @@ model, err := reg.LanguageModel("openai:gpt-4o")
 em, err := reg.EmbeddingModel("openai:text-embedding-3-small")
 ```
 
-Each of the five lookups splits `id` on the first `:`, resolves the
+Each of the six lookups splits `id` on the first `:`, resolves the
 provider by name, then type-asserts it against the matching
 `*ModelProvider` interface — returning an error rather than panicking for
 an unknown provider name, a malformed id (no `:` at all), or a provider

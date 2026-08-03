@@ -26,6 +26,8 @@ request (`providers/cohere/language_model.go`, `embedding.go`).
   (`Capabilities().NativeJSON: true`).
 - `Provider.EmbeddingModel(id)` — `provider.EmbeddingModel` with
   `MaxBatchSize() == 96` (`providers/cohere/cohere.go`).
+- `Provider.RerankingModel(id)` — `provider.RerankingModel`: rerank
+  (`POST /rerank`) — see [Reranking](#reranking) below.
 - No `ImageModel`, `SpeechModel`, or `TranscriptionModel`.
 
 ## Quirks
@@ -94,10 +96,61 @@ result, err := ai.GenerateText(context.Background(), ai.GenerateTextOpts{
 })
 ```
 
+## Reranking
+
+`Provider.RerankingModel(id)` (e.g. `cohere.New().RerankingModel("rerank-v3.5")`)
+constructs a `provider.RerankingModel` that calls Cohere's `POST /rerank`
+endpoint. Use it directly, or through `ai.Rerank` — see
+[Embeddings § Reranking](../core/embeddings.md#reranking) for the
+`ai.Rerank`/`RerankOpts` API and a full example.
+
+```go
+model := cohere.New().RerankingModel("rerank-v3.5")
+
+result, err := ai.Rerank(context.Background(), ai.RerankOpts{
+	Model:     model,
+	Query:     "What's the capital of France?",
+	Documents: []string{"Paris is the capital of France.", "Berlin is the capital of Germany."},
+	TopN:      1,
+})
+```
+
+- **Model IDs**: Cohere's documented rerank models, e.g. `rerank-v3.5`,
+  `rerank-english-v3.0`, `rerank-multilingual-v3.0`. The SDK passes
+  `ModelID()` straight through as the wire `model` field — no validation or
+  translation.
+- **Request shape** (`providers/cohere/wire.go`: `rerankRequest`): `model`,
+  `query`, `documents` (a bare `[]string`, matching `RerankCall.Documents`),
+  and `top_n` — a `*int`, omitted entirely from the wire request when
+  `RerankCall.TopN == 0` (`json:"top_n,omitempty"` on a pointer field, so an
+  intentional `0` is indistinguishable from "unset" — which matches
+  `RerankCall.TopN`'s own contract that `0` means "provider default").
+  `ProviderOptions["cohere"]` is shallow-merged in last, same convention as
+  chat requests (raw wire keys, e.g. Cohere's `rank_fields` or
+  `max_tokens_per_doc` — not otherwise exposed by this SDK).
+- **`Usage` is always zero.** Cohere bills reranking in "search units," not
+  tokens — there is no token-usage field in the rerank response to map onto
+  `provider.Usage`. `provider.RerankResponse.Raw` preserves the full,
+  unparsed response body (including Cohere's `meta.billed_units.search_units`
+  field) for callers that need billing detail.
+- **Results**: Cohere's response is a `results` array of
+  `{index, relevance_score}`, already sorted most-relevant first; the SDK
+  maps `relevance_score` onto `provider.RankedDocument.Score` and passes
+  `index` through unchanged.
+
+**Live-testing note:** like every provider in this SDK (see
+[Provider overview § Live-testing status](README.md#live-testing-status)),
+the rerank integration is verified only against `httptest`-replayed fixture
+responses shaped to match Cohere's published rerank API docs — it has not
+been smoke-tested against the live `https://api.cohere.com/v2/rerank`
+endpoint.
+
 ## Source of truth
 
 - [`providers/cohere/cohere.go`](../../providers/cohere/cohere.go)
 - [`providers/cohere/language_model.go`](../../providers/cohere/language_model.go)
 - [`providers/cohere/wire.go`](../../providers/cohere/wire.go)
 - [`providers/cohere/embedding.go`](../../providers/cohere/embedding.go)
+- [`providers/cohere/rerank.go`](../../providers/cohere/rerank.go)
 - [`providers/cohere/provideroptions_test.go`](../../providers/cohere/provideroptions_test.go)
+- [`providers/cohere/rerank_test.go`](../../providers/cohere/rerank_test.go)
