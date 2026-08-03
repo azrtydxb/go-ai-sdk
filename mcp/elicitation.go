@@ -52,6 +52,9 @@ type elicitationCreateResultWire struct {
 // -32601 is the standard JSON-RPC "Method not found" error code.
 const rpcMethodNotFound = -32601
 
+// -32602 is the standard JSON-RPC "Invalid params" error code.
+const rpcInvalidParams = -32602
+
 // dispatchServerRequest handles one server-initiated request (recognized by
 // having both an id and a method) and sends the matching response back to
 // the server. It runs on its own goroutine (spawned by recvLoop) so a slow
@@ -68,8 +71,11 @@ func (c *Client) dispatchServerRequest(req serverRequest) {
 
 // handleElicitationCreate decodes the request params, invokes the installed
 // ElicitationHandler (or auto-declines if none is set), and sends the
-// result back to the server with the matching id. A handler error is
-// reported to the server as Action "cancel".
+// result back to the server with the matching id. Malformed params (fail
+// to decode) get a JSON-RPC -32602 "Invalid params" error reply, mirroring
+// the -32601 "Method not found" path for unknown methods. A handler error
+// (the installed ElicitationHandler itself returning err) is reported to
+// the server as Action "cancel".
 func (c *Client) handleElicitationCreate(req serverRequest) {
 	c.mu.Lock()
 	h := c.elicitationHandler
@@ -82,7 +88,7 @@ func (c *Client) handleElicitationCreate(req serverRequest) {
 
 	var params elicitationCreateParamsWire
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		c.respondServerResult(req.ID, elicitationCreateResultWire{Action: "cancel"})
+		c.respondServerError(req.ID, rpcInvalidParams, "Invalid params")
 		return
 	}
 

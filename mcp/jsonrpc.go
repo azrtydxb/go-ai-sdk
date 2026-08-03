@@ -39,21 +39,42 @@ type rpcErrorObj struct {
 }
 
 // rpcResponse is the wire shape of anything the server sends us: a response
-// to one of our requests (ID != nil, Method empty), a server-initiated
-// request (ID != nil, Method non-empty), or a notification (ID nil).
+// to one of our requests (ID set, Method empty), a server-initiated request
+// (ID set, Method non-empty), or a notification (ID absent/null).
+//
+// ID is json.RawMessage rather than *int64 because JSON-RPC 2.0 permits
+// string ids, and a spec-conforming server may send a server-initiated
+// request (e.g. "elicitation/create") with a string id — a *int64 field
+// would fail to unmarshal that message and silently drop it (json.Unmarshal
+// returns an error on the whole rpcResponse, and recvLoop's "continue" on
+// unmarshal failure means the message — and any reply the server was
+// waiting on — vanishes). Responses to our own outgoing calls always carry
+// the int64 id we generated (see Client.call), so pending-map lookups
+// unmarshal ID into an int64 at match time; server-initiated request ids
+// are forwarded verbatim (as raw bytes, whatever their JSON type) in the
+// reply so they round-trip exactly as sent.
 type rpcResponse struct {
 	JSONRPC string          `json:"jsonrpc"`
-	ID      *int64          `json:"id"`
+	ID      json.RawMessage `json:"id,omitempty"`
 	Method  string          `json:"method,omitempty"`
 	Params  json.RawMessage `json:"params,omitempty"`
 	Result  json.RawMessage `json:"result,omitempty"`
 	Error   *rpcErrorObj    `json:"error,omitempty"`
 }
 
+// idIsAbsent reports whether raw represents a missing/null JSON-RPC id
+// (i.e. a notification), matching the old *int64-nil semantics for both an
+// entirely absent "id" field and an explicit "id": null.
+func idIsAbsent(raw json.RawMessage) bool {
+	return len(raw) == 0 || string(raw) == "null"
+}
+
 // serverRequest is a JSON-RPC request sent by the server to the client
-// (e.g. "elicitation/create"). Handled by Client.dispatchServerRequest.
+// (e.g. "elicitation/create"). Handled by Client.dispatchServerRequest. ID
+// is the raw wire id (int or string, per JSON-RPC 2.0) and is echoed back
+// verbatim in the reply.
 type serverRequest struct {
-	ID     int64
+	ID     json.RawMessage
 	Method string
 	Params json.RawMessage
 }
@@ -137,22 +158,32 @@ func (c *Client) recvLoop() {
 		if err := json.Unmarshal(msg, &resp); err != nil {
 			continue // malformed message, drop
 		}
-		if resp.ID == nil {
+		if idIsAbsent(resp.ID) {
 			continue // notification, ignored
 		}
 		if resp.Method != "" {
 			// Server-initiated request: dispatch on a new goroutine so a
 			// slow handler doesn't block recvLoop from reading further
-			// messages (e.g. responses to our own in-flight calls).
-			req := serverRequest{ID: *resp.ID, Method: resp.Method, Params: resp.Params}
+			// messages (e.g. responses to our own in-flight calls). The id
+			// is forwarded verbatim (raw bytes) so string ids round-trip.
+			req := serverRequest{ID: resp.ID, Method: resp.Method, Params: resp.Params}
 			go c.dispatchServerRequest(req)
 			continue
 		}
 
+		// A response to one of our own calls: we always generate int64
+		// ids for outgoing requests (see Client.call), so the id here is
+		// always a JSON number — decode it to find the matching pending
+		// entry.
+		var idNum int64
+		if err := json.Unmarshal(resp.ID, &idNum); err != nil {
+			continue // not one of our ids (unexpected shape), drop
+		}
+
 		c.mu.Lock()
-		ch, ok := c.pending[*resp.ID]
+		ch, ok := c.pending[idNum]
 		if ok {
-			delete(c.pending, *resp.ID)
+			delete(c.pending, idNum)
 		}
 		c.mu.Unlock()
 
@@ -228,17 +259,18 @@ func (c *Client) removePending(id int64) {
 }
 
 // serverResponseWire is the wire shape of the client's reply to a
-// server-initiated request.
+// server-initiated request. ID is the raw id from the server's request,
+// echoed back verbatim (int or string, per JSON-RPC 2.0).
 type serverResponseWire struct {
-	JSONRPC string       `json:"jsonrpc"`
-	ID      int64        `json:"id"`
-	Result  any          `json:"result,omitempty"`
-	Error   *rpcErrorObj `json:"error,omitempty"`
+	JSONRPC string          `json:"jsonrpc"`
+	ID      json.RawMessage `json:"id"`
+	Result  any             `json:"result,omitempty"`
+	Error   *rpcErrorObj    `json:"error,omitempty"`
 }
 
 // respondServerResult sends a successful reply to a server-initiated
 // request, with the same id, serialized via sendMu like any other write.
-func (c *Client) respondServerResult(id int64, result any) {
+func (c *Client) respondServerResult(id json.RawMessage, result any) {
 	resp := serverResponseWire{JSONRPC: "2.0", ID: id, Result: result}
 	b, err := json.Marshal(resp)
 	if err != nil {
@@ -251,7 +283,7 @@ func (c *Client) respondServerResult(id int64, result any) {
 
 // respondServerError sends a JSON-RPC error reply to a server-initiated
 // request, with the same id.
-func (c *Client) respondServerError(id int64, code int, message string) {
+func (c *Client) respondServerError(id json.RawMessage, code int, message string) {
 	resp := serverResponseWire{JSONRPC: "2.0", ID: id, Error: &rpcErrorObj{Code: code, Message: message}}
 	b, err := json.Marshal(resp)
 	if err != nil {

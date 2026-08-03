@@ -53,6 +53,41 @@ func TestHTTPTransportTokenProviderPerRequest(t *testing.T) {
 	}
 }
 
+// TestHTTPTransportTokenProviderErrorFailsCleanly asserts that when
+// TokenProvider.Token returns an error, Send fails immediately with that
+// error, never issues an HTTP call to the server, and does not retry (the
+// error isn't a *retryableHTTPError, so it must propagate straight through
+// Send's retry loop on the first attempt).
+func TestHTTPTransportTokenProviderErrorFailsCleanly(t *testing.T) {
+	var gotRequest int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&gotRequest, 1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
+	}))
+	defer srv.Close()
+
+	wantErr := errors.New("token unavailable")
+	tp := TokenProviderFunc(func(ctx context.Context) (string, error) { return "", wantErr })
+
+	tr := NewStreamableHTTPTransportWithOptions(srv.URL, WithTokenProvider(tp), WithHTTPRetry(3))
+	defer tr.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	err := tr.Send(ctx, json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"a"}`))
+	if err == nil {
+		t.Fatal("Send: want error from TokenProvider, got nil")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Send err = %v, want it to wrap %v", err, wantErr)
+	}
+	if atomic.LoadInt32(&gotRequest) != 0 {
+		t.Fatalf("server received %d requests, want 0 (no HTTP call should be made)", gotRequest)
+	}
+}
+
 // TestHTTPTransportCustomAuthHeader asserts WithAuthHeader sends the raw
 // token (no Bearer prefix) under the configured header name, and does not
 // also set Authorization.

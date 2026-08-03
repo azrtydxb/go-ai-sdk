@@ -144,6 +144,123 @@ func TestElicitationHandlerErrorRespondsCancel(t *testing.T) {
 	}
 }
 
+// sendServerRequestRawID sends a server-initiated JSON-RPC request whose id
+// is an arbitrary raw JSON value (e.g. a JSON-RPC-legal string id), to pin
+// that string ids round-trip through dispatchServerRequest instead of being
+// silently dropped (a *int64-typed id field would fail to unmarshal a
+// string id, and recvLoop's "malformed message, drop" path would eat the
+// entire request).
+func sendServerRequestRawID(t *testing.T, server *pipeTransport, rawID json.RawMessage, method string, params any) {
+	t.Helper()
+	req := struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      json.RawMessage `json:"id"`
+		Method  string          `json:"method"`
+		Params  any             `json:"params,omitempty"`
+	}{"2.0", rawID, method, params}
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+	if err := server.Send(ctx, mustMarshal(t, req)); err != nil {
+		t.Fatalf("server send: %v", err)
+	}
+}
+
+// recvServerResponseRawID is like recvServerResponse but preserves the raw
+// id bytes instead of decoding into an int64, so a string id can be
+// asserted against exactly.
+func recvServerResponseRawID(t *testing.T, server *pipeTransport) (rawID json.RawMessage, result json.RawMessage, errObj *rpcErrorObj) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+	raw, err := server.Receive(ctx)
+	if err != nil {
+		t.Fatalf("server receive: %v", err)
+	}
+	var m struct {
+		ID     json.RawMessage `json:"id"`
+		Result json.RawMessage `json:"result"`
+		Error  *rpcErrorObj    `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("server decode: %v", err)
+	}
+	return m.ID, m.Result, m.Error
+}
+
+// TestServerRequestStringIDRoundTrips pins that a server-initiated request
+// with a JSON-RPC-legal *string* id (not the int64 ids this client
+// generates for its own outgoing calls) is dispatched and answered with
+// that exact string id echoed back — not dropped, and not coerced/truncated
+// to a number.
+func TestServerRequestStringIDRoundTrips(t *testing.T) {
+	client, server := newPipePair()
+	c := NewClient(client)
+	defer c.Close()
+
+	c.SetElicitationHandler(func(ctx context.Context, req ElicitationRequest) (ElicitationResult, error) {
+		return ElicitationResult{Action: "decline"}, nil
+	})
+
+	initializeWithCaps(t, client, server, c, map[string]any{"elicitation": map[string]any{}})
+
+	sendServerRequestRawID(t, server, json.RawMessage(`"req-1"`), "elicitation/create", map[string]any{
+		"message": "input?",
+	})
+
+	gotID, result, errObj := recvServerResponseRawID(t, server)
+	if errObj != nil {
+		t.Fatalf("Error = %+v, want nil", errObj)
+	}
+	if string(gotID) != `"req-1"` {
+		t.Fatalf("ID = %s, want %q", gotID, `"req-1"`)
+	}
+	var res struct {
+		Action string `json:"action"`
+	}
+	if err := json.Unmarshal(result, &res); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if res.Action != "decline" {
+		t.Fatalf("Action = %q, want decline", res.Action)
+	}
+}
+
+// TestElicitationCreateMalformedParamsRespondsInvalidParams pins that
+// unparseable "elicitation/create" params get a JSON-RPC -32602 "Invalid
+// params" error reply (mirroring the -32601 "Method not found" path for
+// unknown methods), not a synthesized Action "cancel" result — a malformed
+// request is a protocol-level error, not a user decision the caller made.
+func TestElicitationCreateMalformedParamsRespondsInvalidParams(t *testing.T) {
+	client, server := newPipePair()
+	c := NewClient(client)
+	defer c.Close()
+
+	c.SetElicitationHandler(func(ctx context.Context, req ElicitationRequest) (ElicitationResult, error) {
+		t.Fatal("handler should not be invoked for malformed params")
+		return ElicitationResult{}, nil
+	})
+
+	initializeWithCaps(t, client, server, c, map[string]any{"elicitation": map[string]any{}})
+
+	// "params" is a JSON array where an object is expected: unmarshal into
+	// elicitationCreateParamsWire fails.
+	sendServerRequest(t, server, 11, "elicitation/create", []int{1, 2, 3})
+
+	resp := recvServerResponse(t, server)
+	if resp.ID != 11 {
+		t.Fatalf("ID = %d, want 11", resp.ID)
+	}
+	if resp.Error == nil {
+		t.Fatalf("Error = nil, want -32602")
+	}
+	if resp.Error.Code != rpcInvalidParams {
+		t.Fatalf("Error.Code = %d, want %d", resp.Error.Code, rpcInvalidParams)
+	}
+	if resp.Result != nil {
+		t.Fatalf("Result = %s, want nil (error reply must not also carry a result)", resp.Result)
+	}
+}
+
 func TestUnknownServerMethodRespondsMethodNotFound(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
