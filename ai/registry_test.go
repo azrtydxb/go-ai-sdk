@@ -13,6 +13,7 @@ import (
 	"github.com/azrtydxb/go-ai-sdk/provider"
 	"github.com/azrtydxb/go-ai-sdk/providers/bedrock"
 	"github.com/azrtydxb/go-ai-sdk/providers/cohere"
+	"github.com/azrtydxb/go-ai-sdk/providers/luma"
 	"github.com/azrtydxb/go-ai-sdk/providers/openai"
 )
 
@@ -94,6 +95,19 @@ func TestRegistry_RerankingModel(t *testing.T) {
 	}
 }
 
+func TestRegistry_VideoModel(t *testing.T) {
+	r := ai.NewRegistry()
+	r.Register("luma", luma.New())
+
+	m, err := r.VideoModel("luma:ray-2")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m.ModelID() != "ray-2" {
+		t.Errorf("ModelID() = %q, want %q", m.ModelID(), "ray-2")
+	}
+}
+
 func TestRegistry_InvalidModelID(t *testing.T) {
 	r := ai.NewRegistry()
 	r.Register("openai", openai.New())
@@ -152,6 +166,11 @@ func TestRegistry_CapabilityNotSupported(t *testing.T) {
 			"reranking",
 			func() error { _, err := r.RerankingModel("bedrock:foo"); return err },
 			`ai: provider "bedrock" does not support reranking models`,
+		},
+		{
+			"video",
+			func() error { _, err := r.VideoModel("bedrock:foo"); return err },
+			`ai: provider "bedrock" does not support video models`,
 		},
 	}
 	for _, tt := range tests {

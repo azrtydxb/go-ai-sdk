@@ -66,6 +66,12 @@ func (p *Provider) ImageModel(id string) provider.ImageModel {
 	return &imageModel{provider: p, modelID: id}
 }
 
+// VideoModel returns a provider.VideoModel for the given Replicate model ID
+// (e.g. "minimax/video-01").
+func (p *Provider) VideoModel(id string) provider.VideoModel {
+	return &videoModel{provider: p, modelID: id}
+}
+
 func (p *Provider) client() *http.Client {
 	if p.httpClient != nil {
 		return p.httpClient

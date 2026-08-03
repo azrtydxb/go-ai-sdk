@@ -32,6 +32,12 @@ type SpeechModelProvider interface {
 	SpeechModel(id string) provider.SpeechModel
 }
 
+// VideoModelProvider is implemented by provider packages that can
+// construct a provider.VideoModel for a given model ID.
+type VideoModelProvider interface {
+	VideoModel(id string) provider.VideoModel
+}
+
 // TranscriptionModelProvider is implemented by provider packages that can
 // construct a provider.TranscriptionModel for a given model ID.
 type TranscriptionModelProvider interface {
@@ -157,6 +163,23 @@ func (r *Registry) SpeechModel(id string) (provider.SpeechModel, error) {
 		return nil, fmt.Errorf("ai: provider %q does not support speech models", name)
 	}
 	return sp.SpeechModel(model), nil
+}
+
+// VideoModel resolves id ("provider:model") into a provider.VideoModel.
+func (r *Registry) VideoModel(id string) (provider.VideoModel, error) {
+	name, model, err := splitID(id)
+	if err != nil {
+		return nil, err
+	}
+	p, err := r.lookup(name)
+	if err != nil {
+		return nil, err
+	}
+	vp, ok := p.(VideoModelProvider)
+	if !ok {
+		return nil, fmt.Errorf("ai: provider %q does not support video models", name)
+	}
+	return vp.VideoModel(model), nil
 }
 
 // TranscriptionModel resolves id ("provider:model") into a

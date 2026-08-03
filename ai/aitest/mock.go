@@ -173,6 +173,30 @@ func (m *MockImageModel) ModelID() string { return "mock" }
 // ProviderName implements provider.ImageModel.
 func (m *MockImageModel) ProviderName() string { return "aitest" }
 
+// MockVideoModel is a provider.VideoModel test double that returns a
+// scripted response or fails every call with Err if set.
+type MockVideoModel struct {
+	Response *provider.VideoResponse
+	Err      error                // if set, every call fails with it
+	Calls    []provider.VideoCall // records every GenerateVideos call
+}
+
+// GenerateVideos implements provider.VideoModel. It records the call, then
+// returns Err if set, otherwise Response.
+func (m *MockVideoModel) GenerateVideos(ctx context.Context, call provider.VideoCall) (*provider.VideoResponse, error) {
+	m.Calls = append(m.Calls, call)
+	if m.Err != nil {
+		return nil, m.Err
+	}
+	return m.Response, nil
+}
+
+// ModelID implements provider.VideoModel.
+func (m *MockVideoModel) ModelID() string { return "mock" }
+
+// ProviderName implements provider.VideoModel.
+func (m *MockVideoModel) ProviderName() string { return "aitest" }
+
 // MockSpeechModel is a provider.SpeechModel test double that returns a
 // scripted response or fails every call with Err if set.
 type MockSpeechModel struct {

@@ -71,6 +71,12 @@ func (p *Provider) ImageModel(id string) provider.ImageModel {
 	return &imageModel{provider: p, modelID: id}
 }
 
+// VideoModel returns a provider.VideoModel for the given fal.ai model ID
+// (e.g. "fal-ai/kling-video/v1/standard/text-to-video").
+func (p *Provider) VideoModel(id string) provider.VideoModel {
+	return &videoModel{provider: p, modelID: id}
+}
+
 func (p *Provider) client() *http.Client {
 	if p.httpClient != nil {
 		return p.httpClient
