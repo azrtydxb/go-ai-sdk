@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/textproto"
 
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -37,6 +38,23 @@ type fileWireResponse struct {
 	MimeType  string `json:"mime_type"`
 }
 
+// createFilePart adds the "file" part to mw, using filename and, when
+// mediaType is non-empty, a Content-Type header carrying it — mirroring
+// internal/openaicompat's translation upload path. An empty mediaType
+// falls back to mw.CreateFormFile, which (per net/http's sniffing
+// convention) always writes "application/octet-stream" and leaves
+// call.FileUploadCall.MediaType's information dropped, matching prior
+// behavior for callers that don't set MediaType.
+func createFilePart(mw *multipart.Writer, filename, mediaType string) (io.Writer, error) {
+	if mediaType == "" {
+		return mw.CreateFormFile("file", filename)
+	}
+	h := make(textproto.MIMEHeader)
+	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename=%q`, filename))
+	h.Set("Content-Type", mediaType)
+	return mw.CreatePart(h)
+}
+
 // UploadFile implements provider.FileStore. It POSTs a multipart request to
 // {base}/v1/files with a "file" field, sending the x-api-key,
 // anthropic-version, and anthropic-beta: files-api-2025-04-14 headers.
@@ -48,7 +66,7 @@ func (s *fileStore) UploadFile(ctx context.Context, call provider.FileUploadCall
 	if filename == "" {
 		filename = "file"
 	}
-	fw, err := mw.CreateFormFile("file", filename)
+	fw, err := createFilePart(mw, filename, call.MediaType)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: create file part: %w", err)
 	}

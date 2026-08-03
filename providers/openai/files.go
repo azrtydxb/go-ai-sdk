@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/textproto"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
 	"github.com/azrtydxb/go-ai-sdk/provider"
@@ -60,6 +61,23 @@ func fileAPIError(resp *http.Response, body []byte) error {
 	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), fileErrorMessage(body))
 }
 
+// createFilePart adds the "file" part to mw, using filename and, when
+// mediaType is non-empty, a Content-Type header carrying it — mirroring
+// internal/openaicompat's translation upload path. An empty mediaType
+// falls back to mw.CreateFormFile, which (per net/http's sniffing
+// convention) always writes "application/octet-stream" and leaves
+// call.FileUploadCall.MediaType's information dropped, matching prior
+// behavior for callers that don't set MediaType.
+func createFilePart(mw *multipart.Writer, filename, mediaType string) (io.Writer, error) {
+	if mediaType == "" {
+		return mw.CreateFormFile("file", filename)
+	}
+	h := make(textproto.MIMEHeader)
+	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename=%q`, filename))
+	h.Set("Content-Type", mediaType)
+	return mw.CreatePart(h)
+}
+
 // UploadFile implements provider.FileStore. It POSTs a multipart request to
 // {base}/files with fields "file" and "purpose" (defaulting to "user_data").
 func (s *fileStore) UploadFile(ctx context.Context, call provider.FileUploadCall) (*provider.FileInfo, error) {
@@ -70,7 +88,7 @@ func (s *fileStore) UploadFile(ctx context.Context, call provider.FileUploadCall
 	if filename == "" {
 		filename = "file"
 	}
-	fw, err := mw.CreateFormFile("file", filename)
+	fw, err := createFilePart(mw, filename, call.MediaType)
 	if err != nil {
 		return nil, fmt.Errorf("openai: create file part: %w", err)
 	}

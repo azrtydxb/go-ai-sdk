@@ -16,10 +16,11 @@ import (
 )
 
 type filesFixture struct {
-	uploadAuth     string
-	uploadFilename string
-	uploadPurpose  string
-	uploadData     []byte
+	uploadAuth        string
+	uploadFilename    string
+	uploadPurpose     string
+	uploadData        []byte
+	uploadContentType string
 
 	deleteMethod string
 	deletePath   string
@@ -46,6 +47,7 @@ func newFilesFixture(t *testing.T, uploadStatus int, uploadBody string, deleteSt
 				switch part.FormName() {
 				case "file":
 					f.uploadFilename = part.FileName()
+					f.uploadContentType = part.Header.Get("Content-Type")
 					f.uploadData, _ = io.ReadAll(part)
 				case "purpose":
 					b, _ := io.ReadAll(part)
@@ -97,6 +99,28 @@ func TestFilesUploadFileHappyPath(t *testing.T) {
 	}
 	if info.Raw == nil {
 		t.Error("info.Raw = nil, want set")
+	}
+	if f.uploadContentType != "application/pdf" {
+		t.Errorf("uploaded file part Content-Type = %q, want application/pdf (MediaType must not be dropped)", f.uploadContentType)
+	}
+}
+
+// --- Fix wave IMPORTANT 2 — FileUploadCall.MediaType must not be silently
+// dropped; an empty MediaType keeps the prior CreateFormFile behavior
+// (application/octet-stream). ---
+
+func TestFilesUploadFileEmptyMediaTypeDefaultsOctetStream(t *testing.T) {
+	srv, f := newFilesFixture(t, http.StatusOK, `{"id":"file-1","filename":"a","bytes":1}`, http.StatusOK, "")
+	store := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Files()
+
+	if _, err := store.UploadFile(context.Background(), provider.FileUploadCall{
+		Data:     []byte("a"),
+		Filename: "a",
+	}); err != nil {
+		t.Fatalf("UploadFile: %v", err)
+	}
+	if f.uploadContentType != "application/octet-stream" {
+		t.Errorf("uploaded file part Content-Type = %q, want application/octet-stream", f.uploadContentType)
 	}
 }
 
