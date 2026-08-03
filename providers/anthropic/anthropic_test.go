@@ -267,6 +267,89 @@ func TestRequestShapeMaxTokensExplicit(t *testing.T) {
 	}
 }
 
+// TestRequestShapeTopK asserts call.TopK serializes under Anthropic's top_k
+// wire name.
+func TestRequestShapeTopK(t *testing.T) {
+	srv, fs := newFixtureServer(t)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
+
+	topK := 40
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{provider.UserText("simple")},
+		TopK:     &topK,
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if fs.lastRequest.TopK == nil || *fs.lastRequest.TopK != 40 {
+		t.Errorf("TopK = %v, want 40", fs.lastRequest.TopK)
+	}
+}
+
+// TestRequestShapePresenceFrequencyPenaltySeedIgnored asserts
+// call.PresencePenalty, call.FrequencyPenalty, and call.Seed are NOT sent —
+// the Messages API has no equivalent parameters.
+func TestRequestShapePresenceFrequencyPenaltySeedIgnored(t *testing.T) {
+	srv, fs := newFixtureServer(t)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
+
+	presence := 0.5
+	frequency := -0.5
+	seed := int64(7)
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages:         []provider.Message{provider.UserText("simple")},
+		PresencePenalty:  &presence,
+		FrequencyPenalty: &frequency,
+		Seed:             &seed,
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(fs.rawBody(), &raw); err != nil {
+		t.Fatalf("decode raw request: %v", err)
+	}
+	for _, key := range []string{"presence_penalty", "frequency_penalty", "seed"} {
+		if _, ok := raw[key]; ok {
+			t.Errorf("request unexpectedly contains %q (unsupported by the Messages API): %s", key, fs.rawBody())
+		}
+	}
+}
+
+// TestRequestShapeHeaders asserts call.Headers entries are sent as extra
+// HTTP headers, and that an entry matching the auth header name
+// (case-insensitively) does not clobber the API key.
+func TestRequestShapeHeaders(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-Custom-Header"); got != "custom-value" {
+			t.Errorf("X-Custom-Header = %q, want custom-value", got)
+		}
+		if got := r.Header.Get("x-api-key"); got != "k" {
+			t.Errorf("x-api-key = %q, want k (Headers must not clobber auth)", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		resp := messageResponse{
+			Content:    []wireContentBlock{{Type: "text", Text: "hi"}},
+			StopReason: "end_turn",
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	t.Cleanup(srv.Close)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{provider.UserText("simple")},
+		Headers: map[string]string{
+			"X-Custom-Header": "custom-value",
+			"X-Api-Key":       "should-not-win",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+}
+
 func TestRequestShapeToolsAndSchema(t *testing.T) {
 	srv, fs := newFixtureServer(t)
 	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")

@@ -64,22 +64,57 @@ func escapeModelID(id string) string {
 	return buf.String()
 }
 
-func (m *languageModel) doRequest(ctx context.Context, path string, body []byte) (*http.Response, error) {
-	return m.provider.doRequest(ctx, path, body)
+func (m *languageModel) doRequest(ctx context.Context, path string, body []byte, headers map[string]string) (*http.Response, error) {
+	return m.provider.doRequest(ctx, path, body, headers)
 }
+
+// bedrockAuthHeader is the HTTP header SigV4 signing sets the computed
+// signature on; extra headers from provider.Call.Headers must not be able
+// to override it.
+const bedrockAuthHeader = "Authorization"
 
 // doRequest builds a SigV4-signed POST request against path with the given
 // body and executes it. Shared by the language model (converse /
-// converse-stream) and the embedding model (Titan /invoke).
-func (p *Provider) doRequest(ctx context.Context, path string, body []byte) (*http.Response, error) {
+// converse-stream) and the embedding model (Titan /invoke, which always
+// passes nil headers — extra headers are not implemented on the embedding
+// path this wave).
+//
+// headers entries are split by whether they participate in SigV4 signing:
+// an entry whose key case-insensitively starts with "x-amz-" is set on the
+// request BEFORE signing, so sigv4.Sign includes it in the canonical
+// request and its signature (SigV4 signs every x-amz-* header present at
+// signing time); every other entry is set AFTER signing, reaching the wire
+// unsigned. Either way, an entry named "Authorization" is dropped — Sign
+// always computes and sets that header itself, and Call.Headers must never
+// be able to override a provider's authentication.
+func (p *Provider) doRequest(ctx context.Context, path string, body []byte, headers map[string]string) (*http.Response, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, path, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("bedrock: build request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
+	var unsigned map[string]string
+	for k, v := range headers {
+		switch {
+		case strings.EqualFold(k, bedrockAuthHeader):
+			continue
+		case len(k) >= 6 && strings.EqualFold(k[:6], "x-amz-"):
+			httpReq.Header.Set(k, v)
+		default:
+			if unsigned == nil {
+				unsigned = make(map[string]string, len(headers))
+			}
+			unsigned[k] = v
+		}
+	}
+
 	if err := sigv4.Sign(httpReq, body, p.creds, p.region, defaultServiceOpt, time.Now()); err != nil {
 		return nil, fmt.Errorf("bedrock: sign request: %w", err)
+	}
+
+	for k, v := range unsigned {
+		httpReq.Header.Set(k, v)
 	}
 
 	resp, err := p.client().Do(httpReq)
@@ -107,7 +142,7 @@ func (m *languageModel) Generate(ctx context.Context, call provider.Call) (*prov
 		return nil, fmt.Errorf("bedrock: apply provider options: %w", err)
 	}
 
-	resp, err := m.doRequest(ctx, m.modelPath("/converse"), body)
+	resp, err := m.doRequest(ctx, m.modelPath("/converse"), body, call.Headers)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +179,7 @@ func (m *languageModel) Stream(ctx context.Context, call provider.Call) (provide
 		return nil, fmt.Errorf("bedrock: apply provider options: %w", err)
 	}
 
-	resp, err := m.doRequest(ctx, m.modelPath("/converse-stream"), body)
+	resp, err := m.doRequest(ctx, m.modelPath("/converse-stream"), body, call.Headers)
 	if err != nil {
 		return nil, err
 	}

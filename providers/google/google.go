@@ -69,11 +69,12 @@ func (p *Provider) authorize(_ context.Context, req *http.Request) error {
 
 func (p *Provider) config() geminicompat.Config {
 	return geminicompat.Config{
-		Name:        "google",
-		HTTPClient:  p.httpClient,
-		EndpointFor: p.endpointFor,
-		Authorize:   p.authorize,
-		EmbedBatch:  embeddingMaxBatchSize,
+		Name:           "google",
+		HTTPClient:     p.httpClient,
+		EndpointFor:    p.endpointFor,
+		Authorize:      p.authorize,
+		EmbedBatch:     embeddingMaxBatchSize,
+		AuthHeaderName: "x-goog-api-key",
 	}
 }
 

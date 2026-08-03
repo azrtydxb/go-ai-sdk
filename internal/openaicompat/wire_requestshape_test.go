@@ -485,3 +485,71 @@ func TestRequestShapeJSONObjectOnly(t *testing.T) {
 		t.Errorf("response_format.type = %q, want json_object", rf["type"])
 	}
 }
+
+// TestRequestShapePresenceFrequencyPenaltySeed asserts call.PresencePenalty,
+// call.FrequencyPenalty, and call.Seed serialize under their OpenAI wire
+// names, and that call.TopK is NOT sent (OpenAI's chat-completions API has
+// no top_k parameter).
+func TestRequestShapePresenceFrequencyPenaltySeed(t *testing.T) {
+	model, srv := newTestLanguageModel(t)
+
+	presence := 0.5
+	frequency := -0.25
+	seed := int64(42)
+	topK := 7
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages:         []provider.Message{provider.UserText("simple")},
+		PresencePenalty:  &presence,
+		FrequencyPenalty: &frequency,
+		Seed:             &seed,
+		TopK:             &topK,
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(lastRawBody(srv), &raw); err != nil {
+		t.Fatalf("decode raw request: %v", err)
+	}
+
+	var gotPresence, gotFrequency float64
+	var gotSeed int64
+	if err := json.Unmarshal(raw["presence_penalty"], &gotPresence); err != nil || gotPresence != presence {
+		t.Errorf("presence_penalty = %s, want %v", raw["presence_penalty"], presence)
+	}
+	if err := json.Unmarshal(raw["frequency_penalty"], &gotFrequency); err != nil || gotFrequency != frequency {
+		t.Errorf("frequency_penalty = %s, want %v", raw["frequency_penalty"], frequency)
+	}
+	if err := json.Unmarshal(raw["seed"], &gotSeed); err != nil || gotSeed != seed {
+		t.Errorf("seed = %s, want %v", raw["seed"], seed)
+	}
+	if _, ok := raw["top_k"]; ok {
+		t.Errorf("request unexpectedly contains top_k (unsupported by OpenAI chat-completions): %s", lastRawBody(srv))
+	}
+}
+
+// TestRequestShapeHeaders asserts call.Headers entries are sent as extra
+// HTTP headers, and that an entry matching the auth header name
+// (case-insensitively) does not clobber the API key.
+func TestRequestShapeHeaders(t *testing.T) {
+	model, srv := newTestLanguageModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{provider.UserText("simple")},
+		Headers: map[string]string{
+			"X-Custom-Header": "custom-value",
+			"authorization":   "should-not-win",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	if got := srv.HeaderValues("X-Custom-Header"); len(got) != 1 || got[0] != "custom-value" {
+		t.Errorf("X-Custom-Header = %v, want [custom-value]", got)
+	}
+	if got := srv.HeaderValues("Authorization"); len(got) != 1 || got[0] != "Bearer k" {
+		t.Errorf("Authorization = %v, want [Bearer k] (Headers must not clobber auth)", got)
+	}
+}

@@ -21,6 +21,18 @@ type GenerateTextOpts struct {
 	Temperature   *float64
 	TopP          *float64
 	StopSequences []string
+	// TopK, PresencePenalty, FrequencyPenalty, and Seed are threaded through
+	// to the identically-named provider.Call fields unchanged — see those
+	// fields' docs for per-provider support and wire-name mapping.
+	TopK             *int
+	PresencePenalty  *float64
+	FrequencyPenalty *float64
+	Seed             *int64
+	// Headers carries extra HTTP headers to send with the request; threaded
+	// through to provider.Call.Headers unchanged — see that field's doc for
+	// precedence (it never overrides the provider's auth header) and which
+	// request paths implement it.
+	Headers map[string]string
 
 	// StopWhen, when set, decides after each completed step whether to stop
 	// the tool loop (return true = stop). It is evaluated only when that
@@ -177,14 +189,19 @@ func buildCall(opts GenerateTextOpts) (provider.Call, error) {
 	}
 
 	return provider.Call{
-		Messages:        messages,
-		Tools:           toolDefs,
-		ToolChoice:      opts.ToolChoice,
-		MaxTokens:       opts.MaxTokens,
-		Temperature:     opts.Temperature,
-		TopP:            opts.TopP,
-		StopSequences:   opts.StopSequences,
-		ProviderOptions: opts.ProviderOptions,
+		Messages:         messages,
+		Tools:            toolDefs,
+		ToolChoice:       opts.ToolChoice,
+		MaxTokens:        opts.MaxTokens,
+		Temperature:      opts.Temperature,
+		TopP:             opts.TopP,
+		StopSequences:    opts.StopSequences,
+		TopK:             opts.TopK,
+		PresencePenalty:  opts.PresencePenalty,
+		FrequencyPenalty: opts.FrequencyPenalty,
+		Seed:             opts.Seed,
+		Headers:          opts.Headers,
+		ProviderOptions:  opts.ProviderOptions,
 	}, nil
 }
 

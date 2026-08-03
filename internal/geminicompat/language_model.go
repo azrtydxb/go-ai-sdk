@@ -32,7 +32,7 @@ func (m *languageModel) Capabilities() provider.Capabilities {
 	return provider.Capabilities{NativeJSON: true}
 }
 
-func (m *languageModel) doRequest(ctx context.Context, url string, body []byte) (*http.Response, error) {
+func (m *languageModel) doRequest(ctx context.Context, url string, body []byte, headers map[string]string) (*http.Response, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("%s: build request: %w", m.cfg.Name, err)
@@ -41,6 +41,7 @@ func (m *languageModel) doRequest(ctx context.Context, url string, body []byte) 
 	if err := m.cfg.Authorize(ctx, httpReq); err != nil {
 		return nil, fmt.Errorf("%s: authorize request: %w", m.cfg.Name, err)
 	}
+	applyExtraHeaders(httpReq, headers, m.cfg.authHeaderName())
 
 	return m.cfg.client().Do(httpReq)
 }
@@ -64,7 +65,7 @@ func (m *languageModel) Generate(ctx context.Context, call provider.Call) (*prov
 	}
 
 	url := m.cfg.EndpointFor(m.modelID, "generateContent")
-	resp, err := m.doRequest(ctx, url, body)
+	resp, err := m.doRequest(ctx, url, body, call.Headers)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +105,7 @@ func (m *languageModel) Stream(ctx context.Context, call provider.Call) (provide
 	// EndpointFor is called without query parameters; ?alt=sse is appended
 	// here so EndpointFor implementations stay query-free.
 	url := m.cfg.EndpointFor(m.modelID, "streamGenerateContent") + "?alt=sse"
-	resp, err := m.doRequest(ctx, url, body)
+	resp, err := m.doRequest(ctx, url, body, call.Headers)
 	if err != nil {
 		return nil, err
 	}

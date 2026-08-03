@@ -27,7 +27,11 @@ func (m *languageModel) Capabilities() provider.Capabilities {
 	return provider.Capabilities{NativeJSON: true}
 }
 
-func (m *languageModel) doRequest(ctx context.Context, req chatRequest, providerOptions map[string]any) (*http.Response, error) {
+// mistralAuthHeader is the HTTP header carrying the API key; extra headers
+// from provider.Call.Headers must not be able to override it.
+const mistralAuthHeader = "Authorization"
+
+func (m *languageModel) doRequest(ctx context.Context, req chatRequest, providerOptions map[string]any, headers map[string]string) (*http.Response, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("mistral: marshal request: %w", err)
@@ -43,7 +47,13 @@ func (m *languageModel) doRequest(ctx context.Context, req chatRequest, provider
 		return nil, fmt.Errorf("mistral: build request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+m.provider.apiKey)
+	httpReq.Header.Set(mistralAuthHeader, "Bearer "+m.provider.apiKey)
+	for k, v := range headers {
+		if strings.EqualFold(k, mistralAuthHeader) {
+			continue
+		}
+		httpReq.Header.Set(k, v)
+	}
 
 	return m.provider.client().Do(httpReq)
 }
@@ -58,7 +68,7 @@ func (m *languageModel) Generate(ctx context.Context, call provider.Call) (*prov
 		return nil, err
 	}
 
-	resp, err := m.doRequest(ctx, req, call.ProviderOptions)
+	resp, err := m.doRequest(ctx, req, call.ProviderOptions, call.Headers)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +97,7 @@ func (m *languageModel) Stream(ctx context.Context, call provider.Call) (provide
 		return nil, err
 	}
 
-	resp, err := m.doRequest(ctx, req, call.ProviderOptions)
+	resp, err := m.doRequest(ctx, req, call.ProviderOptions, call.Headers)
 	if err != nil {
 		return nil, err
 	}

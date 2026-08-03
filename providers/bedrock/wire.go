@@ -305,6 +305,13 @@ func buildConverseRequest(call provider.Call) (converseRequest, error) {
 			StopSequences: call.StopSequences,
 		}
 	}
+	// call.TopK, call.PresencePenalty, call.FrequencyPenalty, and call.Seed
+	// are intentionally ignored: the Converse API's base inferenceConfig has
+	// no equivalent fields (some individual foundation models accept
+	// similarly-named knobs via additionalModelRequestFields, but that is
+	// model-specific, not part of the Converse base contract this package
+	// maps — reach it via
+	// ProviderOptions["bedrock"]["additionalModelRequestFields"] instead).
 
 	// ResponseFormat is intentionally ignored: Bedrock's Converse API has no
 	// response-format field, and Capabilities().NativeJSON is false so the

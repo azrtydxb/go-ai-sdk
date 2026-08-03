@@ -59,7 +59,9 @@ func (m *embeddingModel) Embed(ctx context.Context, values []string) (*provider.
 	}
 
 	path := m.provider.modelPath(m.modelID, "/invoke")
-	resp, err := m.provider.doRequest(ctx, path, reqBody)
+	// Headers is not implemented on the embedding path this wave (nil ->
+	// no extra headers).
+	resp, err := m.provider.doRequest(ctx, path, reqBody, nil)
 	if err != nil {
 		return nil, err
 	}

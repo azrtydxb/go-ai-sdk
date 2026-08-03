@@ -6,6 +6,7 @@ package geminicompat
 import (
 	"context"
 	"net/http"
+	"strings"
 )
 
 // Config parameterizes a Gemini-compatible provider.
@@ -27,6 +28,34 @@ type Config struct {
 	// EmbedBatch is EmbeddingModel.MaxBatchSize(); callers only construct
 	// embedding models when > 0.
 	EmbedBatch int
+
+	// AuthHeaderName names the HTTP header Authorize sets its credential
+	// on, so extra headers from provider.Call.Headers can avoid clobbering
+	// it. Empty defaults to "Authorization" (Vertex's bearer token); Google
+	// AI Studio's API key goes on "x-goog-api-key" instead and sets this
+	// explicitly.
+	AuthHeaderName string
+}
+
+// authHeaderName returns c.AuthHeaderName, defaulting to "Authorization".
+func (c Config) authHeaderName() string {
+	if c.AuthHeaderName != "" {
+		return c.AuthHeaderName
+	}
+	return "Authorization"
+}
+
+// applyExtraHeaders sets each entry of headers on req, skipping any entry
+// whose key case-insensitively matches authHeaderName — the caller must not
+// be able to override the provider's own authentication header via
+// provider.Call.Headers.
+func applyExtraHeaders(req *http.Request, headers map[string]string, authHeaderName string) {
+	for k, v := range headers {
+		if strings.EqualFold(k, authHeaderName) {
+			continue
+		}
+		req.Header.Set(k, v)
+	}
 }
 
 // client returns the configured *http.Client, falling back to

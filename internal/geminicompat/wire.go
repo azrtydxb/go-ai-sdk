@@ -67,6 +67,10 @@ type wireGenerationConfig struct {
 	MaxOutputTokens  *int            `json:"maxOutputTokens,omitempty"`
 	Temperature      *float64        `json:"temperature,omitempty"`
 	TopP             *float64        `json:"topP,omitempty"`
+	TopK             *int            `json:"topK,omitempty"`
+	PresencePenalty  *float64        `json:"presencePenalty,omitempty"`
+	FrequencyPenalty *float64        `json:"frequencyPenalty,omitempty"`
+	Seed             *int64          `json:"seed,omitempty"`
 	StopSequences    []string        `json:"stopSequences,omitempty"`
 }
 
@@ -211,6 +215,22 @@ func buildGenerateContentRequest(modelID string, call provider.Call) (generateCo
 	}
 	if call.TopP != nil {
 		gc.TopP = call.TopP
+		haveGC = true
+	}
+	if call.TopK != nil {
+		gc.TopK = call.TopK
+		haveGC = true
+	}
+	if call.PresencePenalty != nil {
+		gc.PresencePenalty = call.PresencePenalty
+		haveGC = true
+	}
+	if call.FrequencyPenalty != nil {
+		gc.FrequencyPenalty = call.FrequencyPenalty
+		haveGC = true
+	}
+	if call.Seed != nil {
+		gc.Seed = call.Seed
 		haveGC = true
 	}
 	if len(call.StopSequences) > 0 {

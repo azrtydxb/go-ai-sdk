@@ -283,6 +283,89 @@ func TestRequestShapeMaxTokensField(t *testing.T) {
 	}
 }
 
+// TestRequestShapePenaltiesSeed asserts call.PresencePenalty and
+// call.FrequencyPenalty serialize under their OpenAI-matching wire names,
+// call.Seed serializes under Mistral's "random_seed" name, and call.TopK is
+// NOT sent (Mistral's chat completions API has no top_k parameter).
+func TestRequestShapePenaltiesSeed(t *testing.T) {
+	srv, fs := newFixtureServer(t)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("mistral-test")
+
+	presence := 0.5
+	frequency := -0.5
+	seed := int64(7)
+	topK := 40
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages:         []provider.Message{provider.UserText("simple")},
+		PresencePenalty:  &presence,
+		FrequencyPenalty: &frequency,
+		Seed:             &seed,
+		TopK:             &topK,
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(fs.rawBody(), &raw); err != nil {
+		t.Fatalf("decode raw request: %v", err)
+	}
+	var gotPresence, gotFrequency float64
+	var gotSeed int64
+	if err := json.Unmarshal(raw["presence_penalty"], &gotPresence); err != nil || gotPresence != presence {
+		t.Errorf("presence_penalty = %s, want %v", raw["presence_penalty"], presence)
+	}
+	if err := json.Unmarshal(raw["frequency_penalty"], &gotFrequency); err != nil || gotFrequency != frequency {
+		t.Errorf("frequency_penalty = %s, want %v", raw["frequency_penalty"], frequency)
+	}
+	if err := json.Unmarshal(raw["random_seed"], &gotSeed); err != nil || gotSeed != seed {
+		t.Errorf("random_seed = %s, want %v", raw["random_seed"], seed)
+	}
+	if _, ok := raw["seed"]; ok {
+		t.Errorf("request has seed field, want only random_seed: %s", fs.rawBody())
+	}
+	if _, ok := raw["top_k"]; ok {
+		t.Errorf("request unexpectedly contains top_k (unsupported by Mistral): %s", fs.rawBody())
+	}
+}
+
+// TestRequestShapeHeaders asserts call.Headers entries are sent as extra
+// HTTP headers, and that an entry matching the auth header name
+// (case-insensitively) does not clobber the API key.
+func TestRequestShapeHeaders(t *testing.T) {
+	var gotCustom, gotAuth string
+	hdrSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCustom = r.Header.Get("X-Custom-Header")
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		content := "hi"
+		resp := chatResponse{Choices: []chatResponseChoice{{
+			Message:      chatResponseMessage{Content: &content},
+			FinishReason: "stop",
+		}}}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	t.Cleanup(hdrSrv.Close)
+	model := New(WithAPIKey("k"), WithBaseURL(hdrSrv.URL)).Model("mistral-test")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{provider.UserText("simple")},
+		Headers: map[string]string{
+			"X-Custom-Header": "custom-value",
+			"authorization":   "should-not-win",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if gotCustom != "custom-value" {
+		t.Errorf("X-Custom-Header = %q, want custom-value", gotCustom)
+	}
+	if gotAuth != "Bearer k" {
+		t.Errorf("Authorization = %q, want Bearer k (Headers must not clobber auth)", gotAuth)
+	}
+}
+
 func TestRequestShapeToolChoiceRequiredIsAny(t *testing.T) {
 	srv, fs := newFixtureServer(t)
 	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("mistral-test")

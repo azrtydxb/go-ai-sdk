@@ -551,6 +551,94 @@ func TestRequestShape_ToolsAndInferenceConfig(t *testing.T) {
 	}
 }
 
+// TestRequestShape_TopKPenaltiesSeedIgnored asserts call.TopK,
+// call.PresencePenalty, call.FrequencyPenalty, and call.Seed do NOT
+// populate InferenceConfig (or anything else) — the Converse API's base
+// inferenceConfig has no equivalent fields.
+func TestRequestShape_TopKPenaltiesSeedIgnored(t *testing.T) {
+	model, fs := newTestModel(t)
+
+	topK := 40
+	presence := 0.5
+	frequency := -0.5
+	seed := int64(7)
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages:         []provider.Message{provider.UserText("simple")},
+		TopK:             &topK,
+		PresencePenalty:  &presence,
+		FrequencyPenalty: &frequency,
+		Seed:             &seed,
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	req, _, _ := fs.snapshot()
+	if req.InferenceConfig != nil {
+		t.Errorf("InferenceConfig = %+v, want nil (TopK/penalties/Seed unsupported and no other InferenceConfig field was set)", req.InferenceConfig)
+	}
+}
+
+// TestRequestShape_Headers asserts call.Headers entries reach the wire, with
+// the SigV4-specific split documented on Provider.doRequest: an x-amz-*
+// entry is signed (appears in the Authorization header's SignedHeaders
+// list), a non-x-amz-* entry is sent unsigned, and an entry named
+// "Authorization" never overrides the computed signature.
+func TestRequestShape_Headers(t *testing.T) {
+	var gotAuth, gotTraceID, gotCustom string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotTraceID = r.Header.Get("X-Amz-Trace-Id")
+		gotCustom = r.Header.Get("X-Custom-Header")
+		w.Header().Set("Content-Type", "application/json")
+		resp := converseResponse{
+			Output:     converseOutput{Message: wireMessage{Role: "assistant", Content: []wireContentBlock{{Text: strPtr("hi")}}}},
+			StopReason: "end_turn",
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	t.Cleanup(srv.Close)
+
+	p := New(
+		WithRegion("us-east-1"),
+		WithCredentials("AKIDEXAMPLE", "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY", ""),
+		WithBaseURL(srv.URL),
+	)
+	model := p.Model("anthropic.claude-3-sonnet-20240229-v1:0")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{provider.UserText("simple")},
+		Headers: map[string]string{
+			"X-Amz-Trace-Id":  "trace-123",
+			"X-Custom-Header": "custom-value",
+			"Authorization":   "should-not-win",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	if gotTraceID != "trace-123" {
+		t.Errorf("X-Amz-Trace-Id = %q, want trace-123", gotTraceID)
+	}
+	if gotCustom != "custom-value" {
+		t.Errorf("X-Custom-Header = %q, want custom-value", gotCustom)
+	}
+	if !strings.Contains(gotAuth, "AWS4-HMAC-SHA256") || !strings.Contains(gotAuth, "SignedHeaders=") {
+		t.Fatalf("Authorization malformed (Headers must not clobber the computed signature): %q", gotAuth)
+	}
+	signedHeaders := gotAuth[strings.Index(gotAuth, "SignedHeaders=")+len("SignedHeaders="):]
+	if idx := strings.Index(signedHeaders, ","); idx >= 0 {
+		signedHeaders = signedHeaders[:idx]
+	}
+	if !strings.Contains(signedHeaders, "x-amz-trace-id") {
+		t.Errorf("SignedHeaders = %q, want it to include x-amz-trace-id (x-amz-* headers participate in signing)", signedHeaders)
+	}
+	if strings.Contains(signedHeaders, "x-custom-header") {
+		t.Errorf("SignedHeaders = %q, want it NOT to include x-custom-header (non-x-amz-* headers are unsigned)", signedHeaders)
+	}
+}
+
 func TestRequestShape_ToolChoiceAutoAndTool(t *testing.T) {
 	model, fs := newTestModel(t)
 

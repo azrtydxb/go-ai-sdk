@@ -4,7 +4,10 @@
 // exposes an OpenAI-compatible API) can reuse it by supplying a Config.
 package openaicompat
 
-import "net/http"
+import (
+	"net/http"
+	"strings"
+)
 
 // Config parameterizes an OpenAI-compatible provider.
 type Config struct {
@@ -52,4 +55,26 @@ func (c Config) setAuthHeader(req *http.Request) {
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+c.APIKey)
+}
+
+// authHeaderName returns the HTTP header name c.setAuthHeader sets, so
+// callers applying extra headers can avoid clobbering it.
+func (c Config) authHeaderName() string {
+	if c.APIKeyHeader != "" {
+		return c.APIKeyHeader
+	}
+	return "Authorization"
+}
+
+// applyExtraHeaders sets each entry of headers on req, skipping any entry
+// whose key case-insensitively matches authHeaderName — the caller must not
+// be able to override the provider's own authentication header via
+// provider.Call.Headers.
+func applyExtraHeaders(req *http.Request, headers map[string]string, authHeaderName string) {
+	for k, v := range headers {
+		if strings.EqualFold(k, authHeaderName) {
+			continue
+		}
+		req.Header.Set(k, v)
+	}
 }

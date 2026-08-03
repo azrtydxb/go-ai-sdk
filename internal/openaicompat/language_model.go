@@ -33,7 +33,7 @@ func (m *languageModel) Capabilities() provider.Capabilities {
 	return provider.Capabilities{NativeJSON: m.cfg.NativeJSON}
 }
 
-func (m *languageModel) doRequest(ctx context.Context, req chatRequest, providerOptions map[string]any) (*http.Response, error) {
+func (m *languageModel) doRequest(ctx context.Context, req chatRequest, providerOptions map[string]any, headers map[string]string) (*http.Response, error) {
 	if m.cfg.BaseURL == "" {
 		return nil, fmt.Errorf("%s: base URL not configured", m.cfg.Name)
 	}
@@ -54,6 +54,7 @@ func (m *languageModel) doRequest(ctx context.Context, req chatRequest, provider
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	m.cfg.setAuthHeader(httpReq)
+	applyExtraHeaders(httpReq, headers, m.cfg.authHeaderName())
 
 	return m.cfg.client().Do(httpReq)
 }
@@ -68,7 +69,7 @@ func (m *languageModel) Generate(ctx context.Context, call provider.Call) (*prov
 		return nil, err
 	}
 
-	resp, err := m.doRequest(ctx, req, call.ProviderOptions)
+	resp, err := m.doRequest(ctx, req, call.ProviderOptions, call.Headers)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +98,7 @@ func (m *languageModel) Stream(ctx context.Context, call provider.Call) (provide
 		return nil, err
 	}
 
-	resp, err := m.doRequest(ctx, req, call.ProviderOptions)
+	resp, err := m.doRequest(ctx, req, call.ProviderOptions, call.Headers)
 	if err != nil {
 		return nil, err
 	}

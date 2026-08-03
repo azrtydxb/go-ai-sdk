@@ -31,6 +31,7 @@ func testConfig(baseURL string) Config {
 			req.Header.Set("x-goog-api-key", "k")
 			return nil
 		},
+		AuthHeaderName: "x-goog-api-key",
 	}
 }
 
@@ -446,5 +447,70 @@ func TestRequestShapeAssistantToolCallParsedArgs(t *testing.T) {
 	}
 	if args["city"] != "Ghent" {
 		t.Errorf("args.city = %q, want Ghent", args["city"])
+	}
+}
+
+// TestRequestShapeTopKPenaltiesSeed asserts call.TopK, call.PresencePenalty,
+// call.FrequencyPenalty, and call.Seed serialize into generationConfig
+// under their Gemini wire names.
+func TestRequestShapeTopKPenaltiesSeed(t *testing.T) {
+	model, srv := newTestLanguageModel(t)
+
+	topK := 40
+	presence := 0.3
+	frequency := -0.2
+	seed := int64(99)
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages:         []provider.Message{provider.UserText("simple")},
+		TopK:             &topK,
+		PresencePenalty:  &presence,
+		FrequencyPenalty: &frequency,
+		Seed:             &seed,
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	gc := lastRequest(t, srv).GenerationConfig
+	if gc == nil {
+		t.Fatalf("GenerationConfig is nil, want set")
+	}
+	if gc.TopK == nil || *gc.TopK != 40 {
+		t.Errorf("TopK = %v, want 40", gc.TopK)
+	}
+	if gc.PresencePenalty == nil || *gc.PresencePenalty != 0.3 {
+		t.Errorf("PresencePenalty = %v, want 0.3", gc.PresencePenalty)
+	}
+	if gc.FrequencyPenalty == nil || *gc.FrequencyPenalty != -0.2 {
+		t.Errorf("FrequencyPenalty = %v, want -0.2", gc.FrequencyPenalty)
+	}
+	if gc.Seed == nil || *gc.Seed != 99 {
+		t.Errorf("Seed = %v, want 99", gc.Seed)
+	}
+}
+
+// TestRequestShapeHeaders asserts call.Headers entries are sent as extra
+// HTTP headers, and that an entry matching the auth header name
+// (case-insensitively — here "x-goog-api-key", per testConfig's Authorize)
+// does not clobber the API key.
+func TestRequestShapeHeaders(t *testing.T) {
+	model, srv := newTestLanguageModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{provider.UserText("simple")},
+		Headers: map[string]string{
+			"X-Custom-Header": "custom-value",
+			"X-Goog-Api-Key":  "should-not-win",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	if got := srv.HeaderValues("X-Custom-Header"); len(got) != 1 || got[0] != "custom-value" {
+		t.Errorf("X-Custom-Header = %v, want [custom-value]", got)
+	}
+	if got := srv.HeaderValues("x-goog-api-key"); len(got) != 1 || got[0] != "k" {
+		t.Errorf("x-goog-api-key = %v, want [k] (Headers must not clobber auth)", got)
 	}
 }

@@ -73,6 +73,7 @@ type messagesRequest struct {
 	StopSequences []string      `json:"stop_sequences,omitempty"`
 	Temperature   *float64      `json:"temperature,omitempty"`
 	TopP          *float64      `json:"top_p,omitempty"`
+	TopK          *int          `json:"top_k,omitempty"`
 	Stream        bool          `json:"stream,omitempty"`
 }
 
@@ -220,7 +221,10 @@ func buildMessagesRequest(modelID string, call provider.Call, stream bool) (mess
 		StopSequences: call.StopSequences,
 		Temperature:   call.Temperature,
 		TopP:          call.TopP,
+		TopK:          call.TopK,
 	}
+	// call.PresencePenalty, call.FrequencyPenalty, and call.Seed are
+	// intentionally ignored: the Messages API has no equivalent parameters.
 
 	// ToolChoiceNone means: omit tools entirely, not merely tool_choice.
 	omitTools := call.ToolChoice != nil && call.ToolChoice.Mode == provider.ToolChoiceNone

@@ -44,16 +44,20 @@ type wireResponseFormat struct {
 }
 
 type chatRequest struct {
-	Model          string        `json:"model"`
-	Messages       []wireMessage `json:"messages"`
-	Tools          []wireTool    `json:"tools,omitempty"`
-	ToolChoice     string        `json:"tool_choice,omitempty"`
-	ResponseFormat any           `json:"response_format,omitempty"`
-	MaxTokens      *int          `json:"max_tokens,omitempty"`
-	Temperature    *float64      `json:"temperature,omitempty"`
-	P              *float64      `json:"p,omitempty"` // Cohere's name for top_p
-	StopSequences  []string      `json:"stop_sequences,omitempty"`
-	Stream         bool          `json:"stream,omitempty"`
+	Model            string        `json:"model"`
+	Messages         []wireMessage `json:"messages"`
+	Tools            []wireTool    `json:"tools,omitempty"`
+	ToolChoice       string        `json:"tool_choice,omitempty"`
+	ResponseFormat   any           `json:"response_format,omitempty"`
+	MaxTokens        *int          `json:"max_tokens,omitempty"`
+	Temperature      *float64      `json:"temperature,omitempty"`
+	P                *float64      `json:"p,omitempty"` // Cohere's name for top_p
+	K                *int          `json:"k,omitempty"` // Cohere's name for top_k
+	PresencePenalty  *float64      `json:"presence_penalty,omitempty"`
+	FrequencyPenalty *float64      `json:"frequency_penalty,omitempty"`
+	Seed             *int64        `json:"seed,omitempty"`
+	StopSequences    []string      `json:"stop_sequences,omitempty"`
+	Stream           bool          `json:"stream,omitempty"`
 }
 
 // ---- Response wire types (non-streaming) ----
@@ -172,12 +176,16 @@ func buildChatRequest(modelID string, call provider.Call, stream bool) (chatRequ
 	}
 
 	req := chatRequest{
-		Model:         modelID,
-		Messages:      messages,
-		MaxTokens:     call.MaxTokens,
-		Temperature:   call.Temperature,
-		P:             call.TopP,
-		StopSequences: call.StopSequences,
+		Model:            modelID,
+		Messages:         messages,
+		MaxTokens:        call.MaxTokens,
+		Temperature:      call.Temperature,
+		P:                call.TopP,
+		K:                call.TopK,
+		PresencePenalty:  call.PresencePenalty,
+		FrequencyPenalty: call.FrequencyPenalty,
+		Seed:             call.Seed,
+		StopSequences:    call.StopSequences,
 	}
 
 	switch {

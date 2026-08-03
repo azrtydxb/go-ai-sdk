@@ -291,6 +291,91 @@ func TestRequestShapeTopPFieldIsP(t *testing.T) {
 	}
 }
 
+// TestRequestShapeTopKPenaltiesSeed asserts call.TopK serializes under
+// Cohere's "k" wire name, and call.PresencePenalty/FrequencyPenalty/Seed
+// serialize under their (OpenAI-matching) wire names.
+func TestRequestShapeTopKPenaltiesSeed(t *testing.T) {
+	srv, fs := newFixtureServer(t)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("cohere-test")
+
+	topK := 40
+	presence := 0.5
+	frequency := -0.5
+	seed := int64(7)
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages:         []provider.Message{provider.UserText("simple")},
+		TopK:             &topK,
+		PresencePenalty:  &presence,
+		FrequencyPenalty: &frequency,
+		Seed:             &seed,
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(fs.rawBody(), &raw); err != nil {
+		t.Fatalf("decode raw request: %v", err)
+	}
+	if _, ok := raw["top_k"]; ok {
+		t.Errorf("request has top_k field, want only k: %s", fs.rawBody())
+	}
+	var gotK int
+	if err := json.Unmarshal(raw["k"], &gotK); err != nil || gotK != 40 {
+		t.Errorf("k = %s, want 40", raw["k"])
+	}
+	var gotPresence, gotFrequency float64
+	var gotSeed int64
+	if err := json.Unmarshal(raw["presence_penalty"], &gotPresence); err != nil || gotPresence != presence {
+		t.Errorf("presence_penalty = %s, want %v", raw["presence_penalty"], presence)
+	}
+	if err := json.Unmarshal(raw["frequency_penalty"], &gotFrequency); err != nil || gotFrequency != frequency {
+		t.Errorf("frequency_penalty = %s, want %v", raw["frequency_penalty"], frequency)
+	}
+	if err := json.Unmarshal(raw["seed"], &gotSeed); err != nil || gotSeed != seed {
+		t.Errorf("seed = %s, want %v", raw["seed"], seed)
+	}
+}
+
+// TestRequestShapeHeaders asserts call.Headers entries are sent as extra
+// HTTP headers, and that an entry matching the auth header name
+// (case-insensitively) does not clobber the API key.
+func TestRequestShapeHeaders(t *testing.T) {
+	var gotCustom, gotAuth string
+	// A dedicated server is used here (rather than newFixtureServer) to
+	// inspect headers directly, since fixtureState only records the decoded
+	// body.
+	hdrSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCustom = r.Header.Get("X-Custom-Header")
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		resp := chatResponse{
+			Message:      &chatResponseMessage{Content: []chatResponseContent{{Type: "text", Text: "hi"}}},
+			FinishReason: "COMPLETE",
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	t.Cleanup(hdrSrv.Close)
+	model := New(WithAPIKey("k"), WithBaseURL(hdrSrv.URL)).Model("cohere-test")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{provider.UserText("simple")},
+		Headers: map[string]string{
+			"X-Custom-Header": "custom-value",
+			"authorization":   "should-not-win",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if gotCustom != "custom-value" {
+		t.Errorf("X-Custom-Header = %q, want custom-value", gotCustom)
+	}
+	if gotAuth != "Bearer k" {
+		t.Errorf("Authorization = %q, want Bearer k (Headers must not clobber auth)", gotAuth)
+	}
+}
+
 func TestRequestShapeResponseFormatWithSchema(t *testing.T) {
 	srv, fs := newFixtureServer(t)
 	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("cohere-test")

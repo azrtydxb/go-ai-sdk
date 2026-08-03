@@ -64,16 +64,19 @@ type wireResponseFormat struct {
 }
 
 type chatRequest struct {
-	Model          string        `json:"model"`
-	Messages       []wireMessage `json:"messages"`
-	Tools          []wireTool    `json:"tools,omitempty"`
-	ToolChoice     any           `json:"tool_choice,omitempty"`
-	ResponseFormat any           `json:"response_format,omitempty"`
-	MaxTokens      *int          `json:"max_tokens,omitempty"`
-	Temperature    *float64      `json:"temperature,omitempty"`
-	TopP           *float64      `json:"top_p,omitempty"`
-	Stop           []string      `json:"stop,omitempty"`
-	Stream         bool          `json:"stream,omitempty"`
+	Model            string        `json:"model"`
+	Messages         []wireMessage `json:"messages"`
+	Tools            []wireTool    `json:"tools,omitempty"`
+	ToolChoice       any           `json:"tool_choice,omitempty"`
+	ResponseFormat   any           `json:"response_format,omitempty"`
+	MaxTokens        *int          `json:"max_tokens,omitempty"`
+	Temperature      *float64      `json:"temperature,omitempty"`
+	TopP             *float64      `json:"top_p,omitempty"`
+	PresencePenalty  *float64      `json:"presence_penalty,omitempty"`
+	FrequencyPenalty *float64      `json:"frequency_penalty,omitempty"`
+	RandomSeed       *int64        `json:"random_seed,omitempty"` // Mistral's name for Seed
+	Stop             []string      `json:"stop,omitempty"`
+	Stream           bool          `json:"stream,omitempty"`
 }
 
 // ---- Response wire types (non-streaming) ----
@@ -178,13 +181,18 @@ func buildChatRequest(modelID string, call provider.Call, stream bool) (chatRequ
 	}
 
 	req := chatRequest{
-		Model:       modelID,
-		Messages:    messages,
-		MaxTokens:   call.MaxTokens,
-		Temperature: call.Temperature,
-		TopP:        call.TopP,
-		Stop:        call.StopSequences,
+		Model:            modelID,
+		Messages:         messages,
+		MaxTokens:        call.MaxTokens,
+		Temperature:      call.Temperature,
+		TopP:             call.TopP,
+		PresencePenalty:  call.PresencePenalty,
+		FrequencyPenalty: call.FrequencyPenalty,
+		RandomSeed:       call.Seed,
+		Stop:             call.StopSequences,
 	}
+	// call.TopK is intentionally ignored: Mistral's chat completions API has
+	// no top_k parameter.
 
 	// ToolChoiceNone means: omit tools entirely, not merely tool_choice —
 	// Mistral rejects tool_choice without a non-empty tools array.

@@ -95,13 +95,16 @@ type chatRequest struct {
 	// MaxTokens is marshaled by MarshalJSON below under maxTokensParam (or
 	// defaultMaxTokensParam if unset), not under a static json tag — the
 	// wire field name varies per provider (see Config.MaxTokensParam).
-	MaxTokens      *int `json:"-"`
-	maxTokensParam string
-	Temperature    *float64       `json:"temperature,omitempty"`
-	TopP           *float64       `json:"top_p,omitempty"`
-	Stop           []string       `json:"stop,omitempty"`
-	Stream         bool           `json:"stream,omitempty"`
-	StreamOptions  *streamOptions `json:"stream_options,omitempty"`
+	MaxTokens        *int `json:"-"`
+	maxTokensParam   string
+	Temperature      *float64       `json:"temperature,omitempty"`
+	TopP             *float64       `json:"top_p,omitempty"`
+	PresencePenalty  *float64       `json:"presence_penalty,omitempty"`
+	FrequencyPenalty *float64       `json:"frequency_penalty,omitempty"`
+	Seed             *int64         `json:"seed,omitempty"`
+	Stop             []string       `json:"stop,omitempty"`
+	Stream           bool           `json:"stream,omitempty"`
+	StreamOptions    *streamOptions `json:"stream_options,omitempty"`
 }
 
 // MarshalJSON marshals chatRequest normally, then adds the max-tokens value
@@ -264,14 +267,20 @@ func buildChatRequest(cfg Config, modelID string, call provider.Call, stream boo
 	}
 
 	req := chatRequest{
-		Model:          modelID,
-		Messages:       messages,
-		Temperature:    call.Temperature,
-		TopP:           call.TopP,
-		Stop:           call.StopSequences,
-		MaxTokens:      call.MaxTokens,
-		maxTokensParam: cfg.MaxTokensParam,
+		Model:            modelID,
+		Messages:         messages,
+		Temperature:      call.Temperature,
+		TopP:             call.TopP,
+		PresencePenalty:  call.PresencePenalty,
+		FrequencyPenalty: call.FrequencyPenalty,
+		Seed:             call.Seed,
+		Stop:             call.StopSequences,
+		MaxTokens:        call.MaxTokens,
+		maxTokensParam:   cfg.MaxTokensParam,
 	}
+	// call.TopK is intentionally ignored: OpenAI's chat-completions API (and
+	// every OpenAI-compatible server this package targets) has no top_k
+	// parameter.
 
 	if len(call.Tools) > 0 {
 		req.Tools = convertTools(call.Tools)
