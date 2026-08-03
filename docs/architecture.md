@@ -9,9 +9,10 @@ for the original rationale and decisions log, see the
 ## The three layers
 
 ```
-github.com/azrtydxb/go-ai-sdk
+github.com/azrtydxb/go-ai-sdk        (root module, zero external dependencies)
 ├── ai/              Layer 3: high-level API — GenerateText, StreamText,
-│                    GenerateObject, Embed, tools, middleware, registry
+│                    GenerateObject, Embed, tools, middleware, registry,
+│                    the observability seam (Telemetry/TelemetryMiddleware)
 ├── provider/        Layer 1: the spec — interfaces + unified types every
 │   └── providertest/  provider implements, plus the shared conformance suite
 ├── providers/       Layer 2: one package per vendor (openai, anthropic,
@@ -28,6 +29,8 @@ github.com/azrtydxb/go-ai-sdk
 │                        (openaicompat, geminicompat — see below)
 ├── mcp/             MCP client, independent of the above (produces
 │                    []ai.Tool, doesn't touch LanguageModel)
+├── contrib/         Optional, dependency-pulling extensions — SEPARATE Go
+│   └── otel/          modules, not part of the root module (see below)
 └── examples/        Runnable, env-guarded example programs, one per feature
 ```
 
@@ -38,6 +41,38 @@ depends on nothing else in this module. Nothing in `provider` or `providers/*`
 imports `ai`, so the spec and its implementations stay agnostic of the
 orchestration built on top of them — a `provider.LanguageModel` is usable
 standalone, without ever calling into `ai.GenerateText`.
+
+## Observability and the nested `contrib/otel` module
+
+`ai.Telemetry`/`ai.TelemetryMiddleware` (in `ai/`) is the SDK's
+observability seam: a minimal `OnSpanStart(ctx, info)`/`OnSpanEnd(info)`
+interface any `provider.LanguageModel` call reports span events through,
+with no dependency of its own. The root module (`go.mod` at the repo root)
+has **zero external `require` directives** — this is a deliberate,
+load-bearing property, not an oversight: anyone depending on
+`github.com/azrtydxb/go-ai-sdk` for text generation alone pulls in nothing
+beyond the Go standard library.
+
+`contrib/otel` is where a *real* OpenTelemetry bridge (`Bridge`,
+implementing `ai.Telemetry` with GenAI-semconv spans) lives — and it's
+deliberately **its own Go module**
+(`github.com/azrtydxb/go-ai-sdk/contrib/otel`, its own `go.mod`/`go.sum`),
+not a package inside the root module. That's what keeps the zero-dependency
+property true even though the SDK ships a first-party OTel integration:
+`go.opentelemetry.io/otel`/`.../trace` only enter a build that explicitly
+imports `contrib/otel`. During development, `contrib/otel/go.mod` has a
+`replace github.com/azrtydxb/go-ai-sdk => ../..` pointing at the local root
+module; this replace is dev-only — the two modules are tagged together
+(root `vX.Y.Z`, nested module `contrib/otel/vX.Y.Z`, per Go's nested-module
+tagging convention), so a published/tagged consumer resolves
+`github.com/azrtydxb/go-ai-sdk` to the matching tagged root version, never
+a local path. `contrib/` is the precedent and the intended home for any
+future optional, dependency-pulling extension (a metrics exporter, a
+different tracing backend) that shouldn't force its dependencies onto
+every consumer of the core SDK. See [Telemetry § The contrib/otel bridge](core/telemetry.md#the-contribotel-bridge)
+for the bridge itself, and note that `go test ./...` run from the repo
+root does **not** build or test `contrib/otel` — it's a separate module,
+verified with `cd contrib/otel && go test ./...`.
 
 ### Layer 1: `provider` — the spec
 
@@ -324,6 +359,9 @@ The image/speech/transcription capabilities (`ImageModel`, `SpeechModel`,
 - [`internal/geminicompat/geminicompat.go`](../internal/geminicompat/geminicompat.go)
 - [`ai/middleware.go`](../ai/middleware.go) (`SimulateStreamingMiddleware`,
   the replay-safety proof)
+- [`ai/telemetry.go`](../ai/telemetry.go) (`Telemetry`, `TelemetryMiddleware`,
+  the observability seam)
+- [`contrib/otel/`](../contrib/otel/) (the nested OTel bridge module)
 - [Design spec](superpowers/specs/2026-08-02-go-ai-sdk-design.md) — original
   rationale and the full decisions log
 

@@ -159,6 +159,29 @@ if pending := stream.PendingApprovals(); len(pending) > 0 {
 }
 ```
 
+## Timeout: the Chunk dimension
+
+`GenerateTextOpts.Timeout.Chunk` bounds the max gap between yielded
+`provider.StreamPart`s within a step — a stall watchdog specific to
+`StreamText` (`Total` and `Step`, the other two `Timeout` dimensions, apply
+to both `GenerateText` and `StreamText`):
+
+```go
+stream, err := ai.StreamText(ctx, ai.GenerateTextOpts{
+	Model:  model,
+	Prompt: "Count to a million.",
+	Timeout: &ai.Timeout{Chunk: 10 * time.Second},
+})
+```
+
+If more than `Chunk` elapses between two yielded parts (the timer resets
+on every part, including the step's first), iteration ends with a
+`*ai.TimeoutError{Dimension: "chunk"}` from `stream.Err()` — distinct from
+the caller's own `ctx` being canceled, which still surfaces via `OnAbort`
+as before. See [Generating text § Timeout](generating-text.md#timeout-total-step-and-chunk)
+for the full Total/Step/Chunk reference and the `TimeoutError`-vs-`OnAbort`
+distinction.
+
 ## SmoothStream
 
 `ai.SmoothStream(parts iter.Seq[provider.StreamPart], opts ai.SmoothOpts) iter.Seq[provider.StreamPart]`
@@ -213,6 +236,7 @@ former, `SmoothStream(stream.Parts(), ...)` for the latter.
 
 - [`provider/stream.go`](../../provider/stream.go)
 - [`ai/stream_text.go`](../../ai/stream_text.go)
+- [`ai/timeout.go`](../../ai/timeout.go) (`Timeout`'s chunk-stall watchdog)
 - [`ai/smooth.go`](../../ai/smooth.go)
 - [`ai/approval.go`](../../ai/approval.go), [`ai/runtime_context.go`](../../ai/runtime_context.go)
 

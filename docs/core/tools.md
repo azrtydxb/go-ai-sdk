@@ -67,6 +67,130 @@ type BookingArgs struct {
 This produces `required: ["city", "lat", "lng"]` — `notes` and `nickname`
 are present as properties but not required.
 
+## Strict mode and input examples
+
+`NewTool` takes optional trailing `ToolOption`s that configure two more
+per-tool wire hints, both additive to `provider.ToolDef`:
+
+```go
+searchTool := ai.NewTool("search", "Search the knowledge base",
+	func(ctx context.Context, args SearchArgs) (any, error) {
+		return map[string]string{"query": args.Query}, nil
+	},
+	ai.WithToolStrict(),
+	ai.WithToolInputExamples(
+		SearchArgs{Query: "go generics", Unit: "metric"},
+		SearchArgs{Query: "how many liters in a gallon"},
+	),
+)
+```
+
+- **`WithToolStrict()`** sets `Tool.Strict()` (and, downstream,
+  `provider.ToolDef.Strict`) to request provider-enforced schema
+  conformance for the tool's arguments. Supported by openaicompat-based
+  providers, which set `"strict":true` inside the function object (OpenAI
+  strict function calling). Ignored (not sent, no error) by anthropic,
+  geminicompat, bedrock, cohere, and mistral — those wire formats have no
+  equivalent knob.
+- **`WithToolInputExamples[Args](examples ...Args)`** marshals each
+  example to JSON **at construction time** (panicking on marshal failure,
+  the same programmer-error convention as schema derivation) and sets
+  `Tool.InputExamples()`. Supported natively only by anthropic, which
+  sends them as the tool object's `"input_examples"` field. Every other
+  provider's wire format has no equivalent field — see
+  [AddToolInputExamplesMiddleware](#addtoolinputexamplesmiddleware) below
+  for folding examples into `Description` text on those providers instead.
+
+Both default to their zero value (`false`/`nil`) when the option isn't
+used, so existing 3-argument `NewTool(name, description, fn)` call sites
+are unaffected.
+
+### AddToolInputExamplesMiddleware
+
+`ai.AddToolInputExamplesMiddleware(model)` wraps a model so that every
+outgoing call's tools have their `InputExamples` folded into
+`Description` as plain text, then cleared:
+
+```go
+model := ai.AddToolInputExamplesMiddleware(openaicompat.Model)
+
+result, err := ai.GenerateText(ctx, ai.GenerateTextOpts{
+	Model:  model,
+	Prompt: "Search for something.",
+	Tools:  []ai.Tool{searchTool}, // has WithToolInputExamples set
+})
+```
+
+For each tool with a non-empty `InputExamples`, the middleware appends
+`"\n\nExample inputs:\n"` followed by each example's compact JSON on its
+own line to that tool's `Description`, then clears `InputExamples` so a
+provider with native support (anthropic) never also receives — and
+double-counts — the same examples via its wire field. This mirrors the AI
+SDK v6 middleware that serializes examples into description text for
+providers without native support.
+
+The wrapped call's `Tools` is always a fresh slice — the caller's original
+`Tools`/`ToolDef` values are never mutated — so wrapping is idempotent per
+call and safe to apply repeatedly (or to an already-wrapped model): each
+invocation starts again from the original `Description` plus the original
+`InputExamples` the caller supplied.
+
+## Per-tool input streaming hooks
+
+`ai.WithToolInputCallbacks(cb ai.ToolInputCallbacks)` attaches lifecycle
+hooks fired as a tool call's arguments become available, mirroring the
+Vercel AI SDK v6's `onInputStart`/`onInputDelta`/`onInputAvailable`:
+
+```go
+type ToolInputCallbacks struct {
+	OnInputStart     func(ctx context.Context, toolCallID string)
+	OnInputDelta     func(ctx context.Context, toolCallID string, delta string)
+	OnInputAvailable func(ctx context.Context, toolCallID string, input json.RawMessage)
+}
+```
+
+```go
+searchTool := ai.NewTool("search", "Search the knowledge base",
+	func(ctx context.Context, args SearchArgs) (any, error) {
+		return map[string]string{"query": args.Query}, nil
+	},
+	ai.WithToolInputCallbacks(ai.ToolInputCallbacks{
+		OnInputStart: func(ctx context.Context, toolCallID string) {
+			fmt.Println("args starting to arrive for", toolCallID)
+		},
+		OnInputDelta: func(ctx context.Context, toolCallID, delta string) {
+			fmt.Print(delta) // raw args-JSON text fragment
+		},
+		OnInputAvailable: func(ctx context.Context, toolCallID string, input json.RawMessage) {
+			fmt.Println("\nfull args for", toolCallID, ":", string(input))
+		},
+	}),
+)
+```
+
+- **`StreamText`** fires `OnInputStart` once per `toolCallID`, on that
+  call's first argument delta; `OnInputDelta` on every delta thereafter
+  (including that first one), with the raw args-JSON text fragment — the
+  concatenation of every delta for a `toolCallID` equals its fully
+  assembled arguments; and `OnInputAvailable` once the arguments are fully
+  assembled, immediately before that call is executed.
+- **`GenerateText`** has no deltas (it isn't streaming), so it fires only
+  `OnInputAvailable`, immediately before `Execute`.
+- **`RepairToolCall`** retries re-fire `OnInputAvailable` for the repaired
+  tool/args, immediately before the repaired `Execute` attempt.
+- **Never fires** for a call that never reaches `Execute` at all — an
+  unresolved unknown-tool call, or an approval-denied call (see
+  [Approvals for tool execution](#approvals-for-tool-execution) below) —
+  nor for the `Output` tool-mode fallback's synthetic forced call (see
+  [Generating text § Output modes](generating-text.md#output-modes)),
+  since that call is decoded directly and never routed through
+  `Tool.Execute`.
+
+All three callbacks are nil-checked before being invoked, and are called
+synchronously on the consuming goroutine — a tool with no callbacks
+configured (the default, zero-value `ToolInputCallbacks{}`) never pays for
+this feature.
+
 ## Execution error taxonomy
 
 Three typed errors cover everything that can go wrong with a tool call:
@@ -463,7 +587,10 @@ into `Tools` the same way as any hand-written tool — see the
 
 ## Source of truth
 
-- [`ai/tool.go`](../../ai/tool.go)
+- [`ai/tool.go`](../../ai/tool.go) (including `WithToolStrict`,
+  `WithToolInputExamples`, `WithToolInputCallbacks`)
+- [`ai/middleware.go`](../../ai/middleware.go) (`AddToolInputExamplesMiddleware`)
+- [`provider/call.go`](../../provider/call.go) (`ToolDef.Strict`/`.InputExamples`)
 - [`ai/tool_result_content.go`](../../ai/tool_result_content.go) (`ToolResultContent`)
 - [`ai/generate_text.go`](../../ai/generate_text.go) (tool loop, `runToolCalls`,
   `runApprovalAwareToolCalls`)

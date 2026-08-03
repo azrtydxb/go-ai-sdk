@@ -94,6 +94,84 @@ ai: exactly one of Prompt or Messages must be set
 
 A `nil` `Model` similarly returns `ai: GenerateTextOpts.Model is required`.
 
+## Timeout: Total, Step, and Chunk
+
+`GenerateTextOpts.Timeout` bounds a run more finely than a single
+`context.Context` deadline — three independent, all-optional dimensions:
+
+```go
+type Timeout struct {
+	Total time.Duration // whole run (all steps)
+	Step  time.Duration // each individual model call/step
+	Chunk time.Duration // StreamText only: max gap between yielded StreamParts
+}
+
+result, err := ai.GenerateText(ctx, ai.GenerateTextOpts{
+	Model:  model,
+	Prompt: "Summarize this document.",
+	Timeout: &ai.Timeout{
+		Total: 60 * time.Second,
+		Step:  20 * time.Second,
+	},
+})
+```
+
+- **`Total`** bounds the whole run (every step combined) — implemented as
+  a `context.WithTimeout` derived at entry, layered on top of (never
+  replacing) whatever `ctx` the caller passed in.
+- **`Step`** bounds each individual step's model call, re-derived fresh
+  for every step.
+- **`Chunk`** (`StreamText` only) bounds the max gap between yielded
+  `provider.StreamPart`s within a step — a timer that resets on every part
+  the underlying stream yields, so a stream that's actively producing
+  output (even slowly, as long as it's under `Chunk` between parts) never
+  trips it. `Chunk` has an inherent, rare TOCTOU window: a part arriving at
+  (almost) the same instant the timer fires can still lose the race and
+  surface as a chunk timeout even though the stream wasn't really stalled
+  — a property of any timer-based watchdog, not a bug to be designed away.
+
+Zero fields mean "no bound" for that dimension; a `nil` `Timeout` (the
+default) means no SDK-imposed bound at all — only the caller's own `ctx`
+governs, exactly as before this feature existed.
+
+### TimeoutError vs OnAbort/ctx errors: which side caused it
+
+The critical distinction `Timeout` makes is **which side** caused a run to
+end:
+
+- If `Total`/`Step`/`Chunk` elapses first, the run ends with a
+  `*ai.TimeoutError` (`Dimension: "total"|"step"|"chunk"`, `Limit` the
+  bound that elapsed) delivered via the function's returned error (and
+  `OnError`, if set) — this is an SDK-imposed limit, i.e. an error, not a
+  user abort.
+- If the caller's own `ctx` is canceled or reaches its own deadline
+  *first*, the run ends exactly as it always has: the plain ctx error from
+  `GenerateText`'s return value, or `OnAbort` in `StreamText` (see
+  [OnAbort](#onabort) above) — never a `*ai.TimeoutError`. A generous
+  `Timeout` (or none at all) never changes this path.
+
+```go
+_, err := ai.GenerateText(context.Background(), ai.GenerateTextOpts{
+	Model:  model,
+	Prompt: "Hello",
+	Timeout: &ai.Timeout{Total: 5 * time.Second},
+})
+var timeoutErr *ai.TimeoutError
+if errors.As(err, &timeoutErr) {
+	fmt.Printf("SDK-imposed %s timeout after %s\n", timeoutErr.Dimension, timeoutErr.Limit)
+}
+```
+
+This is detected by deriving each bound's context with
+`context.WithTimeoutCause`, using a distinct sentinel cause per dimension —
+`context.Cause` on the context actually used for a call reveals whether an
+SDK bound fired (matches a sentinel) or the caller's own `ctx` did (doesn't
+match any sentinel), never by racing wall-clock time against the caller's
+deadline. A shorter caller-supplied `ctx` always wins over a much larger
+`Total`: e.g. `Timeout{Total: time.Hour}` paired with a caller `ctx` that
+expires in 20ms ends the run with a plain `context.DeadlineExceeded` (and
+`OnAbort`, in `StreamText`), never a `*ai.TimeoutError`.
+
 ## The multi-step tool loop
 
 When `Tools` are set and the model requests a tool call, `GenerateText`
@@ -630,7 +708,8 @@ error from the final attempt (`RetryError` also implements `Unwrap()`, so
 
 ## Source of truth
 
-- [`ai/options.go`](../../ai/options.go)
+- [`ai/options.go`](../../ai/options.go) (including `Timeout`)
+- [`ai/timeout.go`](../../ai/timeout.go) (`Timeout`'s shared machinery, the sentinel-cause detection)
 - [`ai/generate_text.go`](../../ai/generate_text.go)
 - [`ai/stream_text.go`](../../ai/stream_text.go)
 - [`ai/output.go`](../../ai/output.go) (`Output`, `OutputObject`/`OutputArray`/

@@ -27,7 +27,9 @@ exists — the SDK's public API is implemented and documented end-to-end (see
 - [Middleware and registry](core/middleware-and-registry.md) — `WrapModel`, built-in middlewares, `Registry`
 - [Provider options](core/provider-options.md) — the raw-wire-key escape hatch, `ProviderMetadata`
 - [Errors and retries](core/errors-and-retries.md) — the typed error reference, retry/backoff behavior
-- [Telemetry](core/telemetry.md) — `Telemetry`, `TelemetryMiddleware`, OTel bridging
+- [Telemetry](core/telemetry.md) — `Telemetry`, `TelemetryMiddleware`, and
+  the real [`contrib/otel`](../contrib/otel/README.md) OpenTelemetry
+  bridge (a separate Go module)
 - [Model Context Protocol (MCP)](mcp.md) — tools, resources, prompts,
   completions, elicitation, and token-provider auth/retries
 
@@ -76,13 +78,19 @@ exists — the SDK's public API is implemented and documented end-to-end (see
 
 ## Versioning
 
-`go-ai-sdk` is pre-1.0 (current release: `v0.1.0`): the
+`go-ai-sdk` is pre-1.0 (current release: `v0.2.0`): the
 public API described throughout this tree is implemented and tested
 end-to-end, but may still change before `v1.0.0`. Once the project reaches
 1.0, it follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 [`CHANGELOG.md`](../CHANGELOG.md) tracks every notable change, release or
 not — check it for the current status and any breaking changes between
-versions.
+versions. `v0.2.0` carries one breaking change: `ai.Telemetry.OnSpanStart`
+gained a leading `ctx` parameter (see
+[Telemetry](core/telemetry.md#telemetry-and-spaninfo)).
+
+`contrib/otel` (the OpenTelemetry bridge) is versioned as its own nested Go
+module, tagged alongside the root (`contrib/otel/vX.Y.Z`) — see
+[Architecture § Observability](architecture.md#observability-and-the-nested-contribotel-module).
 
 ## Reference
 

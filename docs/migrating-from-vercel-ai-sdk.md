@@ -18,29 +18,39 @@ page.
 
 ## AI SDK 6 delta
 
-`go-ai-sdk` targets full parity with the AI SDK 5 core today; AI SDK 6
-parity (ai-sdk.dev, snapshot 2026-08-03) is in progress, tracked wave by
-wave in the
-[v6 parity roadmap](superpowers/plans/2026-08-03-v6-parity-roadmap.md). This
-table is the feature-by-feature status as of the current wave (13):
+`go-ai-sdk` has reached **full parity with the AI SDK 6 core** (ai-sdk.dev,
+snapshot 2026-08-03) as of wave 14 — the closing wave of the
+[v6 parity roadmap](superpowers/plans/2026-08-03-v6-parity-roadmap.md). The
+final gap re-audit (wave 14) found the port essentially at parity already;
+the four remaining core-surface gaps it identified (an OTel bridge, tool
+strict mode/input examples, per-tool input-streaming hooks, and structured
+timeouts) are all shipped as of this wave — see the closing
+[v6 parity final audit](superpowers/specs/2026-08-03-v6-parity-final-audit.md)
+for the full have-list, deliberately-out-of-scope surface (UI/RSC/WebRTC/
+DevTools), and the confirmed v7-only items below. This table is the
+complete feature-by-feature status:
 
 | AI SDK 6 feature | Status |
 |---|---|
-| Call settings: `topK`, `presencePenalty`, `frequencyPenalty`, `seed`, `headers` | **Shipped** — `GenerateTextOpts`/`provider.Call` fields `TopK`/`PresencePenalty`/`FrequencyPenalty`/`Seed`/`Headers`; see [Generating text § Additional call settings](core/generating-text.md#additional-call-settings-topk-penalties-seed-headers). Vercel's richer `timeout` object (distinct connect/response/total timeouts) is **not** shipped — deferred to the wave 10+ lifecycle work; use `context.Context` deadlines for now. |
+| Call settings: `topK`, `presencePenalty`, `frequencyPenalty`, `seed`, `headers` | **Shipped** — `GenerateTextOpts`/`provider.Call` fields `TopK`/`PresencePenalty`/`FrequencyPenalty`/`Seed`/`Headers`; see [Generating text § Additional call settings](core/generating-text.md#additional-call-settings-topk-penalties-seed-headers). |
+| Structured timeouts (`timeout` object: total, per-step, stream-stall) | **Shipped** — `GenerateTextOpts.Timeout{Total, Step, Chunk}`/`*ai.TimeoutError{Dimension, Limit}`. An SDK-imposed bound firing is distinguished from the caller's own `ctx` being canceled (via a sentinel `context.Cause` per dimension): the former surfaces as `*ai.TimeoutError` via the returned error/`OnError`, the latter as the plain ctx error/`OnAbort`, exactly as before this feature existed. See [Generating text § Timeout](core/generating-text.md#timeout-total-step-and-chunk) and [Streaming § Timeout: the Chunk dimension](core/streaming.md#timeout-the-chunk-dimension). |
 | `hasToolCall` / `isLoopFinished` stop conditions | **Shipped** — `ai.HasToolCall(names...)`, `ai.LoopFinished()`; see [Generating text § The multi-step tool loop](core/generating-text.md#the-multi-step-tool-loop). |
 | `onAbort` | **Shipped** — `GenerateTextOpts.OnAbort`; see [Generating text § OnAbort](core/generating-text.md#onabort). |
 | Multi-modal tool results | **Shipped** — `ai.ToolResultContent`, native on anthropic/bedrock, text-projected elsewhere; see [Tools § Multi-modal tool results](core/tools.md#multi-modal-tool-results). |
+| Tool `strict` mode | **Shipped** — `ai.WithToolStrict()` (a `NewTool` option) sets `Tool.Strict()`/`provider.ToolDef.Strict`; honored as `"strict":true` by openaicompat-based providers, ignored (no wire param, no error) by anthropic, geminicompat, bedrock, cohere, mistral. See [Tools § Strict mode and input examples](core/tools.md#strict-mode-and-input-examples). |
+| Tool `inputExamples` | **Shipped** — `ai.WithToolInputExamples[Args](examples ...Args)` sets `Tool.InputExamples()`/`provider.ToolDef.InputExamples`; native support on anthropic (`input_examples`), folded into tool `Description` text for every other provider via `ai.AddToolInputExamplesMiddleware`. See [Tools § Strict mode and input examples](core/tools.md#strict-mode-and-input-examples) and [§ AddToolInputExamplesMiddleware](core/tools.md#addtoolinputexamplesmiddleware). |
+| Per-tool input-streaming lifecycle hooks (`onInputStart`/`onInputDelta`/`onInputAvailable`) | **Shipped** — `ai.WithToolInputCallbacks(ai.ToolInputCallbacks{OnInputStart, OnInputDelta, OnInputAvailable})`. `StreamText` fires all three (Start on the first delta, Delta per delta, Available once assembled, before `Execute`); `GenerateText` fires only `OnInputAvailable` (no deltas exist); neither fires for the `Output` tool-mode fallback's synthetic call. See [Tools § Per-tool input streaming hooks](core/tools.md#per-tool-input-streaming-hooks). |
 | `extractJsonMiddleware` | **Shipped** — `ai.ExtractJSONMiddleware`; see [Middleware and registry § ExtractJSONMiddleware](core/middleware-and-registry.md#extractjsonmiddleware). |
 | Image-model middleware (`wrapImageModel` equivalent) | **Shipped as a naming hook** — `ai.WrapImageModel`; no built-in image middlewares ship yet, and Vercel's full image-middleware interface (which can also rewrite `params`/results) isn't modeled — see [Middleware and registry § WrapImageModel](core/middleware-and-registry.md#wrapimagemodel). |
 | AssemblyAI, Gladia, Rev.ai transcription providers | **Shipped** — see [Provider overview](providers/README.md) and each provider's page. |
-| `stopWhen` consultation on every step | **Shipped, and now Vercel-consistent** — `StopWhen` is consulted after every completed step (not only ones that requested tool calls); this matches Vercel's documented behavior and removes what would otherwise have been a divergence. See [Generating text § The multi-step tool loop](core/generating-text.md#the-multi-step-tool-loop). |
-| Output modes on `generateText` (`text`/`object`/`array`/`choice`/`json`, `Experimental_Output`) | **Shipped for `GenerateText`** — `GenerateTextOpts.Output` (`ai.OutputObject[T]`/`ai.OutputArray[T]`/`ai.OutputChoice`/`ai.OutputJSON`), extracted via `ai.OutputAs[T]`; see [Generating text § Output modes](core/generating-text.md#output-modes). **Not shipped for `StreamText`**: Vercel's `Experimental_Output` also streams partial output incrementally as a stream mode; `go-ai-sdk`'s `StreamText` returns the typed `ai.ErrOutputWithStreamText` immediately if `Output` is set — partial-output streaming is deferred to a later wave. |
-| Reranking (`rerank`, `RerankingModel`, Cohere/Voyage/Mixedbread) | **Shipped** — `ai.Rerank`, `provider.RerankingModel`, `Registry.RerankingModel`; Cohere, Voyage, and Mixedbread all implement `provider.RerankingModel` as of wave 13. See [Embeddings § Reranking](core/embeddings.md#reranking), [Voyage](providers/voyage.md#reranking), and [Mixedbread](providers/mixedbread.md#reranking). |
-| Unified `reasoning` option (effort/budget, per-provider mapping) | **Shipped** — `GenerateTextOpts.Reasoning`/`provider.ReasoningConfig{Effort, BudgetTokens}`, mapped to `reasoning_effort` (openaicompat), a resolved token budget via `provider.EffortBudgetTokens` (Anthropic, Google/Vertex AI, Bedrock), or ignored (Cohere, Mistral); see [Reasoning § Requesting reasoning](core/reasoning.md#requesting-reasoning-generatetextoptsreasoning). Unlike the roadmap's original framing, `ProviderOptions` still merges last and wins over `Reasoning` on a wire-key collision — the repo-wide `ProviderOptions` precedence convention was not special-cased for this option; see [Provider options § Reasoning is no exception](core/provider-options.md#reasoning-is-no-exception). |
+| `stopWhen` consultation on every step | **Shipped, and Vercel-consistent** — `StopWhen` is consulted after every completed step (not only ones that requested tool calls). See [Generating text § The multi-step tool loop](core/generating-text.md#the-multi-step-tool-loop). |
+| Output modes on `generateText` (`text`/`object`/`array`/`choice`/`json`, `Experimental_Output`) | **Shipped for `GenerateText`** — `GenerateTextOpts.Output` (`ai.OutputObject[T]`/`ai.OutputArray[T]`/`ai.OutputChoice`/`ai.OutputJSON`), extracted via `ai.OutputAs[T]`; see [Generating text § Output modes](core/generating-text.md#output-modes). **Not shipped for `StreamText`**: Vercel's `Experimental_Output` also streams partial output incrementally as a stream mode; `go-ai-sdk`'s `StreamText` returns the typed `ai.ErrOutputWithStreamText` immediately if `Output` is set — this remains the one known future item, tracked under [Future — plausible, not yet implemented](#future--plausible-not-yet-implemented) below, not a v6-core gap. |
+| Reranking (`rerank`, `RerankingModel`, Cohere/Voyage/Mixedbread) | **Shipped** — `ai.Rerank`, `provider.RerankingModel`, `Registry.RerankingModel`; Cohere, Voyage, and Mixedbread all implement `provider.RerankingModel`. See [Embeddings § Reranking](core/embeddings.md#reranking), [Voyage](providers/voyage.md#reranking), and [Mixedbread](providers/mixedbread.md#reranking). |
+| Unified `reasoning` option (effort/budget, per-provider mapping) | **Shipped** — `GenerateTextOpts.Reasoning`/`provider.ReasoningConfig{Effort, BudgetTokens}`, mapped to `reasoning_effort` (openaicompat), a resolved token budget via `provider.EffortBudgetTokens` (Anthropic, Google/Vertex AI, Bedrock), or ignored (Cohere, Mistral); see [Reasoning § Requesting reasoning](core/reasoning.md#requesting-reasoning-generatetextoptsreasoning). `ProviderOptions` still merges last and wins over `Reasoning` on a wire-key collision — the repo-wide `ProviderOptions` precedence convention was not special-cased for this option; see [Provider options § Reasoning is no exception](core/provider-options.md#reasoning-is-no-exception). A top-level per-message reasoning **enum** (v7-only — see below) is not modeled. |
 | Full lifecycle-callback event set (call-start/end, tool-execution start/end, embed/rerank events) | **Shipped** — `GenerateTextOpts.OnModelCallStart`/`OnModelCallEnd`, `OnToolExecutionStart`/`OnToolExecutionEnd` (see [Generating text § Lifecycle callbacks](core/generating-text.md#lifecycle-callbacks-model-call-and-tool-execution)); `EmbedOpts`/`EmbedManyOpts.OnEmbedStart`/`OnEmbedEnd` (see [Embeddings § Embed](core/embeddings.md#embed)); `RerankOpts.OnRerankStart`/`OnRerankEnd` (see [Embeddings § Reranking](core/embeddings.md#reranking)). Every End-callback's error is the SAME error the caller's function returns (retry exhaustion already translated to `*ai.RetryError`). |
 | RuntimeContext / application context passed into tool execution | **Shipped** — `GenerateTextOpts.RuntimeContext` (an `ai.RuntimeContext` map), read inside a tool's `Execute` (and inside `ApprovalRequirer.ApprovalRequired`/`ApproveToolCall`) via `ai.RuntimeContextFrom(ctx)`. Installed once per run, before the tool loop begins, so every step and resumed batch sees the same value. See [Tools § RuntimeContext](core/tools.md#runtimecontext). |
-| Agents (`ToolLoopAgent` equivalent, agent-as-tool subagents) | **Shipped** — `agent.Agent` (`Generate`/`Stream`, `RunOpts`), `agent.AsTool` for agent-as-tool sub-agent delegation. Named plainly `Agent`, not `ToolLoopAgent` — see [Agents § Naming](core/agents.md#naming-toolloopagent-vs-agent). Contains no loop logic of its own; assembles a `GenerateTextOpts` and delegates entirely to `ai.GenerateText`/`ai.StreamText`. See [Agents](core/agents.md). |
-| Tool-execution approvals (approval func, policy hook, resumable pending-approval flow) | **Shipped** — `ai.RequireApproval`/`ai.ApprovalRequirer`, `GenerateTextOpts.ApproveToolCall`/`.Approvals`, `GenerateTextResult.PendingApprovals`. Decision order is `Approvals` then `ApproveToolCall` then pending; a pending call suspends its whole batch atomically; denial is recorded as `*ai.ToolApprovalDeniedError` on an `IsError` tool result, never raised. Vercel models a pending approval as a special message part surfaced to a UI stream; `go-ai-sdk` has no UI layer, so it models the same idea as a suspended result (`PendingApprovals`) plus `Approvals` on the resume call instead — see [Tools § Approvals for tool execution](core/tools.md#approvals-for-tool-execution). |
+| Agents (`ToolLoopAgent` equivalent, agent-as-tool subagents) | **Shipped** — `agent.Agent` (`Generate`/`Stream`, `RunOpts`), `agent.AsTool` for agent-as-tool sub-agent delegation. Named plainly `Agent`, not `ToolLoopAgent` — see [Agents § Naming](core/agents.md#naming-toolloopagent-vs-agent). Contains no loop logic of its own; assembles a `GenerateTextOpts` and delegates entirely to `ai.GenerateText`/`ai.StreamText`. `WorkflowAgent` and a `toolOrder` hint are **v7-only** (see below), not modeled here. See [Agents](core/agents.md). |
+| Tool-execution approvals (approval func, policy hook, resumable pending-approval flow) | **Shipped** — `ai.RequireApproval`/`ai.ApprovalRequirer`, `GenerateTextOpts.ApproveToolCall`/`.Approvals`, `GenerateTextResult.PendingApprovals`. Decision order is `Approvals` then `ApproveToolCall` then pending; a pending call suspends its whole batch atomically; denial is recorded as `*ai.ToolApprovalDeniedError` on an `IsError` tool result, never raised. Vercel models a pending approval as a special message part surfaced to a UI stream; `go-ai-sdk` has no UI layer, so it models the same idea as a suspended result (`PendingApprovals`) plus `Approvals` on the resume call instead — see [Tools § Approvals for tool execution](core/tools.md#approvals-for-tool-execution). A v7-redesigned approvals surface is **v7-only** (see below), not modeled here. |
 | Sandbox interface / Code Mode | **Shipped** — `codemode.Tool(sandbox, tools, opts)` wraps a set of `ai.Tool`s into a single `run_code` tool; `codemode.Sandbox` is the interface the caller implements against their own runtime (subprocess, container, embedded interpreter) — the SDK ships no bundled code runtime, and security/isolation is entirely the sandbox implementer's responsibility. See [Code Mode](core/code-mode.md). |
 | Video generation (`GenerateVideo`) | **Shipped** — `ai.GenerateVideo`, `provider.VideoModel`, `Registry.VideoModel`; Luma (Dream Machine, async poll), fal, and Replicate (both synchronous) implement it. See [Media § GenerateVideo](core/media.md#generatevideo). |
 | Realtime/streaming transcription (`StreamTranscribe`, a minimal realtime voice session) | **Shipped**, over a stdlib-only WebSocket client (`internal/websocket`) — `ai.StreamTranscribe`/`provider.StreamingTranscriptionModel` (Deepgram live, OpenAI Realtime API in transcription mode); `(*openai.Provider).RealtimeSession` (OpenAI-only voice/text session, no generic provider interface, not wired into `ai.Registry`). Vercel's WebRTC realtime transport is out of scope (see below) — this SDK's realtime support is WebSocket-only. See [Media § StreamTranscribe](core/media.md#streamtranscribe) and [§ Realtime voice session](core/media.md#realtime-voice-session-openai-only). |
@@ -49,8 +59,29 @@ table is the feature-by-feature status as of the current wave (13):
 | File/skill upload (`uploadFile`, `uploadSkill`) | **Shipped.** `ai.UploadFile`/`ai.DeleteFile`/`provider.FileStore` (OpenAI, Anthropic — both with `files-api-2025-04-14`-equivalent beta gating on Anthropic's side), referenced from a prompt via the new `provider.FilePart.FileID`/`.URL` variants. `uploadSkill` is **Anthropic-only**: `(*anthropic.Provider).UploadSkill`/`.DeleteSkill`, a provider-specific capability with no generic interface (`anthropic-beta: skills-2025-10-02`). Neither is wired into `ai.Registry`. See [Media § Files & skills](core/media.md#files--skills). |
 | MCP extensions (resources, prompts, completions, elicitation, token-provider auth) | **Shipped** — `Client.ListResources`/`ListResourceTemplates`/`ReadResource`, `ListPrompts`/`GetPrompt`, `Complete`, `SetElicitationHandler`/`ElicitationHandler` (server-initiated request dispatch), `NewStreamableHTTPTransportWithOptions` with `WithTokenProvider`/`WithAuthHeader`/`WithHTTPRetry`. **Caveat: elicitation over the HTTP transport is unsupported** — the Streamable HTTP transport has no server→client channel to receive a server-initiated request on, so `elicitation/create` can only reach the client over stdio today; see [MCP § Elicitation](mcp.md#elicitation) and [§ Limitations](mcp.md#limitations). Sampling and roots remain unimplemented. See [MCP § MCP scope](#mcp-scope) below. |
 | Provider fleet (Moonshot, Qwen, MiniMax, DeepInfra, Hugging Face, Baseten, LM Studio, NVIDIA NIM, Voyage, Mixedbread, Cartesia, Prodia, Black Forest Labs, AI Gateway) | **Shipped** — 14 new provider packages, bringing the total to 39. See [Provider overview](providers/README.md). |
-| OpenTelemetry bridge | Planned — wave 14, as a separate nested Go module (`contrib/otel/`) so the root module stays zero-dependency; `ai.Telemetry` is the seam it will plug into today. |
+| OpenTelemetry bridge | **Shipped as `contrib/otel`** — a separate nested Go module (`github.com/azrtydxb/go-ai-sdk/contrib/otel`) implementing `ai.Telemetry` with real OpenTelemetry GenAI-semantic-convention spans (`gen_ai.operation.name`, `gen_ai.system`, `gen_ai.request.model`, `gen_ai.usage.*`, `gen_ai.response.finish_reasons`), nested so the root module stays zero-dependency. See [Telemetry § The contrib/otel bridge](core/telemetry.md#the-contribotel-bridge). |
 | UI framework hooks (`useChat`/`useCompletion`/`useObject`, RSC streaming), MCP Apps rendering, DevTools/Terminal UI, WebRTC realtime transport | **Out of scope**, permanently — see [Features NOT ported](#features-not-ported) and the roadmap's standing scope rulings. |
+
+### v7-only: confirmed not targeted
+
+A handful of items visible on ai-sdk.dev as of the 2026-08-03 snapshot
+belong to **AI SDK 7**, not 6, and are explicitly **not targeted** by this
+port (tracked, not deferred — there is no "v6 gap" here to close):
+
+- **`WorkflowAgent`** and a `toolOrder` execution-order hint on
+  multi-tool steps.
+- **`contextSchema`** — a schema attached to an agent/run's context object
+  itself (distinct from `RuntimeContext`'s untyped bag).
+- **A top-level `reasoning` enum** on a message/part (v6's `reasoning`
+  option, which `go-ai-sdk` ships, is a *request*-side effort/budget knob
+  — this is a different, response-shape-level enum).
+- **A redesigned tool-execution approvals surface** (v7 reworks the
+  approval message-part shape beyond what `go-ai-sdk`'s
+  `PendingApprovals`/`Approvals` models today).
+
+These will be revisited only if/when a v7 parity effort is chartered; see
+the [v6 parity final audit](superpowers/specs/2026-08-03-v6-parity-final-audit.md)
+for the full ruling.
 
 ## API mapping
 
@@ -87,13 +118,16 @@ package `github.com/azrtydxb/go-ai-sdk/ai`, imported as `ai`.
 | `activeTools` | `ActiveTools []string` | See the [ActiveTools resolution](#documented-divergences) divergence (#6). |
 | `stopWhen: hasToolCall(name)` / a custom "loop finished" check | `ai.HasToolCall(names...)` / `ai.LoopFinished()` | Ready-made `StopWhen` helpers alongside `ai.StepCountIs`; see [Generating text § The multi-step tool loop](core/generating-text.md#the-multi-step-tool-loop). |
 | `topK` / `presencePenalty` / `frequencyPenalty` / `seed` / `headers` | `TopK` / `PresencePenalty` / `FrequencyPenalty` / `Seed` / `Headers` (all pointers/maps, optional) | Per-provider support varies — see [Generating text § Additional call settings](core/generating-text.md#additional-call-settings-topk-penalties-seed-headers). |
+| `timeout` (distinct connect/response/total timeouts) | `Timeout *ai.Timeout{Total, Step, Chunk}` | Not a field-for-field mapping — `go-ai-sdk`'s three dimensions are whole-run/per-step/stream-stall, not connect/response/total; see [Generating text § Timeout](core/generating-text.md#timeout-total-step-and-chunk). |
+| `tool({ inputSchema, execute, strict, inputExamples })` (`strict`/`inputExamples` fields) | `ai.NewTool[Args](name, description, fn, ai.WithToolStrict(), ai.WithToolInputExamples(examples...))` | Trailing `ToolOption`s instead of object fields; see [Tools § Strict mode and input examples](core/tools.md#strict-mode-and-input-examples). |
+| `tool({ onInputStart, onInputDelta, onInputAvailable })` | `ai.WithToolInputCallbacks(ai.ToolInputCallbacks{...})` | See [Tools § Per-tool input streaming hooks](core/tools.md#per-tool-input-streaming-hooks). |
 | `extractJsonMiddleware()` | `ai.ExtractJSONMiddleware(model)` | See [Middleware and registry § ExtractJSONMiddleware](core/middleware-and-registry.md#extractjsonmiddleware). |
 | `experimental_repairToolCall` | `RepairToolCall func(ctx, ai.ToolCallRecord, error) (ai.ToolCallRecord, bool)` | One retry, same as Vercel's documented behavior; Go signature returns `(call, ok bool)` instead of `Promise<ToolCall | null>`. |
 | `maxRetries` | `MaxRetries *int` (pointer; `nil` = default 2) | |
 | `maxOutputTokens` | `MaxTokens *int` | |
 | `temperature` / `topP` / `stopSequences` | `Temperature` / `TopP` / `StopSequences` (all pointers where TS allows omission) | |
 | `providerOptions` | `ProviderOptions map[string]any` | **Values are raw wire keys, not translated option names** — the single biggest divergence; see below. |
-| `experimental_telemetry` (OTel-based) | `ai.TelemetryMiddleware(model, telemetryImpl)` + `ai.Telemetry` interface | Not OpenTelemetry — see [Telemetry is an interface, not OTel](#telemetry-is-an-interface-not-otel). |
+| `experimental_telemetry` (OTel-based) | `ai.TelemetryMiddleware(model, telemetryImpl)` + `ai.Telemetry` interface, or `ai.TelemetryMiddleware(model, otelbridge.New())` (`contrib/otel`) for real OpenTelemetry | See [Telemetry: a plain interface, plus a real OTel bridge](#telemetry-a-plain-interface-plus-a-real-otel-bridge). |
 | MCP tools (`experimental_createMCPClient`) | `mcp.NewClient(transport)` + `mcp.Tools(ctx, client)` | Also covers resources, prompts, completions, and elicitation — see [MCP scope](#mcp-scope). |
 | `useChat` / `useCompletion` / `useObject` (React hooks) | *(not ported)* | UI-framework layer — see [Features NOT ported](#features-not-ported). |
 | React Server Components streaming (`streamUI`, `createStreamableUI`) | *(not ported)* | Same reason. |
@@ -167,6 +201,7 @@ doc comment for the exact contract.
 | `simulateStreamingMiddleware()` | `ai.SimulateStreamingMiddleware(model)` |
 | `defaultSettingsMiddleware({ settings })` | `ai.DefaultSettingsMiddleware(model, defaults provider.Call)` |
 | `extractJsonMiddleware()` | `ai.ExtractJSONMiddleware(model)` |
+| A `tool()`-level `inputExamples` serialization helper for providers without native support | `ai.AddToolInputExamplesMiddleware(model)` |
 | `wrapLanguageModel({ model, middleware: [a, b] })` | Compose by nesting: `ai.WrapModel(model, a)` then wrap again, or call `a(b(model))`-style directly since every middleware here is just `func(provider.LanguageModel) provider.LanguageModel` |
 | Image-model middleware (`wrapImageModel` equivalent) | `ai.WrapImageModel(model, wrap)` — a naming hook only; no built-in image middlewares ship yet |
 
@@ -216,13 +251,18 @@ at its source page.
    delay at all; set it explicitly to get pacing. See
    [Streaming § SmoothStream](core/streaming.md#smoothstream).
 
-3. **Telemetry is a plain interface, not OpenTelemetry.** Vercel's
-   `experimental_telemetry` is documented as built directly on OpenTelemetry
-   conventions (span names, semantic attributes). `go-ai-sdk` ships zero
-   external dependencies, so `ai.Telemetry` is a minimal
-   `OnSpanStart`/`OnSpanEnd` seam you bridge to OTel (or anything else)
-   yourself. See [Telemetry](core/telemetry.md) and
-   [Telemetry is an interface, not OTel](#telemetry-is-an-interface-not-otel)
+3. **Telemetry is a plain interface at the root; the OTel bridge is a
+   separate module.** Vercel's `experimental_telemetry` is documented as
+   built directly on OpenTelemetry conventions (span names, semantic
+   attributes). The root `go-ai-sdk` module still ships zero external
+   dependencies, so `ai.Telemetry` is a minimal `OnSpanStart`/`OnSpanEnd`
+   seam — but as of wave 14, a real, ready-to-use OpenTelemetry bridge
+   ships as [`contrib/otel`](../contrib/otel/README.md), a separate Go
+   module implementing `ai.Telemetry` with GenAI-semconv spans. Use it
+   directly (`otelbridge.New()`) instead of writing your own bridge,
+   unless you need something OTel doesn't cover. See
+   [Telemetry](core/telemetry.md) and
+   [Telemetry: a plain interface, plus a real OTel bridge](#telemetry-a-plain-interface-plus-a-real-otel-bridge)
    below.
 
 4. **MCP has no sampling/roots, and elicitation only works over stdio.**
@@ -256,18 +296,30 @@ at its source page.
    is not "no filtering" — it disables every tool). See
    [Tools § ActiveTools](core/tools.md#activetools).
 
-### Telemetry is an interface, not OTel
+### Telemetry: a plain interface, plus a real OTel bridge
 
 ```go
 type Telemetry interface {
-	OnSpanStart(info SpanInfo)
+	OnSpanStart(ctx context.Context, info SpanInfo)
 	OnSpanEnd(info SpanInfo)
 }
 ```
 
-Bridge it to OpenTelemetry yourself: start a span in `OnSpanStart`, end it
-in `OnSpanEnd`. A full sketch (including the stream-lifecycle span-ending
-rules) is in [Telemetry § OTel bridge sketch](core/telemetry.md#otel-bridge-sketch).
+**Breaking change (v0.2.0):** `OnSpanStart` now takes `ctx` as its first
+argument, and `SpanInfo` gained `CorrelationID` — migrating a hand-rolled
+`Telemetry` implementation is a one-line signature update (see
+[Telemetry § Telemetry and SpanInfo](core/telemetry.md#telemetry-and-spaninfo)).
+This is the only breaking change across the whole v6 parity program
+(waves 9–14); pre-1.0, and the only known implementer was this doc's own
+now-removed sketch.
+
+For OpenTelemetry specifically, bridge it yourself (start a span in
+`OnSpanStart`, end it in `OnSpanEnd`, keyed by `SpanInfo.CorrelationID`) —
+or reach for the ready-made [`contrib/otel`](../contrib/otel/README.md)
+bridge instead of writing one: `otelbridge.New()` returns an
+`ai.Telemetry` that emits real GenAI-semconv spans. Full attribute mapping
+and the stream-lifecycle span-ending rules are in
+[Telemetry § The contrib/otel bridge](core/telemetry.md#the-contribotel-bridge).
 
 ### MCP scope
 
@@ -310,9 +362,9 @@ deviations are in [MCP § Limitations](mcp.md#limitations).
   infrastructure rather than round-tripping through the caller) — not
   modeled; every tool call in `go-ai-sdk` today executes client-side via
   `ai.Tool.Execute`.
-- **Native OpenTelemetry integration** — `ai.Telemetry` is the seam for
-  it, but no built-in OTel exporter/bridge ships with the SDK (see
-  divergence 3 above).
+- **Partial-output streaming for `StreamText`'s `Output` modes** — the one
+  remaining `StreamText`-side gap from the [output modes](#ai-sdk-6-delta)
+  row above; `GenerateText`'s `Output` modes are fully shipped.
 
 ## Source of truth
 
@@ -335,5 +387,10 @@ deviations are in [MCP § Limitations](mcp.md#limitations).
 - [`docs/superpowers/plans/2026-08-03-v6-parity-roadmap.md`](superpowers/plans/2026-08-03-v6-parity-roadmap.md) —
   the wave-by-wave AI SDK 6 parity plan the [delta table](#ai-sdk-6-delta)
   above is drawn from
+- [`docs/superpowers/specs/2026-08-03-v6-parity-final-audit.md`](superpowers/specs/2026-08-03-v6-parity-final-audit.md) —
+  the closing gap-audit record: the full have-list, deliberately-out-of-scope
+  surface, and confirmed v7-only items
+- [`contrib/otel/`](../contrib/otel/) — the OpenTelemetry bridge (separate
+  Go module)
 - [Architecture](architecture.md) — how the layers underneath these APIs
   fit together

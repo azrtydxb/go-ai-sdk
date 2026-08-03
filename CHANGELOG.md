@@ -8,25 +8,101 @@ once it reaches 1.0.
 
 ## [Unreleased]
 
-Waves 9, 10, 11, 12, and 13 of the [AI SDK 6 parity roadmap](docs/superpowers/plans/2026-08-03-v6-parity-roadmap.md).
-Wave 9: v5 leftovers plus quick AI SDK 6 wins. Wave 10: output modes on
-`GenerateText`, reranking, a unified reasoning option, and the full
-lifecycle-callback event set. Wave 11: tool-execution approvals with a
-resumable pending-approval flow, `RuntimeContext`, an `agent.Agent`
-package, and Code Mode (`codemode.Tool`/`Sandbox`). Wave 12: video
-generation, a stdlib-only WebSocket client, streaming transcription,
-audio translation, a minimal OpenAI realtime voice session, and
-file/skill upload. Wave 13: MCP resources/prompts/completions/elicitation
-and token-provider auth with transient retry on the HTTP transport, plus
-14 new providers (Moonshot, Qwen, MiniMax, DeepInfra, Hugging Face,
-Baseten, LM Studio, NVIDIA NIM, Voyage, Mixedbread, Cartesia, Prodia,
-Black Forest Labs, Vercel AI Gateway), bringing the provider total to 39.
-Full parity with the AI SDK 5 core is maintained; AI SDK 6 parity is in
-progress — see
+## [0.2.0] — 2026-08-03
+
+Waves 9, 10, 11, 12, 13, and 14 of the [AI SDK 6 parity roadmap](docs/superpowers/plans/2026-08-03-v6-parity-roadmap.md) —
+the closing release of the parity program. Wave 9: v5 leftovers plus quick
+AI SDK 6 wins. Wave 10: output modes on `GenerateText`, reranking, a
+unified reasoning option, and the full lifecycle-callback event set. Wave
+11: tool-execution approvals with a resumable pending-approval flow,
+`RuntimeContext`, an `agent.Agent` package, and Code Mode
+(`codemode.Tool`/`Sandbox`). Wave 12: video generation, a stdlib-only
+WebSocket client, streaming transcription, audio translation, a minimal
+OpenAI realtime voice session, and file/skill upload. Wave 13: MCP
+resources/prompts/completions/elicitation and token-provider auth with
+transient retry on the HTTP transport, plus 14 new providers (Moonshot,
+Qwen, MiniMax, DeepInfra, Hugging Face, Baseten, LM Studio, NVIDIA NIM,
+Voyage, Mixedbread, Cartesia, Prodia, Black Forest Labs, Vercel AI
+Gateway), bringing the provider total to 39. Wave 14: a real OpenTelemetry
+bridge (`contrib/otel`, a separate nested Go module), tool `strict` mode
+and `inputExamples` (plus `AddToolInputExamplesMiddleware`), per-tool
+input-streaming lifecycle hooks, and structured `Timeout`
+(Total/Step/Chunk) with `*ai.TimeoutError` — closing out the final
+gap-audit's four remaining items. **`go-ai-sdk` now has full parity with
+the AI SDK 6 core** — see
 [Migrating from the Vercel AI SDK § AI SDK 6 delta](docs/migrating-from-vercel-ai-sdk.md#ai-sdk-6-delta)
-for the feature-by-feature status.
+for the feature-by-feature status and the
+[v6 parity final audit](docs/superpowers/specs/2026-08-03-v6-parity-final-audit.md)
+for the closing record.
 
 ### Added
+
+**Wave 14**
+
+- `contrib/otel`: a real OpenTelemetry bridge — `github.com/azrtydxb/go-ai-sdk/contrib/otel`,
+  a **separate Go module** (its own `go.mod`/`go.sum`, `replace
+  github.com/azrtydxb/go-ai-sdk => ../..` for local development only) so
+  the root module stays zero-dependency. `otelbridge.New(...Option)`
+  returns a `*Bridge` implementing `ai.Telemetry`: starts a
+  `trace.SpanKindClient` span per call (`"chat " + ModelID`, both
+  `SpanInfo.Operation` values mapping to GenAI's `"chat"` operation),
+  keyed by `SpanInfo.CorrelationID`, parented under any span already in
+  the call's `ctx`. Emits GenAI semantic-convention attributes
+  (`gen_ai.operation.name`, `gen_ai.system`, `gen_ai.request.model`,
+  `gen_ai.usage.input_tokens`/`.output_tokens`,
+  `gen_ai.response.finish_reasons`) as plain string keys (not coupled to a
+  versioned `semconv` package), plus `codes.Ok`/`codes.Error` status and
+  `RecordError` on failure. `WithTracer`/`WithSpanNamePrefix` configure it.
+  Tested with an in-memory `tracetest.SpanRecorder` — no network/collector
+  required; verify with `cd contrib/otel && go test -race ./...` (a
+  separate module, invisible to the root `go test ./...`). See
+  [Telemetry § The contrib/otel bridge](docs/core/telemetry.md#the-contribotel-bridge)
+  and [`contrib/otel/README.md`](contrib/otel/README.md).
+- Tool `strict` mode and `inputExamples`: `ai.WithToolStrict()` and
+  `ai.WithToolInputExamples[Args](examples ...Args)`, two new `NewTool`
+  `ToolOption`s setting `Tool.Strict()`/`Tool.InputExamples()`
+  (`provider.ToolDef.Strict`/`.InputExamples` downstream). `Strict` is
+  honored as `"strict":true` by openaicompat-based providers, ignored
+  (no wire param, no error) by anthropic, geminicompat, bedrock, cohere,
+  mistral. `InputExamples` is sent natively only by anthropic
+  (`input_examples`); every other provider needs
+  `ai.AddToolInputExamplesMiddleware(model)`, which folds each tool's
+  examples into its `Description` as text (`"\n\nExample inputs:\n"` plus
+  one compact-JSON example per line) and clears `InputExamples`, so a
+  native-support provider never double-counts them — idempotent per call,
+  the caller's original `Tools`/`ToolDef` values are never mutated. See
+  [Tools § Strict mode and input examples](docs/core/tools.md#strict-mode-and-input-examples)
+  and [§ AddToolInputExamplesMiddleware](docs/core/tools.md#addtoolinputexamplesmiddleware).
+- Per-tool input-streaming lifecycle hooks:
+  `ai.WithToolInputCallbacks(ai.ToolInputCallbacks{OnInputStart,
+  OnInputDelta, OnInputAvailable})`, mirroring the Vercel AI SDK v6's
+  `onInputStart`/`onInputDelta`/`onInputAvailable`. `StreamText` fires
+  `OnInputStart` once per `toolCallID` on its first argument delta,
+  `OnInputDelta` on every delta thereafter (raw args-JSON text fragment),
+  and `OnInputAvailable` once arguments are fully assembled, immediately
+  before that call executes; `GenerateText` (no deltas) fires only
+  `OnInputAvailable`. A `RepairToolCall` retry re-fires `OnInputAvailable`
+  for the repaired call. None of the three fire for the `Output`
+  tool-mode fallback's synthetic forced call, since that call is decoded
+  directly and never routed through `Tool.Execute`. See
+  [Tools § Per-tool input streaming hooks](docs/core/tools.md#per-tool-input-streaming-hooks).
+- `GenerateTextOpts.Timeout{Total, Step, Chunk time.Duration}` /
+  `*ai.TimeoutError{Dimension, Limit}`: structured timeout bounds finer
+  than a single `context.Context` deadline. `Total` bounds the whole run
+  (a `context.WithTimeout` derived at entry, layered on the caller's own
+  `ctx`); `Step` bounds each individual step's model call; `Chunk`
+  (`StreamText` only) bounds the max gap between yielded
+  `provider.StreamPart`s, implemented as a timer reset on every part.
+  Whichever bound fires first ends the run with a `*ai.TimeoutError`
+  (`Dimension: "total"|"step"|"chunk"`) via the returned error/`OnError` —
+  detected via a distinct `context.WithTimeoutCause` sentinel per
+  dimension, so this is always distinguishable from the caller's own
+  `ctx` being canceled or reaching its own deadline, which continues to
+  surface exactly as before (the plain ctx error / `OnAbort` in
+  `StreamText`, never a `*ai.TimeoutError`) — a shorter caller-supplied
+  `ctx` always wins over a much larger `Total`. See
+  [Generating text § Timeout](docs/core/generating-text.md#timeout-total-step-and-chunk)
+  and [Streaming § Timeout: the Chunk dimension](docs/core/streaming.md#timeout-the-chunk-dimension).
 
 **Wave 13**
 
@@ -280,7 +356,7 @@ for the feature-by-feature status.
   by Anthropic, Google/Vertex AI (geminicompat), and Bedrock, replacing
   three byte-identical private copies — an internal consolidation with no
   behavior change, exported for reuse. See
-  [Reasoning § EffortBudgetTokens](docs/core/reasoning.md#effortbudgettokens-the-effort-token-budget-table).
+  [Reasoning § EffortBudgetTokens](docs/core/reasoning.md#effortbudgettokens-the-effort--token-budget-table).
 
 **Wave 10**
 
@@ -356,6 +432,30 @@ for the feature-by-feature status.
   provider total to 25.
 
 ### Changed
+
+**Wave 14 — BREAKING**
+
+- **`ai.Telemetry.OnSpanStart` signature change:** now
+  `OnSpanStart(ctx context.Context, info SpanInfo)` (previously
+  `OnSpanStart(info SpanInfo)`). `ai.SpanInfo` also gains a new
+  `CorrelationID string` field, populated identically on the
+  `OnSpanStart`/`OnSpanEnd` (or stream-end) pair for one call — a
+  process-wide monotonic atomic counter, not time-based, so it never
+  collides under concurrent or fast-successive calls (unlike keying a
+  span map by `StartTime`). **This is the only breaking change in the
+  entire v6 parity program (waves 9–14).** It's pre-1.0, and the only
+  known implementer of `Telemetry` in this repo before this wave was the
+  docs' own OTel sketch (now replaced by the real
+  [`contrib/otel`](contrib/otel/README.md) bridge, itself built against
+  the new signature). Migration is a one-line signature update:
+  ```go
+  // Before (v0.1.x)
+  func (t *myTelemetry) OnSpanStart(info ai.SpanInfo) { ... }
+  // After (v0.2.0)
+  func (t *myTelemetry) OnSpanStart(ctx context.Context, info ai.SpanInfo) { ... }
+  ```
+  `OnSpanEnd`'s signature is unchanged. See
+  [Telemetry § Telemetry and SpanInfo](docs/core/telemetry.md#telemetry-and-spaninfo).
 
 **Wave 9**
 
@@ -505,5 +605,6 @@ smoke-tested against live APIs yet (see the
 - [Migrating from the Vercel AI SDK](docs/migrating-from-vercel-ai-sdk.md)
   and [Architecture](docs/architecture.md).
 
-[Unreleased]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/azrtydxb/go-ai-sdk/releases/tag/v0.1.0

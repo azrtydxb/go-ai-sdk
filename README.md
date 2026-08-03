@@ -13,13 +13,21 @@ Prodia, and Black Forest Labs — with the same concepts and naming as the
 TypeScript original, expressed in native Go (`context.Context`, `iter.Seq`,
 generics, typed errors) rather than mirrored line-for-line.
 
-**Status: v0.1.** The public API has full parity with the AI SDK 5 core;
-AI SDK 6 parity is in progress (see the migration guide's
-[AI SDK 6 delta](docs/migrating-from-vercel-ai-sdk.md#ai-sdk-6-delta)). It's
-implemented and tested end-to-end (unit tests plus a shared
-provider-conformance suite), but it is young: expect rough edges, and
-expect the API to move before a 1.0. Coming from the TypeScript SDK? Start
-with [Migrating from the Vercel AI SDK](docs/migrating-from-vercel-ai-sdk.md).
+**Status: v0.2.** The public API has reached **full parity with the AI SDK
+6 core** (see the migration guide's
+[AI SDK 6 delta](docs/migrating-from-vercel-ai-sdk.md#ai-sdk-6-delta) for
+the feature-by-feature record, and the
+[v6 parity final audit](docs/superpowers/specs/2026-08-03-v6-parity-final-audit.md)
+for the closing have-list). It's implemented and tested end-to-end (unit
+tests plus a shared provider-conformance suite), but it is young: expect
+rough edges, and expect the API to move before a 1.0. Coming from the
+TypeScript SDK? Start with
+[Migrating from the Vercel AI SDK](docs/migrating-from-vercel-ai-sdk.md).
+
+**v0.2.0 breaking change:** `ai.Telemetry.OnSpanStart` gained a leading
+`ctx context.Context` parameter, and `ai.SpanInfo` gained `CorrelationID`
+— a one-line signature update for any hand-rolled `Telemetry`
+implementation. See [`CHANGELOG.md`](CHANGELOG.md#020--2026-08-03).
 
 ## Install
 
@@ -27,7 +35,13 @@ with [Migrating from the Vercel AI SDK](docs/migrating-from-vercel-ai-sdk.md).
 go get github.com/azrtydxb/go-ai-sdk
 ```
 
-Requires Go 1.26+.
+Requires Go 1.26+. The OpenTelemetry bridge is a separate module (kept out
+of the root so the core SDK stays dependency-free) — `go get` it only if
+you want it:
+
+```sh
+go get github.com/azrtydxb/go-ai-sdk/contrib/otel
+```
 
 ## Quickstart
 
@@ -100,7 +114,18 @@ in [`examples/`](examples/), each compiled by CI.
   execution. See [Generating text](docs/core/generating-text.md).
 - **Tool calling** — typed tools via `ai.NewTool[Args]` with a
   reflection-derived JSON Schema, `ActiveTools`, `RepairToolCall`, and a
-  typed error taxonomy. See [Tools](docs/core/tools.md).
+  typed error taxonomy, plus `ai.WithToolStrict()`/`ai.WithToolInputExamples`
+  (provider-enforced strict schemas and example payloads, folded into
+  tool descriptions for providers without native support via
+  `ai.AddToolInputExamplesMiddleware`) and per-tool input-streaming
+  lifecycle hooks (`ai.WithToolInputCallbacks`). See
+  [Tools](docs/core/tools.md).
+- **Structured timeouts** — `GenerateTextOpts.Timeout{Total, Step, Chunk}`
+  bounds a whole run, each step, and stream-chunk staleness independently,
+  surfacing an SDK-imposed bound as a typed `*ai.TimeoutError`, distinct
+  from the caller's own `context.Context` being canceled (still `OnAbort`/
+  the plain ctx error, exactly as before). See
+  [Generating text § Timeout](docs/core/generating-text.md#timeout-total-step-and-chunk).
 - **Tool-execution approvals** — `ai.RequireApproval`/`ai.ApprovalRequirer`
   gate a tool call on an inline decision (`ApproveToolCall`) or a
   suspend-then-resume flow (`PendingApprovals`/`Approvals`), with denials
@@ -180,8 +205,13 @@ in [`examples/`](examples/), each compiled by CI.
   wrapper with typed, `errors.As`-able failure modes. See
   [Errors and retries](docs/core/errors-and-retries.md).
 - **Telemetry** — a minimal, dependency-free span-reporting seam
-  (`ai.Telemetry`) you bridge to OpenTelemetry or anything else — no OTel
-  dependency shipped. See [Telemetry](docs/core/telemetry.md).
+  (`ai.Telemetry`/`ai.TelemetryMiddleware`) in the root module, plus a
+  ready-to-use **OpenTelemetry bridge** — `contrib/otel`, a separate Go
+  module (so the root stays zero-dependency) emitting real GenAI-semconv
+  spans (`gen_ai.operation.name`, `gen_ai.system`, `gen_ai.request.model`,
+  `gen_ai.usage.*`, `gen_ai.response.finish_reasons`). See
+  [Telemetry](docs/core/telemetry.md) and
+  [`contrib/otel/README.md`](contrib/otel/README.md).
 - **MCP (Model Context Protocol)** — an MCP client (stdio and Streamable
   HTTP transports) that adapts a server's tools straight into `ai.Tool`,
   plus resources, resource templates, prompts, argument completions, and

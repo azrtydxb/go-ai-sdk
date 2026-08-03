@@ -2,7 +2,7 @@
 
 `go-ai-sdk` middlewares are plain `provider.LanguageModel` decorators —
 functions that take a model and return a wrapped model implementing the
-same interface. `ai.WrapModel` is a one-line hook for applying them; four
+same interface. `ai.WrapModel` is a one-line hook for applying them; five
 middlewares ship with the SDK. `ai.WrapImageModel` is the equivalent hook
 for `provider.ImageModel`. `ai.Registry` maps provider names to provider
 values and resolves `"provider:model"` IDs into concrete models.
@@ -17,10 +17,10 @@ func WrapModel(m provider.LanguageModel, wrap func(provider.LanguageModel) provi
 
 It exists purely for readability at the call site — `wrap(m)` alone does
 the same thing — as a named hook for middleware that decorates a model
-(logging, caching, retries, or any of the three below) before passing it to
+(logging, caching, retries, or any of the five below) before passing it to
 `GenerateText`/`StreamText`.
 
-## The four middlewares
+## The five middlewares
 
 ### ExtractReasoningMiddleware
 
@@ -137,6 +137,23 @@ code fence (rare, but possible in a model's raw text output) will still be
 treated as a fence marker and stripped — there's no semantic check that the
 surrounding content is actually JSON before removing the fence lines.
 
+### AddToolInputExamplesMiddleware
+
+```go
+func AddToolInputExamplesMiddleware(model provider.LanguageModel) provider.LanguageModel
+```
+
+Folds each tool's `InputExamples` (set via `ai.WithToolInputExamples`, see
+[Tools § Strict mode and input examples](tools.md#strict-mode-and-input-examples))
+into its `Description` as text, then clears `InputExamples` — for
+providers whose wire format has no native input-examples field (every
+provider except anthropic). Idempotent per call: the caller's original
+`Tools`/`ToolDef` values are never mutated, so wrapping repeatedly (or an
+already-wrapped model) always starts fresh from the original
+`Description`/`InputExamples`. See
+[Tools § AddToolInputExamplesMiddleware](tools.md#addtoolinputexamplesmiddleware)
+for the exact text format and full behavior.
+
 ### WrapImageModel
 
 ```go
@@ -149,7 +166,7 @@ The `provider.ImageModel` counterpart to `WrapModel` — a one-line naming
 hook for middleware that decorates an image model (logging, caching,
 provider-option injection) before it's passed to `ai.GenerateImage`. It's a
 naming hook only: no built-in image middlewares ship with the SDK yet
-(unlike the four `provider.LanguageModel` middlewares above), so `wrap` is
+(unlike the five `provider.LanguageModel` middlewares above), so `wrap` is
 always a function you write yourself, e.g.:
 
 ```go
