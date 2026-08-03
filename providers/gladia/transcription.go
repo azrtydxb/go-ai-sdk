@@ -8,8 +8,8 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
-	"time"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/transcribeutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -134,7 +134,7 @@ func (m *transcriptionModel) upload(ctx context.Context, call provider.Transcrip
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-	filename := "audio" + extForMediaType(call.MediaType)
+	filename := "audio" + transcribeutil.ExtForMediaType(call.MediaType)
 
 	partHeader := make(map[string][]string)
 	partHeader["Content-Disposition"] = []string{fmt.Sprintf(`form-data; name="audio"; filename=%q`, filename)}
@@ -274,24 +274,14 @@ func (m *transcriptionModel) poll(ctx context.Context, id string) (*pollResponse
 			if pr.ErrorCode != nil {
 				return nil, nil, fmt.Errorf("gladia: transcription %s failed: %v", id, pr.ErrorCode)
 			}
-			return nil, nil, fmt.Errorf("gladia: transcription %s failed", id)
+			// The "error_code" field was empty despite a terminal error
+			// status; fall back to the raw response body so the failure
+			// isn't silently reported with no detail at all.
+			return nil, nil, fmt.Errorf("gladia: transcription %s failed: %s", id, body)
 		}
 
-		if err := sleep(ctx, m.provider.poll()); err != nil {
+		if err := transcribeutil.Sleep(ctx, m.provider.poll()); err != nil {
 			return nil, nil, err
 		}
-	}
-}
-
-// sleep blocks for d or until ctx is done, whichever comes first,
-// returning ctx.Err() in the latter case.
-func sleep(ctx context.Context, d time.Duration) error {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-t.C:
-		return nil
 	}
 }

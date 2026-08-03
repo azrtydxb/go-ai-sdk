@@ -8,8 +8,8 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
-	"time"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/transcribeutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -129,7 +129,7 @@ func (m *transcriptionModel) createJob(ctx context.Context, call provider.Transc
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-	filename := "audio" + extForMediaType(call.MediaType)
+	filename := "audio" + transcribeutil.ExtForMediaType(call.MediaType)
 
 	mediaHeader := make(map[string][]string)
 	mediaHeader["Content-Disposition"] = []string{fmt.Sprintf(`form-data; name="media"; filename=%q`, filename)}
@@ -250,10 +250,13 @@ func (m *transcriptionModel) pollJob(ctx context.Context, id string) error {
 			if jr.FailureDetail != "" {
 				return fmt.Errorf("revai: job %s failed: %s", id, jr.FailureDetail)
 			}
-			return fmt.Errorf("revai: job %s failed", id)
+			// The "failure_detail" field was empty despite a terminal
+			// failed status; fall back to the raw response body so the
+			// failure isn't silently reported with no detail at all.
+			return fmt.Errorf("revai: job %s failed: %s", id, body)
 		}
 
-		if err := sleep(ctx, m.provider.poll()); err != nil {
+		if err := transcribeutil.Sleep(ctx, m.provider.poll()); err != nil {
 			return err
 		}
 	}
@@ -291,17 +294,4 @@ func (m *transcriptionModel) fetchTranscript(ctx context.Context, id string) (*t
 		return nil, nil, fmt.Errorf("revai: decode transcript response: %w", err)
 	}
 	return &tr, body, nil
-}
-
-// sleep blocks for d or until ctx is done, whichever comes first,
-// returning ctx.Err() in the latter case.
-func sleep(ctx context.Context, d time.Duration) error {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-t.C:
-		return nil
-	}
 }

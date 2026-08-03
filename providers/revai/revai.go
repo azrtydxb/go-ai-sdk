@@ -123,37 +123,3 @@ func errorMessage(body []byte) string {
 	}
 	return string(body)
 }
-
-// extForMediaType returns a plausible file extension (including the leading
-// dot) for a MIME media type, used to build a filename for the multipart
-// upload. Returns "" when the type is unknown or empty.
-func extForMediaType(mediaType string) string {
-	switch mediaType {
-	case "audio/mpeg", "audio/mp3":
-		return ".mp3"
-	case "audio/wav", "audio/x-wav", "audio/wave":
-		return ".wav"
-	case "audio/webm":
-		return ".webm"
-	case "audio/ogg":
-		return ".ogg"
-	case "audio/flac", "audio/x-flac":
-		return ".flac"
-	case "audio/mp4", "audio/x-m4a", "audio/m4a":
-		return ".m4a"
-	case "video/mp4":
-		return ".mp4"
-	}
-	if mediaType == "" {
-		return ""
-	}
-	for i := len(mediaType) - 1; i >= 0; i-- {
-		if mediaType[i] == '/' {
-			if i+1 < len(mediaType) {
-				return "." + mediaType[i+1:]
-			}
-			return ""
-		}
-	}
-	return ""
-}
