@@ -67,6 +67,12 @@ type GenerateTextResult struct {
 	FinishReason  provider.FinishReason
 	Usage         provider.Usage     // summed over steps
 	Messages      []provider.Message // full final conversation incl. tool msgs
+	// Output holds the decoded value when GenerateTextOpts.Output was set:
+	// a T for OutputObject[T], a []T for OutputArray[T], a string for
+	// OutputChoice, or an arbitrary JSON value (map[string]any / []any /
+	// ...) for OutputJSON. Nil when Output was not set. Extract it with
+	// OutputAs[T].
+	Output any
 }
 
 // GenerateText calls opts.Model (through retry), running a multi-step
@@ -87,7 +93,7 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 		return nil, err
 	}
 
-	call, err := buildCall(opts)
+	call, outputToolName, err := buildOutputCall(opts)
 	if err != nil {
 		// Argument-validation errors are reported solely via the returned
 		// error, not OnError — this mirrors StreamText, which never reaches
@@ -151,6 +157,20 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 		toolCalls := resp.ToolCalls()
 		hasToolCalls := len(toolCalls) > 0
 
+		if outputToolName != "" && hasToolCalls {
+			// Output's tool-mode fallback: the model was forced (via
+			// ToolChoice) to call the single injected output-schema tool.
+			// That call is not a real tool — it must not be executed via
+			// runToolCalls — its Args are the structured output's raw JSON,
+			// which becomes this (single, final) step's Text.
+			step.Text = string(toolCalls[0].Args)
+			steps = append(steps, step)
+			if opts.OnStepFinish != nil {
+				opts.OnStepFinish(step)
+			}
+			break
+		}
+
 		if hasToolCalls {
 			results, err := runToolCalls(ctx, opts.Tools, toolCalls, active, opts.RepairToolCall)
 			if err != nil {
@@ -197,6 +217,16 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 
 	last := steps[len(steps)-1]
 
+	var decoded any
+	if opts.Output != nil {
+		raw := stripFences(last.Text)
+		val, derr := opts.Output.decode(raw)
+		if derr != nil {
+			return fail(derr)
+		}
+		decoded = val
+	}
+
 	result := &GenerateTextResult{
 		Text:          last.Text,
 		ReasoningText: last.ReasoningText,
@@ -207,6 +237,7 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 		FinishReason:  last.FinishReason,
 		Usage:         totalUsage,
 		Messages:      messages,
+		Output:        decoded,
 	}
 	if opts.OnFinish != nil {
 		opts.OnFinish(result)

@@ -9,12 +9,23 @@ import (
 
 // GenerateTextOpts configures a GenerateText call.
 type GenerateTextOpts struct {
-	Model         provider.LanguageModel // required
-	System        string                 // optional; prepended as system message
-	Prompt        string                 // exactly one of Prompt/Messages
-	Messages      []provider.Message
-	Tools         []Tool
-	ToolChoice    *provider.ToolChoice
+	Model      provider.LanguageModel // required
+	System     string                 // optional; prepended as system message
+	Prompt     string                 // exactly one of Prompt/Messages
+	Messages   []provider.Message
+	Tools      []Tool
+	ToolChoice *provider.ToolChoice
+	// Output selects a structured-output mode (object/array/choice/json) for
+	// this call. GenerateText-only: StreamText returns
+	// ErrOutputWithStreamText immediately when Output is set. When Output
+	// has a schema and Model.Capabilities().NativeJSON is true, it is
+	// enforced via Call.ResponseFormat; when NativeJSON is false, it falls
+	// back to a single forced tool call the same way GenerateObject does —
+	// which requires Tools to be empty (ErrOutputRequiresJSONOrNoTools
+	// otherwise). See Output's doc and OutputObject/OutputArray/
+	// OutputChoice/OutputJSON for the available modes, and OutputAs to
+	// extract the decoded GenerateTextResult.Output as a concrete type.
+	Output        Output
 	MaxSteps      int  // default 1; if 0 and StopWhen is set, defaults to 16
 	MaxRetries    *int // default 2
 	MaxTokens     *int

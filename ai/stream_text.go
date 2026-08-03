@@ -40,6 +40,10 @@ type TextStream struct {
 // StreamText starts the first model call (retried like GenerateText) and
 // returns a *TextStream. A non-nil error means the stream could not start.
 func StreamText(ctx context.Context, opts GenerateTextOpts) (*TextStream, error) {
+	if opts.Output != nil {
+		return nil, ErrOutputWithStreamText
+	}
+
 	call, err := buildCall(opts)
 	if err != nil {
 		return nil, err
