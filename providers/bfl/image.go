@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/fetchimage"
+	"github.com/azrtydxb/go-ai-sdk/internal/fetchmedia"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -132,11 +133,45 @@ func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall
 	}, nil
 }
 
+// maxPollBodyBytes caps how much of a poll response body is read into
+// memory. BFL's poll responses are small status/result JSON objects, so
+// this is generous headroom rather than a tight fit -- it exists purely as
+// a memory-DoS backstop against a compromised or malicious polling_url
+// returning an unbounded body.
+const maxPollBodyBytes = 1 << 20 // 1MB
+
 // poll repeatedly GETs the absolute pollingURL until the generation
 // reaches a terminal state ("Ready" or a failure status), sleeping
 // p.provider.poll() between requests. The sleep is ctx-aware: cancellation
 // returns ctx.Err() immediately instead of waiting out the interval.
+//
+// pollingURL is chosen by the server's create-call response, not by the
+// caller -- so before ever attaching the x-key credential to a request,
+// poll requires pollingURL to be same-origin with the configured base URL
+// (fetchmedia.SameOrigin), and validates it against SSRF targets
+// (fetchmedia.ValidateURL: link-local/metadata addresses, including cloud
+// metadata at 169.254.169.254). A mismatch or rejected URL fails closed
+// before any request -- with credentials -- is ever sent to it. Redirects
+// are refused outright: the poll response body is also capped
+// (maxPollBodyBytes) as a memory-DoS backstop.
 func (m *imageModel) poll(ctx context.Context, pollingURL string) (*pollResponse, []byte, error) {
+	if !fetchmedia.SameOrigin(m.provider.baseURL, pollingURL) {
+		return nil, nil, fmt.Errorf("bfl: polling_url %q is not same-origin as the configured base URL %q; refusing to send the API key to it", pollingURL, m.provider.baseURL)
+	}
+	if err := fetchmedia.ValidateURL(ctx, pollingURL); err != nil {
+		return nil, nil, fmt.Errorf("bfl: polling_url %q rejected: %w", pollingURL, err)
+	}
+
+	base := m.provider.client()
+	pollClient := &http.Client{
+		Transport: base.Transport,
+		Jar:       base.Jar,
+		Timeout:   base.Timeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return fmt.Errorf("bfl: refusing to follow redirect while polling %q", pollingURL)
+		},
+	}
+
 	for {
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, pollingURL, nil)
 		if err != nil {
@@ -144,14 +179,17 @@ func (m *imageModel) poll(ctx context.Context, pollingURL string) (*pollResponse
 		}
 		httpReq.Header.Set("x-key", m.provider.apiKey)
 
-		resp, err := m.provider.client().Do(httpReq)
+		resp, err := pollClient.Do(httpReq)
 		if err != nil {
 			return nil, nil, err
 		}
-		body, err := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(io.LimitReader(resp.Body, maxPollBodyBytes+1))
 		resp.Body.Close()
 		if err != nil {
 			return nil, nil, fmt.Errorf("bfl: read poll response: %w", err)
+		}
+		if len(body) > maxPollBodyBytes {
+			return nil, nil, fmt.Errorf("bfl: poll response body exceeds %d bytes", maxPollBodyBytes)
 		}
 
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {

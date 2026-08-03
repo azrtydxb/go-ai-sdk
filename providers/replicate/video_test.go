@@ -204,6 +204,37 @@ func TestGenerateVideos_URLFetchHappyPathSingleAndArray(t *testing.T) {
 	}
 }
 
+func TestGenerateVideos_FetchVideoErrorIsSinglePrefixed(t *testing.T) {
+	var srv *httptest.Server
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models/minimax/video-01/predictions", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"succeeded","output":["` + srv.URL + `/missing.mp4"]}`))
+	})
+	mux.HandleFunc("/missing.mp4", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("not found"))
+	})
+	srv = httptest.NewServer(mux)
+	defer srv.Close()
+
+	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
+	m := p.VideoModel("minimax/video-01")
+
+	_, err := m.GenerateVideos(context.Background(), provider.VideoCall{Prompt: "a cat"})
+	if err == nil {
+		t.Fatal("expected error for failed video fetch")
+	}
+	msg := err.Error()
+	if strings.Count(msg, "replicate:") != 1 {
+		t.Errorf("error = %q, want exactly one %q prefix (no double-wrap like the old replicate: fetch video: replicate: fetch)", msg, "replicate:")
+	}
+	if strings.Count(msg, "fetch ") != 1 {
+		t.Errorf("error = %q, want exactly one \"fetch \" (no double-wrap)", msg)
+	}
+}
+
 func TestGenerateVideos_FailedStatusError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

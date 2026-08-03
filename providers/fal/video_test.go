@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
@@ -181,6 +182,37 @@ func TestGenerateVideos_ProviderOptionsMergeTopLevel(t *testing.T) {
 	}
 	if _, ok := gotBody["other-provider"]; ok {
 		t.Error("other-provider options should not leak into request body")
+	}
+}
+
+func TestGenerateVideos_FetchVideoErrorIsSinglePrefixed(t *testing.T) {
+	var srv *httptest.Server
+	mux := http.NewServeMux()
+	mux.HandleFunc("/fal-ai/kling-video/v1/standard/text-to-video", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"video":{"url":"` + srv.URL + `/missing.mp4"}}`))
+	})
+	mux.HandleFunc("/missing.mp4", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("not found"))
+	})
+	srv = httptest.NewServer(mux)
+	defer srv.Close()
+
+	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
+	m := p.VideoModel("fal-ai/kling-video/v1/standard/text-to-video")
+
+	_, err := m.GenerateVideos(context.Background(), provider.VideoCall{Prompt: "a cat"})
+	if err == nil {
+		t.Fatal("expected error for failed video fetch")
+	}
+	msg := err.Error()
+	if strings.Count(msg, "fal:") != 1 {
+		t.Errorf("error = %q, want exactly one %q prefix (no double-wrap like the old fal: fetch video: fal: fetch)", msg, "fal:")
+	}
+	if strings.Count(msg, "fetch ") != 1 {
+		t.Errorf("error = %q, want exactly one \"fetch \" (no double-wrap)", msg)
 	}
 }
 

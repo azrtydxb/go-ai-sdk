@@ -334,6 +334,112 @@ func TestGenerateImages_ProviderOptionsMergeTopLevel(t *testing.T) {
 	}
 }
 
+// TestGenerateImages_ForeignOriginPollingURLRejected covers the credential-leak
+// vulnerability this task fixes: BFL's create call returns an absolute
+// polling_url that the model then GETs with the x-key API key attached. If a
+// malicious or MITM'd response pointed polling_url at a different host, the
+// old code would happily send the API key there. The fix requires
+// same-origin before ever attaching x-key.
+func TestGenerateImages_ForeignOriginPollingURLRejected(t *testing.T) {
+	var foreignGotKey string
+	var foreignHit int32
+	foreign := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&foreignHit, 1)
+		foreignGotKey = r.Header.Get("x-key")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"gen-1","status":"Ready","result":{"sample":"http://example.invalid/sample"}}`))
+	}))
+	defer foreign.Close()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"gen-1","polling_url":"` + foreign.URL + `/poll"}`))
+	}))
+	defer srv.Close()
+
+	p := New(WithAPIKey("secret-key"), WithBaseURL(srv.URL))
+	m := p.ImageModel("flux-pro-1.1")
+
+	_, err := m.GenerateImages(context.Background(), provider.ImageCall{Prompt: "a cat"})
+	if err == nil {
+		t.Fatal("expected error for foreign-origin polling_url")
+	}
+	if !strings.Contains(err.Error(), "same-origin") {
+		t.Errorf("error = %q, want it to mention same-origin", err.Error())
+	}
+	if atomic.LoadInt32(&foreignHit) != 0 {
+		t.Errorf("foreign host was hit %d times, want 0 (must reject before requesting)", foreignHit)
+	}
+	if foreignGotKey != "" {
+		t.Errorf("x-key %q reached the foreign host, want it never attached", foreignGotKey)
+	}
+}
+
+// TestGenerateImages_SameOriginPollingURLWorks is the positive counterpart to
+// the foreign-origin rejection test: a polling_url on the same origin as the
+// configured base URL (BFL's normal, legitimate response shape) must
+// continue to poll successfully with the API key attached.
+func TestGenerateImages_SameOriginPollingURLWorks(t *testing.T) {
+	sampleBytes := []byte("sample-bytes")
+	var gotPollKey string
+
+	mux := http.NewServeMux()
+	var srv *httptest.Server
+	mux.HandleFunc("/v1/flux-pro-1.1", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"gen-1","polling_url":"` + srv.URL + `/poll"}`))
+	})
+	mux.HandleFunc("/poll", func(w http.ResponseWriter, r *http.Request) {
+		gotPollKey = r.Header.Get("x-key")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"gen-1","status":"Ready","result":{"sample":"` + srv.URL + `/sample"}}`))
+	})
+	mux.HandleFunc("/sample", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.WriteHeader(http.StatusOK)
+		w.Write(sampleBytes)
+	})
+	srv = httptest.NewServer(mux)
+	defer srv.Close()
+
+	p := New(WithAPIKey("secret-key"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
+	m := p.ImageModel("flux-pro-1.1")
+
+	resp, err := m.GenerateImages(context.Background(), provider.ImageCall{Prompt: "a cat"})
+	if err != nil {
+		t.Fatalf("GenerateImages: %v", err)
+	}
+	if gotPollKey != "secret-key" {
+		t.Errorf("poll x-key = %q, want secret-key", gotPollKey)
+	}
+	if len(resp.Images) != 1 || string(resp.Images[0].Data) != string(sampleBytes) {
+		t.Fatalf("unexpected images: %+v", resp.Images)
+	}
+}
+
+// TestGenerateImages_PollingURLLinkLocalRejected covers the SSRF half of the
+// vulnerability: even a same-origin-looking polling_url that resolves to a
+// link-local/metadata address must be rejected.
+func TestGenerateImages_PollingURLLinkLocalRejected(t *testing.T) {
+	// baseURL and polling_url share the same (link-local) host, so the
+	// same-origin check alone wouldn't catch this -- it's the link-local
+	// check that must reject it.
+	p := New(WithAPIKey("k"), WithBaseURL("http://169.254.169.254"))
+	m := p.ImageModel("flux-pro-1.1").(*imageModel)
+
+	_, _, err := m.poll(context.Background(), "http://169.254.169.254/poll")
+	if err == nil {
+		t.Fatal("expected error for link-local polling_url")
+	}
+	if !strings.Contains(err.Error(), "link-local") && !strings.Contains(err.Error(), "rejected") {
+		t.Errorf("error = %q, want it to mention the link-local rejection", err.Error())
+	}
+}
+
 func TestGenerateImages_EmptyPollingURLError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

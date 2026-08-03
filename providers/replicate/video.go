@@ -6,11 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"mime"
 	"net/http"
-	"strings"
 	"time"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/fetchmedia"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -95,9 +94,12 @@ func (m *videoModel) GenerateVideos(ctx context.Context, call provider.VideoCall
 
 	videos := make([]provider.GeneratedVideo, 0, len(urls))
 	for _, u := range urls {
-		data, mediaType, err := fetchVideo(ctx, m.provider.client(), u)
+		data, mediaType, err := fetchmedia.Fetch(ctx, m.provider.client(), u, "replicate", 0)
 		if err != nil {
-			return nil, fmt.Errorf("replicate: fetch video: %w", err)
+			return nil, err
+		}
+		if mediaType == "" {
+			mediaType = "video/mp4"
 		}
 		videos = append(videos, provider.GeneratedVideo{Data: data, MediaType: mediaType, URL: u})
 	}
@@ -187,59 +189,4 @@ func sleep(ctx context.Context, d time.Duration) error {
 	case <-t.C:
 		return nil
 	}
-}
-
-// fetchVideo downloads the video at url using client (or http.DefaultClient
-// if client is nil), returning the raw bytes and a MediaType. Unlike
-// internal/fetchimage (which is image-specific: it sniffs unrecognized
-// content types via internal/imagesniff), video bytes aren't sniffed —
-// the MediaType is taken from the response's Content-Type header when
-// present, defaulting to "video/mp4" otherwise. A non-2xx response returns
-// an *ai.APICallError via apiError, so a transient CDN 5xx is retryable
-// through ai core the same way a provider API error is.
-func fetchVideo(ctx context.Context, client *http.Client, url string) ([]byte, string, error) {
-	if client == nil {
-		client = http.DefaultClient
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, "", fmt.Errorf("replicate: build fetch request for %s: %w", url, err)
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, "", fmt.Errorf("replicate: fetch %s: %w", url, err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, "", fmt.Errorf("replicate: read response from %s: %w", url, err)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, "", apiError(resp, body)
-	}
-
-	mediaType := "video/mp4"
-	if ct := parseMediaTypeVideo(resp.Header.Get("Content-Type")); ct != "" {
-		mediaType = ct
-	}
-
-	return body, mediaType, nil
-}
-
-// parseMediaTypeVideo strips any parameters (e.g. "; charset=binary") from
-// a Content-Type header value, returning just the type/subtype. Returns ""
-// if contentType is empty or unparseable.
-func parseMediaTypeVideo(contentType string) string {
-	if contentType == "" {
-		return ""
-	}
-	if t, _, err := mime.ParseMediaType(contentType); err == nil {
-		return t
-	}
-	t, _, _ := strings.Cut(contentType, ";")
-	return strings.TrimSpace(t)
 }

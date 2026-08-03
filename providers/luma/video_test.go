@@ -385,6 +385,42 @@ func TestGenerateVideos_429Retryable(t *testing.T) {
 	}
 }
 
+func TestGenerateVideos_FetchVideoErrorIsSinglePrefixed(t *testing.T) {
+	var srv *httptest.Server
+	mux := http.NewServeMux()
+	mux.HandleFunc("/dream-machine/v1/generations", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"gen-1"}`))
+	})
+	mux.HandleFunc("/dream-machine/v1/generations/gen-1", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"gen-1","state":"completed","assets":{"video":"` + srv.URL + `/missing.mp4"}}`))
+	})
+	mux.HandleFunc("/missing.mp4", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("not found"))
+	})
+	srv = httptest.NewServer(mux)
+	defer srv.Close()
+
+	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
+	m := p.VideoModel("ray-2")
+
+	_, err := m.GenerateVideos(context.Background(), provider.VideoCall{Prompt: "a cat"})
+	if err == nil {
+		t.Fatal("expected error for failed video fetch")
+	}
+	msg := err.Error()
+	if strings.Count(msg, "luma:") != 1 {
+		t.Errorf("error = %q, want exactly one %q prefix (no double-wrap like the old luma: fetch video: luma: fetch)", msg, "luma:")
+	}
+	if strings.Count(msg, "fetch ") != 1 {
+		t.Errorf("error = %q, want exactly one \"fetch \" (no double-wrap)", msg)
+	}
+}
+
 func TestGenerateVideos_EmptyCreateIDError(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/dream-machine/v1/generations", func(w http.ResponseWriter, r *http.Request) {

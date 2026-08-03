@@ -138,7 +138,11 @@ func TestFetchNon2xxErrorTruncatesBody(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for non-2xx status")
 	}
-	if len(err.Error()) > 1100 {
+	// fetchmedia wraps the underlying *ai.APICallError with an
+	// "fetchimage: fetch <url>: " prefix, so the bound is ~1KB (the
+	// truncated body) plus that prefix and the APICallError's own
+	// boilerplate -- not exactly 1024.
+	if len(err.Error()) > 1300 {
 		t.Errorf("error message too long (%d chars), want body truncated to ~1KB", len(err.Error()))
 	}
 }

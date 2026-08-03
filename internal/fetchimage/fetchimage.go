@@ -5,19 +5,12 @@ package fetchimage
 
 import (
 	"context"
-	"fmt"
-	"io"
-	"mime"
 	"net/http"
 	"strings"
 
-	"github.com/azrtydxb/go-ai-sdk/ai"
+	"github.com/azrtydxb/go-ai-sdk/internal/fetchmedia"
 	"github.com/azrtydxb/go-ai-sdk/internal/imagesniff"
 )
-
-// maxErrorBodyBytes caps how much of a non-2xx response body is included
-// in the returned error.
-const maxErrorBodyBytes = 1024
 
 // Fetch downloads the image at url using client (or http.DefaultClient if
 // client is nil), returning the raw bytes and a MediaType. The MediaType is
@@ -28,36 +21,17 @@ const maxErrorBodyBytes = 1024
 // (via ai.NewAPICallError) carrying the status code, url, and up to 1KB of
 // the response body, so a transient CDN 5xx from an image host is
 // retryable through ai core the same way a provider API error is.
+//
+// The fetch itself is guarded by internal/fetchmedia against SSRF (only
+// http/https, no link-local/metadata targets, including through redirects)
+// and unbounded memory use (a hard byte cap on the response body), since
+// url is chosen by the remote provider's API response, not by the caller.
 func Fetch(ctx context.Context, client *http.Client, url string) ([]byte, string, error) {
-	if client == nil {
-		client = http.DefaultClient
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	body, contentType, err := fetchmedia.Fetch(ctx, client, url, "fetchimage", 0)
 	if err != nil {
-		return nil, "", fmt.Errorf("fetchimage: build request for %s: %w", url, err)
+		return nil, "", err
 	}
 
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, "", fmt.Errorf("fetchimage: fetch %s: %w", url, err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, "", fmt.Errorf("fetchimage: read response from %s: %w", url, err)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		truncated := body
-		if len(truncated) > maxErrorBodyBytes {
-			truncated = truncated[:maxErrorBodyBytes]
-		}
-		return nil, "", ai.NewAPICallError(resp.StatusCode, url, string(truncated), string(truncated))
-	}
-
-	contentType := parseMediaType(resp.Header.Get("Content-Type"))
 	var mediaType string
 	if strings.HasPrefix(contentType, "image/") {
 		mediaType = contentType
@@ -66,17 +40,4 @@ func Fetch(ctx context.Context, client *http.Client, url string) ([]byte, string
 	}
 
 	return body, mediaType, nil
-}
-
-// parseMediaType strips any parameters (e.g. "; charset=binary") from a
-// Content-Type header value, returning just the type/subtype so
-// GeneratedImage.MediaType stays a bare MediaType per its contract. Falls
-// back to cutting on the first ';' if mime.ParseMediaType can't parse the
-// header (e.g. a malformed or empty value).
-func parseMediaType(contentType string) string {
-	if t, _, err := mime.ParseMediaType(contentType); err == nil {
-		return t
-	}
-	t, _, _ := strings.Cut(contentType, ";")
-	return strings.TrimSpace(t)
 }
