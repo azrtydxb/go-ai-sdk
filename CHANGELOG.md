@@ -8,7 +8,61 @@ once it reaches 1.0.
 
 ## [Unreleased]
 
-Nothing yet.
+Wave 9 of the [AI SDK 6 parity roadmap](docs/superpowers/plans/2026-08-03-v6-parity-roadmap.md):
+v5 leftovers plus quick AI SDK 6 wins. Full parity with the AI SDK 5 core is
+maintained; AI SDK 6 parity is in progress — see
+[Migrating from the Vercel AI SDK § AI SDK 6 delta](docs/migrating-from-vercel-ai-sdk.md#ai-sdk-6-delta)
+for the feature-by-feature status.
+
+### Added
+
+- `GenerateTextOpts`/`provider.Call`: first-class `TopK`, `PresencePenalty`,
+  `FrequencyPenalty`, and `Seed` sampling settings, threaded through to
+  every language-model request path (per-provider support and wire-name
+  mapping documented on each field), plus `Headers` for per-call extra HTTP
+  headers (applied after — and never overriding — each provider's own
+  auth header(s); SigV4-signed for Bedrock when the key starts with
+  `x-amz-`).
+- `ai.HasToolCall(names ...string)` and `ai.LoopFinished()`: two more
+  ready-made `StopWhen` helpers alongside `ai.StepCountIs`.
+- `GenerateTextOpts.OnAbort`: fires exactly once per `TextStream` when the
+  consumer abandons `Parts()` iteration early or the call context is
+  canceled mid-stream — mutually exclusive with `OnFinish`/`OnError` for
+  the same event.
+- `ai.ToolResultContent`: multi-modal tool results — a `Tool.Execute` can
+  return text plus one or more `provider.GeneratedImage`s. Serialized
+  natively by anthropic and bedrock; text-projected (images dropped) by
+  openaicompat-based providers, geminicompat, cohere, and mistral.
+- `ai.ExtractJSONMiddleware`: strips markdown code fences (` ```json `)
+  from a model's text output, both `Generate` and incrementally in
+  `Stream`, reusing `GenerateObject`'s fence-stripping rule.
+- `ai.WrapImageModel`: the `provider.ImageModel` counterpart to
+  `ai.WrapModel` — a one-line naming hook for image-model middleware.
+- AssemblyAI, Gladia, and Rev.ai `provider.TranscriptionModel`
+  implementations (`providers/assemblyai`, `providers/gladia`,
+  `providers/revai`), each an asynchronous upload/create-then-poll flow
+  with `WithPollInterval`-controlled, ctx-aware polling — bringing the
+  provider total to 25.
+
+### Changed
+
+- `GenerateTextOpts.StopWhen` is now consulted after **every** completed
+  step, not only steps that requested tool calls — this removes the
+  previously-documented divergence from Vercel's `stopWhen`, which is
+  consulted after every step too. A step with no tool calls still always
+  ends the loop naturally regardless of what `StopWhen` returns for it.
+
+### Fixed
+
+- `providers/revai`: documented that `"unknown"`-type transcript elements
+  (unintelligible speech) are intentionally omitted from both `Text` and
+  `Segments`.
+- `providers/gladia`: documented that the job-creation response's
+  `result_url` is intentionally unused — this provider polls by job `id`
+  instead.
+- `providers/assemblyai`: a terminal `"error"` transcript status with an
+  empty `error` field now includes the raw response body in the returned
+  error, instead of reporting the failure with no detail at all.
 
 ## [0.1.0] — 2026-08-03
 

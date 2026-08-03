@@ -229,7 +229,10 @@ func (m *transcriptionModel) poll(ctx context.Context, id string) (*transcriptRe
 			if tr.Error != "" {
 				return nil, nil, fmt.Errorf("assemblyai: transcript %s failed: %s", id, tr.Error)
 			}
-			return nil, nil, fmt.Errorf("assemblyai: transcript %s failed", id)
+			// The "error" field was empty despite a terminal error status;
+			// fall back to the raw response body so the failure isn't
+			// silently reported with no detail at all.
+			return nil, nil, fmt.Errorf("assemblyai: transcript %s failed: %s", id, body)
 		}
 
 		if err := sleep(ctx, m.provider.poll()); err != nil {

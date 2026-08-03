@@ -50,6 +50,15 @@ env var table. A few providers need more than a bare API key:
   its exact header and env var. fal is also the one provider in this SDK
   with a two-variable fallback: `WithAPIKey` defaults to
   `FAL_API_KEY`, then `FAL_KEY` if that's unset.
+- **AssemblyAI, Gladia, Rev.ai** — three more provider-specific auth
+  headers: AssemblyAI sends `authorization: <key>` (lowercase header name,
+  and — unlike almost every other provider in this SDK — no `Bearer`
+  prefix on the value), Gladia sends `x-gladia-key`, and Rev.ai uses the
+  standard `Authorization: Bearer <key>` shape. Rev.ai also has its own
+  two-variable fallback: `WithAPIKey` defaults to `REVAI_API_KEY`, then
+  `REV_AI_API_KEY` if that's unset. See
+  [AssemblyAI](providers/assemblyai.md), [Gladia](providers/gladia.md), and
+  [Rev.ai](providers/revai.md).
 
 If a request fails with an auth-shaped error, it surfaces as
 `*ai.APICallError` — check `StatusCode` and the provider's raw response

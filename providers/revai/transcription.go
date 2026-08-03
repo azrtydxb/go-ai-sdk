@@ -80,6 +80,9 @@ func (m *transcriptionModel) Transcribe(ctx context.Context, call provider.Trans
 			case "text", "punct":
 				text += el.Value
 			}
+			// "unknown"-type elements (unintelligible speech) are
+			// intentionally omitted from both Text and Segments: they carry
+			// no usable Value and no timestamps.
 			if el.Type == "text" {
 				seg := provider.TranscriptSegment{Text: el.Value}
 				if el.Ts != nil {

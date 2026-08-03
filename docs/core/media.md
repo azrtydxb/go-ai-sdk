@@ -135,14 +135,20 @@ for _, seg := range result.Segments {
 | Groq | Same `openaicompat` base as OpenAI | Same rule as OpenAI | Groq's transcription models go through the identical wire format and `gpt-4o` substring check. |
 | ElevenLabs | word-level timestamps | Synthesized from `type == "word"` entries | `DurationSec` is derived as the last segment's `EndSec` (ElevenLabs doesn't report a duration field directly); `Language` comes from `language_code`. |
 | Deepgram | `/v1/listen` JSON response, word-level timestamps | From `results.channels[0].alternatives[0].words` | Request body is the raw audio bytes, not multipart or JSON — the only transcription provider in this SDK that doesn't upload a file part. `Text` prefers `punctuated_word` over `word`. See [Deepgram](../providers/deepgram.md). |
+| AssemblyAI | Async: upload → create → poll `GET /v2/transcript/{id}` | From the poll response's `words[]` (ms → sec) | Three-request flow with `WithPollInterval`-controlled, ctx-aware polling. See [AssemblyAI](../providers/assemblyai.md). |
+| Gladia | Async: upload → create → poll `GET /v2/pre-recorded/{id}` | From `result.transcription.utterances[]` (already in seconds) | Same three-request async shape as AssemblyAI; `DurationSec` comes from `result.metadata.audio_duration`. See [Gladia](../providers/gladia.md). |
+| Rev.ai | Async: multipart create → poll → fetch structured transcript | From `monologues[].elements[]` where `type == "text"` | Job options are multipart, not JSON; `"unknown"`-type transcript elements (unintelligible speech) are omitted from both `Text` and `Segments`. See [Rev.ai](../providers/revai.md). |
 
-OpenAI, Groq, and ElevenLabs upload `Audio` as a multipart file part;
-`MediaType` selects the upload filename's extension for OpenAI/Groq
-(`audio/mpeg`→`mp3`, `audio/wav`→`wav`, `audio/mp4`→`mp4`,
+OpenAI, Groq, ElevenLabs, AssemblyAI, and Rev.ai upload `Audio` as a
+multipart file part (Gladia does too, via a separate upload endpoint before
+job creation); `MediaType` selects the upload filename's extension for
+OpenAI/Groq (`audio/mpeg`→`mp3`, `audio/wav`→`wav`, `audio/mp4`→`mp4`,
 `audio/webm`→`webm`, anything else→`bin`) and is otherwise sent through
 as-is as the part's `Content-Type` (defaulting to `application/octet-stream`
 when empty). Deepgram instead sends `Audio` as the literal request body
-with `Content-Type: MediaType` (defaulting the same way).
+with `Content-Type: MediaType` (defaulting the same way). AssemblyAI,
+Gladia, and Rev.ai are all asynchronous — see each provider's page for its
+exact upload/create/poll endpoint sequence and error-body shape.
 
 ## FilePart attachment matrix
 
@@ -207,7 +213,10 @@ returns an error):
   [`providers/hume/speech.go`](../../providers/hume/speech.go)
 - [`internal/openaicompat/transcription.go`](../../internal/openaicompat/transcription.go),
   [`providers/deepgram/transcription.go`](../../providers/deepgram/transcription.go),
-  [`providers/elevenlabs/transcription.go`](../../providers/elevenlabs/transcription.go)
+  [`providers/elevenlabs/transcription.go`](../../providers/elevenlabs/transcription.go),
+  [`providers/assemblyai/transcription.go`](../../providers/assemblyai/transcription.go),
+  [`providers/gladia/transcription.go`](../../providers/gladia/transcription.go),
+  [`providers/revai/transcription.go`](../../providers/revai/transcription.go)
 - [`provider/message.go`](../../provider/message.go) (`FilePart` doc
   comment)
 - [`providers/bedrock/wire.go`](../../providers/bedrock/wire.go)

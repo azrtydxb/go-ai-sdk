@@ -36,8 +36,54 @@ func ptr[T any](v T) *T { return &v }
 - **`MaxTokens`, `Temperature`, `TopP`, `StopSequences`** — passed through to
   the provider's wire request; each is optional and provider-defined when
   unset.
+- **`TopK`, `PresencePenalty`, `FrequencyPenalty`, `Seed`, `Headers`** — see
+  [Additional call settings](#additional-call-settings-topk-penalties-seed-headers)
+  below.
 - **`MaxRetries`** (`*int`, default `2`) — the number of retries around each
   model call (see [Retries](#retries-and-retryerror) below).
+
+## Additional call settings: TopK, penalties, Seed, Headers
+
+```go
+result, err := ai.GenerateText(context.Background(), ai.GenerateTextOpts{
+	Model:            model,
+	Prompt:           "Write a short poem about Go channels.",
+	TopK:             ptr(40),
+	PresencePenalty:  ptr(0.5),
+	FrequencyPenalty: ptr(0.5),
+	Seed:             ptr(int64(42)),
+	Headers:          map[string]string{"x-request-id": "abc123"},
+})
+```
+
+These five settings are threaded through unchanged to the identically-named
+`provider.Call` fields (`ai/options.go`'s `buildCall`) — full per-provider
+support and wire-name mapping lives in each field's doc comment in
+[`provider/call.go`](../../provider/call.go). Summarized:
+
+| Setting | Supported by | Ignored by (silently, no wire param, no error) |
+|---|---|---|
+| `TopK` | anthropic, geminicompat (Google/Vertex), cohere (wire field `k`) | openaicompat-based providers (OpenAI, Azure, Groq, xAI, DeepSeek, Together, Fireworks, Cerebras, Perplexity), mistral, bedrock |
+| `PresencePenalty` / `FrequencyPenalty` | openaicompat-based providers, cohere, mistral (wire fields `presence_penalty`/`frequency_penalty`) | anthropic, geminicompat, bedrock |
+| `Seed` | openaicompat-based providers (`seed`), cohere (`seed`), mistral (`random_seed`) | anthropic, geminicompat, bedrock |
+| `Headers` | every language-model request path: openaicompat, geminicompat, anthropic, cohere, mistral, bedrock | not yet implemented (this wave) by any embedding or media (image/speech/transcription) request path |
+
+An "ignored by" provider drops the field entirely — nothing is sent on the
+wire, and no error is returned. `ProviderOptions` can still reach an
+otherwise-unsupported provider's native parameter name directly if that
+provider's API happens to accept it undocumented (e.g.
+`{"mistral": {"top_k": 5}}`); this table only covers parameters the SDK maps
+by name.
+
+**`Headers` precedence:** entries are applied AFTER the provider sets its own
+authentication header(s), so a `Headers` entry can never override auth — a
+key that case-insensitively matches the header the provider uses for
+authentication (`Authorization`, `x-api-key`, `x-goog-api-key`, ...) is
+silently skipped; every other entry wins over anything the SDK would
+otherwise set. Bedrock is a special case because requests are SigV4-signed:
+an entry whose key case-insensitively starts with `x-amz-` is set BEFORE
+signing (so it participates in the signature), and every other entry is set
+AFTER signing (reaches the wire unsigned, not covered by the signature).
 
 Getting `Prompt`/`Messages` exclusivity wrong returns an error immediately,
 without calling the model:
@@ -58,10 +104,13 @@ executes the tools and calls the model again automatically — this is the
   A step is one model call (plus, if it requested tools, executing them). At
   the default of 1, a tool-calling response ends the run after that single
   step, with the tool calls left unexecuted in the result.
-- **`StopWhen`** (`func(steps []Step) bool`, optional) — evaluated after each
-  step that requested tool calls (a step with no tool calls always ends the
-  loop naturally, without consulting `StopWhen`). Returning `true` stops the
-  loop.
+- **`StopWhen`** (`func(steps []Step) bool`, optional) — evaluated after
+  EVERY completed step, whether or not that step requested tool calls (this
+  is what makes `LoopFinished`, below, meaningful to compose with other
+  conditions inside a custom `StopWhen`). That said, a step with no tool
+  calls always ends the loop naturally regardless of what `StopWhen` returns
+  for it — `StopWhen` cannot make the loop continue past a step the model
+  didn't request further tool calls in. Returning `true` stops the loop.
 
 ```go
 weatherTool := ai.NewTool("get_weather", "Get the current weather for a city",
@@ -81,7 +130,24 @@ result, err := ai.GenerateText(context.Background(), ai.GenerateTextOpts{
 ```
 
 `ai.StepCountIs(n)` is a ready-made `StopWhen` that stops once at least `n`
-steps have completed.
+steps have completed. Two more ready-made helpers cover the other common
+conditions:
+
+- **`ai.HasToolCall(names ...string)`** — stops when the LAST completed step
+  called any of the named tools. With no names given, it stops when the last
+  step called any tool at all, regardless of name.
+- **`ai.LoopFinished()`** — stops when the LAST completed step made no tool
+  calls: the same condition that already ends the loop naturally. It exists
+  mainly for composing inside a custom `StopWhen` closure alongside other
+  conditions (on its own it's redundant with the loop's natural end).
+
+```go
+StopWhen: func(steps []ai.Step) bool {
+	// Stop at 10 steps, or as soon as the model calls "finalize_answer" —
+	// whichever comes first.
+	return ai.StepCountIs(10)(steps) || ai.HasToolCall("finalize_answer")(steps)
+},
+```
 
 **The default-cap-16 rule:** if `MaxSteps` is left unset (`0`) and
 `StopWhen` is non-nil, the effective hard cap defaults to 16 instead of the
@@ -184,6 +250,49 @@ misuse. Those are reported solely via the function's returned error, in both
 validation happens before the first model call, so there's no started call
 for `OnError` to describe; `GenerateText` applies the same exclusion for
 consistency, even though it could technically fire `OnError` there too.
+
+## OnAbort
+
+`OnAbort`, when set, is consulted only by `StreamText` — `GenerateText` has
+no notion of an abandoned or mid-flight iteration, so it never calls
+`OnAbort`. It fires exactly once per `TextStream`, before the stream's
+internal `Close`, in either of two cases:
+
+- the consumer abandons `TextStream.Parts()` early — stops ranging over it
+  (e.g. via `break`) before the tool loop would otherwise have ended
+  naturally or with an error;
+- the context passed to `StreamText` is canceled (or its deadline exceeded)
+  while a step's stream is in flight, surfacing as that step's
+  `stream.Err()`.
+
+```go
+stream, err := ai.StreamText(ctx, ai.GenerateTextOpts{
+	Model:  model,
+	Prompt: "Count to a million.",
+	OnAbort: func() {
+		fmt.Println("stream abandoned or context canceled")
+	},
+})
+if err != nil {
+	log.Fatal(err)
+}
+defer stream.Close()
+
+for part := range stream.Parts() {
+	if _, ok := part.(provider.TextDelta); ok {
+		break // abandoning iteration early triggers OnAbort, not OnFinish/OnError
+	}
+}
+```
+
+**Mutual exclusion with `OnFinish`/`OnError`:** `OnAbort` never fires on
+natural completion (`StopWhen`/`MaxSteps`/no more tool calls) — that's
+`OnFinish`'s case — nor does it fire together with `OnError` for the same
+event: a ctx-cancellation mid-stream fires `OnAbort` only, while any other
+mid-stream error (a real provider failure, not caused by ctx) fires
+`OnError` only. Abandoning iteration early is likewise never accompanied by
+an error — `Err()` reports `nil` in that case, same as before `OnAbort`
+existed — so only `OnAbort` fires for it.
 
 ## Result anatomy
 

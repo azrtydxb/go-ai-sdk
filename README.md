@@ -3,19 +3,21 @@
 An idiomatic Go port of the [Vercel AI SDK](https://sdk.vercel.ai): a single,
 provider-agnostic API for generating text, streaming text, generating
 structured objects, calling tools, computing embeddings, and generating
-images/speech/transcriptions across **22 providers** — OpenAI, Anthropic,
+images/speech/transcriptions across **25 providers** — OpenAI, Anthropic,
 Google (Gemini), Groq, xAI, DeepSeek, Together, Fireworks, Cerebras,
 Perplexity, Mistral, Cohere, Azure OpenAI, Vertex AI, Amazon Bedrock,
-ElevenLabs, fal, Replicate, Luma, Deepgram, LMNT, and Hume — with the same
-concepts and naming as the TypeScript original, expressed in native Go
-(`context.Context`, `iter.Seq`, generics, typed errors) rather than
-mirrored line-for-line.
+ElevenLabs, fal, Replicate, Luma, Deepgram, LMNT, Hume, AssemblyAI, Gladia,
+and Rev.ai — with the same concepts and naming as the TypeScript original,
+expressed in native Go (`context.Context`, `iter.Seq`, generics, typed
+errors) rather than mirrored line-for-line.
 
-**Status: v0.1.** The public API is implemented and tested end-to-end
-(unit tests plus a shared provider-conformance suite), but it is young:
-expect rough edges, and expect the API to move before a 1.0. Coming from
-the TypeScript SDK? Start with
-[Migrating from the Vercel AI SDK](docs/migrating-from-vercel-ai-sdk.md).
+**Status: v0.1.** The public API has full parity with the AI SDK 5 core;
+AI SDK 6 parity is in progress (see the migration guide's
+[AI SDK 6 delta](docs/migrating-from-vercel-ai-sdk.md#ai-sdk-6-delta)). It's
+implemented and tested end-to-end (unit tests plus a shared
+provider-conformance suite), but it is young: expect rough edges, and
+expect the API to move before a 1.0. Coming from the TypeScript SDK? Start
+with [Migrating from the Vercel AI SDK](docs/migrating-from-vercel-ai-sdk.md).
 
 ## Install
 
@@ -171,17 +173,17 @@ All supported providers, by capability:
 
 Supported providers for media capabilities:
 
-| Capability | OpenAI | Google | Vertex AI | xAI | ElevenLabs | Groq | fal | Replicate | Luma | Deepgram | LMNT | Hume |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `GenerateImage` | ✅ gpt-image-1 | ✅ imagen-3.0-generate-002 | ✅ imagen-3.0-generate-002 | ✅ grok-2-image | — | — | ✅ fal-ai/flux/schnell | ✅ black-forest-labs/flux-schnell | ✅ photon-1 | — | — | — |
-| `GenerateSpeech` | ✅ gpt-4o-mini-tts | — | — | — | ✅ eleven_multilingual_v2 | — | — | — | — | — | ✅ blizzard | ✅ (model ID has no wire effect) |
-| `Transcribe` | ✅ whisper-1 | — | — | — | ✅ scribe_v1 | ✅ whisper-large-v3-turbo | — | — | — | ✅ nova-3 | — | — |
+| Capability | OpenAI | Google | Vertex AI | xAI | ElevenLabs | Groq | fal | Replicate | Luma | Deepgram | LMNT | Hume | AssemblyAI | Gladia | Rev.ai |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `GenerateImage` | ✅ gpt-image-1 | ✅ imagen-3.0-generate-002 | ✅ imagen-3.0-generate-002 | ✅ grok-2-image | — | — | ✅ fal-ai/flux/schnell | ✅ black-forest-labs/flux-schnell | ✅ photon-1 | — | — | — | — | — | — |
+| `GenerateSpeech` | ✅ gpt-4o-mini-tts | — | — | — | ✅ eleven_multilingual_v2 | — | — | — | — | — | ✅ blizzard | ✅ (model ID has no wire effect) | — | — | — |
+| `Transcribe` | ✅ whisper-1 | — | — | — | ✅ scribe_v1 | ✅ whisper-large-v3-turbo | — | — | — | ✅ nova-3 | — | — | ✅ universal | ✅ (model ID unused) | ✅ (model ID unused) |
 
-**Note:** This closes out the Vercel-supported media roster targeted for
-v0.1 (fal, Replicate, Luma, Deepgram, LMNT, Hume). Vercel providers for
-transcription such as AssemblyAI, Gladia, and Rev.ai — along with a handful
-of other marginal/less-common Vercel providers — remain unimplemented; see
-[Provider coverage](#provider-coverage) below.
+**Note:** This closes out the Vercel-supported transcription roster (fal,
+Replicate, Luma, Deepgram, LMNT, Hume, AssemblyAI, Gladia, Rev.ai). A
+handful of AI SDK 6 providers remain unimplemented — planned per the
+[v6 parity roadmap](docs/superpowers/plans/2026-08-03-v6-parity-roadmap.md);
+see [Provider coverage](#provider-coverage) below.
 
 ### Provider coverage
 
@@ -191,8 +193,8 @@ of other marginal/less-common Vercel providers — remain unimplemented; see
 | Groq, xAI, DeepSeek, Together, Fireworks, Cerebras, Perplexity | Thin presets over the OpenAI-compatible base |
 | Mistral, Cohere | Own APIs, full provider implementations |
 | Azure OpenAI, Vertex AI, Amazon Bedrock | Platform auth: Azure (API-key preset over the OpenAI-compatible base), Vertex AI (Google service-account/ADC auth), Bedrock (AWS SigV4 request signing) |
-| ElevenLabs, fal, Replicate, Luma, Deepgram, LMNT, Hume; image/speech/transcription for OpenAI, Google/Vertex, xAI, Groq | Media-only or media-layered providers, all behind the same `ImageModel`/`SpeechModel`/`TranscriptionModel` interfaces |
-| Not yet implemented: AssemblyAI, Gladia, Rev.ai (transcription), and other marginal Vercel AI SDK providers | The provider interface already accommodates them as follow-ups |
+| ElevenLabs, fal, Replicate, Luma, Deepgram, LMNT, Hume, AssemblyAI, Gladia, Rev.ai; image/speech/transcription for OpenAI, Google/Vertex, xAI, Groq | Media-only or media-layered providers, all behind the same `ImageModel`/`SpeechModel`/`TranscriptionModel` interfaces |
+| Planned, not yet implemented: Moonshot, Qwen, MiniMax, DeepInfra, Hugging Face, Baseten, LM Studio, NVIDIA NIM, Voyage, Mixedbread, Cartesia, Prodia, Black Forest Labs, AI Gateway | See the [v6 parity roadmap](docs/superpowers/plans/2026-08-03-v6-parity-roadmap.md) (waves 13+) — the provider interface already accommodates them as follow-ups |
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the full release history, and the
 [design spec](docs/superpowers/specs/2026-08-02-go-ai-sdk-design.md) for

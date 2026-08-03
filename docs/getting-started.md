@@ -107,6 +107,9 @@ provider package:
 | Deepgram | `providers/deepgram` | `DEEPGRAM_API_KEY` | |
 | LMNT | `providers/lmnt` | `LMNT_API_KEY` | |
 | Hume | `providers/hume` | `HUME_API_KEY` | |
+| AssemblyAI | `providers/assemblyai` | `ASSEMBLYAI_API_KEY` | |
+| Gladia | `providers/gladia` | `GLADIA_API_KEY` | |
+| Rev.ai | `providers/revai` | `REVAI_API_KEY` (falls back to `REV_AI_API_KEY`) | |
 
 ## Streaming quickstart
 

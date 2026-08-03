@@ -52,6 +52,9 @@ exists — the SDK's public API is implemented and documented end-to-end (see
 - [Deepgram](providers/deepgram.md)
 - [LMNT](providers/lmnt.md)
 - [Hume](providers/hume.md)
+- [AssemblyAI](providers/assemblyai.md)
+- [Gladia](providers/gladia.md)
+- [Rev.ai](providers/revai.md)
 
 ## Versioning
 

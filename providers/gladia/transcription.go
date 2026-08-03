@@ -41,7 +41,10 @@ type createRequest struct {
 }
 
 type createResponse struct {
-	ID        string `json:"id"`
+	ID string `json:"id"`
+	// ResultURL is intentionally unused: this provider polls the job by ID
+	// (GET .../pre-recorded/{id}) rather than fetching ResultURL directly,
+	// so the field is decoded for documentation purposes only.
 	ResultURL string `json:"result_url"`
 }
 

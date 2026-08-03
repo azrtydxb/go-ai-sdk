@@ -162,6 +162,41 @@ fails again — still an unknown tool, or `Execute` fails again —
 second failure's normal semantics apply (`*NoSuchToolError` aborts the
 batch, `*InvalidToolArgumentsError` is recorded on the result).
 
+## Multi-modal tool results
+
+A tool's `Execute` may return an `ai.ToolResultContent` (or
+`*ai.ToolResultContent`) instead of a plain value when it wants to attach
+one or more images alongside — or instead of — text, e.g. a screenshot
+tool, an image-generation tool, or a chart renderer:
+
+```go
+screenshotTool := ai.NewTool("take_screenshot", "Capture the current screen",
+	func(ctx context.Context, args ScreenshotArgs) (any, error) {
+		img := captureScreen() // provider.GeneratedImage
+		return ai.ToolResultContent{
+			Text:   "Captured a 1280x720 screenshot.",
+			Images: []provider.GeneratedImage{img},
+		}, nil
+	})
+```
+
+A tool that never needs images can keep returning a plain string (or any
+other JSON-marshalable value) — `ToolResultContent` is opt-in.
+
+**Provider support for the `Images` half is uneven**, since not every wire
+format has an image slot in a tool result:
+
+| Provider | Support |
+|---|---|
+| anthropic | Native: the `tool_result` content block's `"content"` becomes an array — one `{"type":"text"}` block (only when `Text` is non-empty) followed by one `{"type":"image","source":{...}}` block per entry in `Images`. |
+| bedrock (Converse) | Native, same shape: the `toolResult` block's `"content"` array gets a `{"text":...}` entry (only when `Text` is non-empty) followed by one `{"image":{...}}` entry per entry in `Images`. |
+| openaicompat-based providers, geminicompat, cohere, mistral | Text-projection only: `ToolResultContent` is projected down to its `Text` field — `Images` is silently dropped. |
+
+If a script must run identically across a text-projection provider and an
+image-capable one, prefer text-describable results, or attach the image via
+a separate, provider-agnostic mechanism instead (e.g. a `FilePart` on a
+subsequent user message — see [Media § FilePart attachment matrix](media.md#filepart-attachment-matrix)).
+
 ## Tools from MCP servers
 
 An [MCP](../mcp.md) server's tools can be adapted into `ai.Tool`s and passed
@@ -171,6 +206,7 @@ into `Tools` the same way as any hand-written tool — see the
 ## Source of truth
 
 - [`ai/tool.go`](../../ai/tool.go)
+- [`ai/tool_result_content.go`](../../ai/tool_result_content.go) (`ToolResultContent`)
 - [`ai/generate_text.go`](../../ai/generate_text.go) (tool loop, `runToolCalls`)
 - [`ai/errors.go`](../../ai/errors.go)
 - [`internal/schema/schema.go`](../../internal/schema/schema.go)

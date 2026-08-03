@@ -16,6 +16,39 @@ what the docs say, current as of when this page was written. If your
 installed version behaves differently, trust your own testing over this
 page.
 
+## AI SDK 6 delta
+
+`go-ai-sdk` targets full parity with the AI SDK 5 core today; AI SDK 6
+parity (ai-sdk.dev, snapshot 2026-08-03) is in progress, tracked wave by
+wave in the
+[v6 parity roadmap](superpowers/plans/2026-08-03-v6-parity-roadmap.md). This
+table is the feature-by-feature status as of the current wave (9):
+
+| AI SDK 6 feature | Status |
+|---|---|
+| Call settings: `topK`, `presencePenalty`, `frequencyPenalty`, `seed`, `headers` | **Shipped** — `GenerateTextOpts`/`provider.Call` fields `TopK`/`PresencePenalty`/`FrequencyPenalty`/`Seed`/`Headers`; see [Generating text § Additional call settings](core/generating-text.md#additional-call-settings-topk-penalties-seed-headers). Vercel's richer `timeout` object (distinct connect/response/total timeouts) is **not** shipped — deferred to the wave 10+ lifecycle work; use `context.Context` deadlines for now. |
+| `hasToolCall` / `isLoopFinished` stop conditions | **Shipped** — `ai.HasToolCall(names...)`, `ai.LoopFinished()`; see [Generating text § The multi-step tool loop](core/generating-text.md#the-multi-step-tool-loop). |
+| `onAbort` | **Shipped** — `GenerateTextOpts.OnAbort`; see [Generating text § OnAbort](core/generating-text.md#onabort). |
+| Multi-modal tool results | **Shipped** — `ai.ToolResultContent`, native on anthropic/bedrock, text-projected elsewhere; see [Tools § Multi-modal tool results](core/tools.md#multi-modal-tool-results). |
+| `extractJsonMiddleware` | **Shipped** — `ai.ExtractJSONMiddleware`; see [Middleware and registry § ExtractJSONMiddleware](core/middleware-and-registry.md#extractjsonmiddleware). |
+| Image-model middleware (`wrapImageModel` equivalent) | **Shipped as a naming hook** — `ai.WrapImageModel`; no built-in image middlewares ship yet, and Vercel's full image-middleware interface (which can also rewrite `params`/results) isn't modeled — see [Middleware and registry § WrapImageModel](core/middleware-and-registry.md#wrapimagemodel). |
+| AssemblyAI, Gladia, Rev.ai transcription providers | **Shipped** — see [Provider overview](providers/README.md) and each provider's page. |
+| `stopWhen` consultation on every step | **Shipped, and now Vercel-consistent** — `StopWhen` is consulted after every completed step (not only ones that requested tool calls); this matches Vercel's documented behavior and removes what would otherwise have been a divergence. See [Generating text § The multi-step tool loop](core/generating-text.md#the-multi-step-tool-loop). |
+| Output modes on `generateText` (`text`/`object`/`array`/`choice`/`json`, `Experimental_Output`) | Planned — wave 10. |
+| Reranking (`rerank`, `RerankingModel`, Cohere/Voyage/Mixedbread) | Planned — wave 10. |
+| Unified `reasoning` option (effort/budget, per-provider mapping) | Planned — wave 10. |
+| Full lifecycle-callback event set (call-start/end, tool-execution start/end, embed/rerank events) | Planned — wave 10. |
+| Agents (`ToolLoopAgent` equivalent, agent-as-tool subagents) | Planned — wave 11. |
+| Tool-execution approvals (approval func, policy hook, resumable pending-approval flow) | Planned — wave 11. |
+| Sandbox interface / Code Mode | Planned — wave 11 (a `Sandbox` interface the caller implements, not a bundled code runtime). |
+| Video generation (`GenerateVideo`) | Planned — wave 12. |
+| Realtime/streaming transcription and translation (`StreamTranscribe`, `StreamTranslate`, a minimal realtime voice session) | Planned — wave 12, over a stdlib WebSocket client — Vercel's WebRTC realtime transport is out of scope (see below). |
+| File/skill upload (`uploadFile`, `uploadSkill`) | Planned — wave 12. |
+| MCP extensions (resources, prompts, sampling, roots, elicitation, token-provider auth) | Planned — wave 13; today's client is tools-only, see [MCP is tools-only](#mcp-is-tools-only). |
+| Provider fleet (Moonshot, Qwen, MiniMax, DeepInfra, Hugging Face, Baseten, LM Studio, NVIDIA NIM, Voyage, Mixedbread, Cartesia, Prodia, Black Forest Labs, AI Gateway) | Planned — wave 13. |
+| OpenTelemetry bridge | Planned — wave 14, as a separate nested Go module (`contrib/otel/`) so the root module stays zero-dependency; `ai.Telemetry` is the seam it will plug into today. |
+| UI framework hooks (`useChat`/`useCompletion`/`useObject`, RSC streaming), MCP Apps rendering, DevTools/Terminal UI, WebRTC realtime transport | **Out of scope**, permanently — see [Features NOT ported](#features-not-ported) and the roadmap's standing scope rulings. |
+
 ## API mapping
 
 Every core entry point, side by side. `ai.X` here is always the Go
@@ -43,7 +76,11 @@ package `github.com/azrtydxb/go-ai-sdk/ai`, imported as `ai`.
 | `onChunk` | `OnChunk func(part provider.StreamPart)` | |
 | `onFinish` | `OnFinish func(result *ai.GenerateTextResult)` | |
 | `onError` | `OnError func(err error)` | See the [validation-error exclusion](#documented-divergences) divergence (#5). |
+| `onAbort` | `OnAbort func()` | `StreamText`-only; see [Generating text § OnAbort](core/generating-text.md#onabort). |
 | `activeTools` | `ActiveTools []string` | See the [ActiveTools resolution](#documented-divergences) divergence (#6). |
+| `stopWhen: hasToolCall(name)` / a custom "loop finished" check | `ai.HasToolCall(names...)` / `ai.LoopFinished()` | Ready-made `StopWhen` helpers alongside `ai.StepCountIs`; see [Generating text § The multi-step tool loop](core/generating-text.md#the-multi-step-tool-loop). |
+| `topK` / `presencePenalty` / `frequencyPenalty` / `seed` / `headers` | `TopK` / `PresencePenalty` / `FrequencyPenalty` / `Seed` / `Headers` (all pointers/maps, optional) | Per-provider support varies — see [Generating text § Additional call settings](core/generating-text.md#additional-call-settings-topk-penalties-seed-headers). |
+| `extractJsonMiddleware()` | `ai.ExtractJSONMiddleware(model)` | See [Middleware and registry § ExtractJSONMiddleware](core/middleware-and-registry.md#extractjsonmiddleware). |
 | `experimental_repairToolCall` | `RepairToolCall func(ctx, ai.ToolCallRecord, error) (ai.ToolCallRecord, bool)` | One retry, same as Vercel's documented behavior; Go signature returns `(call, ok bool)` instead of `Promise<ToolCall | null>`. |
 | `maxRetries` | `MaxRetries *int` (pointer; `nil` = default 2) | |
 | `maxOutputTokens` | `MaxTokens *int` | |
@@ -122,7 +159,9 @@ doc comment for the exact contract.
 | `extractReasoningMiddleware({ tagName })` | `ai.ExtractReasoningMiddleware(model, ai.ExtractReasoningOpts{TagName: "think"})` |
 | `simulateStreamingMiddleware()` | `ai.SimulateStreamingMiddleware(model)` |
 | `defaultSettingsMiddleware({ settings })` | `ai.DefaultSettingsMiddleware(model, defaults provider.Call)` |
+| `extractJsonMiddleware()` | `ai.ExtractJSONMiddleware(model)` |
 | `wrapLanguageModel({ model, middleware: [a, b] })` | Compose by nesting: `ai.WrapModel(model, a)` then wrap again, or call `a(b(model))`-style directly since every middleware here is just `func(provider.LanguageModel) provider.LanguageModel` |
+| Image-model middleware (`wrapImageModel` equivalent) | `ai.WrapImageModel(model, wrap)` — a naming hook only; no built-in image middlewares ship yet |
 
 ### Streams: async iterators → iter.Seq
 
@@ -261,8 +300,14 @@ and known transport deviations are in [MCP § Limitations](mcp.md#limitations-v1
 - [`ai/options.go`](../ai/options.go), [`ai/generate_text.go`](../ai/generate_text.go),
   [`ai/stream_text.go`](../ai/stream_text.go) — `GenerateTextOpts` and the
   tool loop
+- [`ai/tool_result_content.go`](../ai/tool_result_content.go),
+  [`ai/middleware_json.go`](../ai/middleware_json.go) — multi-modal tool
+  results and `ExtractJSONMiddleware`
 - [`docs/core/`](core/) — the per-topic guides each divergence above is
   drawn from
 - [`docs/mcp.md`](mcp.md) — MCP client scope and transport deviations
+- [`docs/superpowers/plans/2026-08-03-v6-parity-roadmap.md`](superpowers/plans/2026-08-03-v6-parity-roadmap.md) —
+  the wave-by-wave AI SDK 6 parity plan the [delta table](#ai-sdk-6-delta)
+  above is drawn from
 - [Architecture](architecture.md) — how the layers underneath these APIs
   fit together

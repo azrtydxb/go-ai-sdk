@@ -2,9 +2,10 @@
 
 `go-ai-sdk` middlewares are plain `provider.LanguageModel` decorators —
 functions that take a model and return a wrapped model implementing the
-same interface. `ai.WrapModel` is a one-line hook for applying them; three
-middlewares ship with the SDK. `ai.Registry` maps provider names to
-provider values and resolves `"provider:model"` IDs into concrete models.
+same interface. `ai.WrapModel` is a one-line hook for applying them; four
+middlewares ship with the SDK. `ai.WrapImageModel` is the equivalent hook
+for `provider.ImageModel`. `ai.Registry` maps provider names to provider
+values and resolves `"provider:model"` IDs into concrete models.
 
 ## WrapModel
 
@@ -19,7 +20,7 @@ the same thing — as a named hook for middleware that decorates a model
 (logging, caching, retries, or any of the three below) before passing it to
 `GenerateText`/`StreamText`.
 
-## The three middlewares
+## The four middlewares
 
 ### ExtractReasoningMiddleware
 
@@ -65,6 +66,63 @@ namespace — see [Provider options](provider-options.md) for the namespace
 convention). Every other `Call` field (`Messages`, `Tools`, `ToolChoice`,
 `ResponseFormat`) passes through unmodified. Per-call values always win —
 only zero-valued fields are ever replaced.
+
+### ExtractJSONMiddleware
+
+```go
+func ExtractJSONMiddleware(model provider.LanguageModel) provider.LanguageModel
+```
+
+Strips markdown code fences from a model's text output — a common way
+models wrap JSON they were asked to produce "raw" (e.g.
+` ```json\n{...}\n``` `). It reuses the same fence-stripping rule as
+`GenerateObject`'s non-native-JSON decoding path: a single leading fence
+line (` ``` ` or ` ```json `, on its own line) and a single trailing fence
+line are removed; content that isn't fenced passes through unchanged.
+
+```go
+model := ai.ExtractJSONMiddleware(openai.New().Model("gpt-4o"))
+
+result, err := ai.GenerateText(ctx, ai.GenerateTextOpts{
+	Model:  model,
+	Prompt: "Return the user's profile as raw JSON, no commentary.",
+})
+// result.Text has any ```json fence markers already stripped.
+```
+
+`Generate` strips fences from each `TextPart` of the response as a whole.
+`Stream` strips them incrementally, buffering only the undecided prefix of a
+candidate fence line (at most 2 bytes) so scanning stays fully incremental —
+a fence marker split across two deltas is still recognized correctly.
+
+**Fence-scanner caveat:** the scanner only recognizes a fence by its first
+three bytes (` ``` `) at the start of a line. Text that legitimately starts
+a line with three literal backticks for a reason *other than* a markdown
+code fence (rare, but possible in a model's raw text output) will still be
+treated as a fence marker and stripped — there's no semantic check that the
+surrounding content is actually JSON before removing the fence lines.
+
+### WrapImageModel
+
+```go
+func WrapImageModel(m provider.ImageModel, wrap func(provider.ImageModel) provider.ImageModel) provider.ImageModel {
+	return wrap(m)
+}
+```
+
+The `provider.ImageModel` counterpart to `WrapModel` — a one-line naming
+hook for middleware that decorates an image model (logging, caching,
+provider-option injection) before it's passed to `ai.GenerateImage`. It's a
+naming hook only: no built-in image middlewares ship with the SDK yet
+(unlike the four `provider.LanguageModel` middlewares above), so `wrap` is
+always a function you write yourself, e.g.:
+
+```go
+model := ai.WrapImageModel(openai.New().ImageModel("gpt-image-1"),
+	func(m provider.ImageModel) provider.ImageModel {
+		return &loggingImageModel{inner: m}
+	})
+```
 
 ## Composition order
 
@@ -156,8 +214,9 @@ internal `sync.RWMutex`).
 
 ## Source of truth
 
-- [`ai/generate_text.go`](../../ai/generate_text.go) (`WrapModel`)
+- [`ai/generate_text.go`](../../ai/generate_text.go) (`WrapModel`, `WrapImageModel`)
 - [`ai/middleware.go`](../../ai/middleware.go)
+- [`ai/middleware_json.go`](../../ai/middleware_json.go) (`ExtractJSONMiddleware`)
 - [`ai/registry.go`](../../ai/registry.go)
 
 See also: [Provider options](provider-options.md) for the

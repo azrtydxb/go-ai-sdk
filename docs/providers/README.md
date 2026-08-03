@@ -3,16 +3,16 @@
 `go-ai-sdk` exposes every provider through the same `provider.LanguageModel`
 / `provider.EmbeddingModel` / `provider.ImageModel` / `provider.SpeechModel`
 / `provider.TranscriptionModel` interfaces, constructed from a per-provider
-package under [`providers/`](../../providers), 22 in total. Nine of them
+package under [`providers/`](../../providers), 25 in total. Nine of them
 (OpenAI, Azure, Groq, xAI, DeepSeek, Cerebras, Together, Fireworks,
 Perplexity) share one implementation, [`internal/openaicompat`](../../internal/openaicompat),
 configured per provider by a `Config` preset; Google and Vertex AI share
 [`internal/geminicompat`](../../internal/geminicompat); Anthropic, Bedrock,
-Mistral, Cohere, ElevenLabs, fal, Replicate, Luma, Deepgram, LMNT, and Hume
-are standalone implementations because their wire formats diverge too far
-from either shared base (or, for the six newest media providers, because
-they implement only a single media capability with no shared text-model
-base to build on).
+Mistral, Cohere, ElevenLabs, fal, Replicate, Luma, Deepgram, LMNT, Hume,
+AssemblyAI, Gladia, and Rev.ai are standalone implementations because their
+wire formats diverge too far from either shared base (or, for the nine
+media-only providers, because they implement only a single media capability
+with no shared text-model base to build on).
 
 Every provider reads its API key from an environment variable by default
 and accepts a `With*` functional option to override it — see
@@ -52,6 +52,9 @@ caveat, see that provider's page
 | [Deepgram](deepgram.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
 | [LMNT](lmnt.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
 | [Hume](hume.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
+| [AssemblyAI](assemblyai.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
+| [Gladia](gladia.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
+| [Rev.ai](revai.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
 
 ¹ xAI's image endpoint rejects the `size` parameter — see
 [xAI quirks](xai.md#quirks-and-notes).
@@ -108,6 +111,9 @@ example.
 | [Deepgram](deepgram.md) | `DEEPGRAM_API_KEY` | `https://api.deepgram.com` | `Authorization: Token` header |
 | [LMNT](lmnt.md) | `LMNT_API_KEY` | `https://api.lmnt.com` | `X-API-Key` header |
 | [Hume](hume.md) | `HUME_API_KEY` | `https://api.hume.ai` | `X-Hume-Api-Key` header |
+| [AssemblyAI](assemblyai.md) | `ASSEMBLYAI_API_KEY` | `https://api.assemblyai.com` | `authorization` header (no `Bearer` prefix) |
+| [Gladia](gladia.md) | `GLADIA_API_KEY` | `https://api.gladia.io` | `x-gladia-key` header |
+| [Rev.ai](revai.md) | `REVAI_API_KEY` (falls back to `REV_AI_API_KEY`) | `https://api.rev.ai` | `Authorization: Bearer` header |
 
 ## Provider pages
 
@@ -133,23 +139,27 @@ example.
 - [Deepgram](deepgram.md) — `/v1/listen` transcription, raw-audio request body, query-param options
 - [LMNT](lmnt.md) — text-to-speech, `X-API-Key` auth header
 - [Hume](hume.md) — Octave text-to-speech, base64-encoded JSON audio response
+- [AssemblyAI](assemblyai.md) — asynchronous transcription: upload → create → poll
+- [Gladia](gladia.md) — asynchronous transcription: upload → create → poll, `x-gladia-key` auth header
+- [Rev.ai](revai.md) — asynchronous transcription: multipart create → poll → fetch structured transcript
 
 ## Live-testing status
 
-Every provider in this SDK — all 22, including the six media providers
-added most recently (fal, Replicate, Luma, Deepgram, LMNT, Hume) — is
-verified only against recorded, documented wire formats: unit tests run
-each provider's HTTP client against an `httptest` server that replays
-fixture request/response bodies shaped to match that provider's published
-API docs. **None of the 22 providers have been smoke-tested against a live
-upstream API yet.**
+Every provider in this SDK — all 25, including the nine media-only
+providers added most recently (fal, Replicate, Luma, Deepgram, LMNT, Hume,
+AssemblyAI, Gladia, Rev.ai) — is verified only against recorded, documented
+wire formats: unit tests run each provider's HTTP client against an
+`httptest` server that replays fixture request/response bodies shaped to
+match that provider's published API docs. **None of the 25 providers have
+been smoke-tested against a live upstream API yet.**
 
-The six newest media providers (fal, Replicate, Luma, Deepgram, LMNT, Hume)
-are the **highest priority** for live verification: they're the
-least-battle-tested implementations in the SDK, each page above carries a
-"⚠ Not yet verified against the live API" note, and their corresponding
-package doc comments state the same thing. Live verification against real
-API keys should happen before relying on any of the six in production.
+The nine media-only providers (fal, Replicate, Luma, Deepgram, LMNT, Hume,
+AssemblyAI, Gladia, Rev.ai) are the **highest priority** for live
+verification: they're the least-battle-tested implementations in the SDK,
+each page above carries a "⚠ Not yet verified against the live API" note,
+and their corresponding package doc comments state the same thing. Live
+verification against real API keys should happen before relying on any of
+the nine in production.
 
 ## Source of truth
 
