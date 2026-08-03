@@ -239,7 +239,7 @@ func TestGenerateImages_EmptyImagesError(t *testing.T) {
 func TestGenerateImages_401Error(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error":"invalid api key"}`))
+		w.Write([]byte(`{"detail":"invalid api key"}`))
 	}))
 	defer srv.Close()
 
@@ -259,6 +259,9 @@ func TestGenerateImages_401Error(t *testing.T) {
 	}
 	if !strings.Contains(apiErr.ResponseBody, "invalid api key") {
 		t.Errorf("ResponseBody = %q", apiErr.ResponseBody)
+	}
+	if apiErr.Message != "invalid api key" {
+		t.Errorf("Message = %q, want parsed detail %q", apiErr.Message, "invalid api key")
 	}
 }
 

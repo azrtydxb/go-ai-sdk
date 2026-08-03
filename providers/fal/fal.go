@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
 	"github.com/azrtydxb/go-ai-sdk/provider"
@@ -79,7 +80,44 @@ func (p *Provider) client() *http.Client {
 
 // apiError converts a non-2xx HTTP response into an *ai.APICallError.
 func apiError(resp *http.Response, body []byte) error {
-	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), string(body))
+	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), errorMessage(body))
+}
+
+// wireErrorDetail matches fal's error body, which uses "detail" as either a
+// plain string or, for FastAPI-style validation errors, a list of objects
+// each carrying a "msg" field.
+type wireErrorDetail struct {
+	Detail json.RawMessage `json:"detail"`
+}
+
+type wireErrorDetailItem struct {
+	Msg string `json:"msg"`
+}
+
+// errorMessage tries to parse fal's error body shapes:
+// {"detail":"..."} or {"detail":[{"msg":...}, ...]}. Falls back to the raw
+// body if parsing fails or no message can be extracted.
+func errorMessage(body []byte) string {
+	var we wireErrorDetail
+	if err := json.Unmarshal(body, &we); err == nil && len(we.Detail) > 0 {
+		var s string
+		if err := json.Unmarshal(we.Detail, &s); err == nil && s != "" {
+			return s
+		}
+		var items []wireErrorDetailItem
+		if err := json.Unmarshal(we.Detail, &items); err == nil && len(items) > 0 {
+			var msgs []string
+			for _, item := range items {
+				if item.Msg != "" {
+					msgs = append(msgs, item.Msg)
+				}
+			}
+			if len(msgs) > 0 {
+				return strings.Join(msgs, "; ")
+			}
+		}
+	}
+	return string(body)
 }
 
 // ---- provider options ----

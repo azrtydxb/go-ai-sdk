@@ -55,3 +55,25 @@ func TestImageModel(t *testing.T) {
 		t.Errorf("ProviderName() = %q", m.ProviderName())
 	}
 }
+
+func TestErrorMessage_Detail(t *testing.T) {
+	got := errorMessage([]byte(`{"detail":"Invalid token."}`))
+	if got != "Invalid token." {
+		t.Errorf("errorMessage = %q, want %q", got, "Invalid token.")
+	}
+}
+
+func TestErrorMessage_TitleFallback(t *testing.T) {
+	got := errorMessage([]byte(`{"title":"Not Found","status":404}`))
+	if got != "Not Found" {
+		t.Errorf("errorMessage = %q, want %q", got, "Not Found")
+	}
+}
+
+func TestErrorMessage_FallsBackToRawBody(t *testing.T) {
+	body := `not json at all`
+	got := errorMessage([]byte(body))
+	if got != body {
+		t.Errorf("errorMessage = %q, want raw body %q", got, body)
+	}
+}

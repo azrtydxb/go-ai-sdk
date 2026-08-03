@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"strings"
 
@@ -19,8 +20,9 @@ const maxErrorBodyBytes = 1024
 
 // Fetch downloads the image at url using client (or http.DefaultClient if
 // client is nil), returning the raw bytes and a MediaType. The MediaType is
-// taken from the response's Content-Type header when it starts with
-// "image/"; otherwise it's determined by sniffing the downloaded bytes via
+// taken from the response's Content-Type header (parameters such as
+// "; charset=..." are stripped) when it starts with "image/"; otherwise
+// it's determined by sniffing the downloaded bytes via
 // imagesniff.SniffMediaType. A non-2xx response returns an error including
 // the status code and up to 1KB of the response body.
 func Fetch(ctx context.Context, client *http.Client, url string) ([]byte, string, error) {
@@ -52,7 +54,7 @@ func Fetch(ctx context.Context, client *http.Client, url string) ([]byte, string
 		return nil, "", fmt.Errorf("fetchimage: fetch %s: status %d: %s", url, resp.StatusCode, truncated)
 	}
 
-	contentType := resp.Header.Get("Content-Type")
+	contentType := parseMediaType(resp.Header.Get("Content-Type"))
 	var mediaType string
 	if strings.HasPrefix(contentType, "image/") {
 		mediaType = contentType
@@ -61,4 +63,17 @@ func Fetch(ctx context.Context, client *http.Client, url string) ([]byte, string
 	}
 
 	return body, mediaType, nil
+}
+
+// parseMediaType strips any parameters (e.g. "; charset=binary") from a
+// Content-Type header value, returning just the type/subtype so
+// GeneratedImage.MediaType stays a bare MediaType per its contract. Falls
+// back to cutting on the first ';' if mime.ParseMediaType can't parse the
+// header (e.g. a malformed or empty value).
+func parseMediaType(contentType string) string {
+	if t, _, err := mime.ParseMediaType(contentType); err == nil {
+		return t
+	}
+	t, _, _ := strings.Cut(contentType, ";")
+	return strings.TrimSpace(t)
 }

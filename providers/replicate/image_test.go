@@ -301,6 +301,9 @@ func TestGenerateImages_401Error(t *testing.T) {
 	if !strings.Contains(apiErr.ResponseBody, "Invalid token.") {
 		t.Errorf("ResponseBody = %q", apiErr.ResponseBody)
 	}
+	if apiErr.Message != "Invalid token." {
+		t.Errorf("Message = %q, want parsed detail %q", apiErr.Message, "Invalid token.")
+	}
 }
 
 func TestGenerateImages_ContextCancellation(t *testing.T) {

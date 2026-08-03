@@ -75,7 +75,31 @@ func (p *Provider) client() *http.Client {
 
 // apiError converts a non-2xx HTTP response into an *ai.APICallError.
 func apiError(resp *http.Response, body []byte) error {
-	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), string(body))
+	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), errorMessage(body))
+}
+
+// wireError matches Replicate's error body shapes: either a simple
+// {"detail":"..."} (e.g. auth errors) or an RFC-7807-style problem object
+// carrying "title" and/or "detail".
+type wireError struct {
+	Detail string `json:"detail"`
+	Title  string `json:"title"`
+}
+
+// errorMessage tries to parse Replicate's error body shapes, preferring
+// "detail" then falling back to "title". Falls back to the raw body if
+// parsing fails or neither field is present.
+func errorMessage(body []byte) string {
+	var we wireError
+	if err := json.Unmarshal(body, &we); err == nil {
+		if we.Detail != "" {
+			return we.Detail
+		}
+		if we.Title != "" {
+			return we.Title
+		}
+	}
+	return string(body)
 }
 
 // ---- provider options ----

@@ -28,6 +28,23 @@ func TestFetchUsesContentTypeWhenImage(t *testing.T) {
 	}
 }
 
+func TestFetchStripsContentTypeParameters(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg; charset=binary")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("fake-jpeg-bytes"))
+	}))
+	defer srv.Close()
+
+	_, mediaType, err := Fetch(context.Background(), nil, srv.URL)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if mediaType != "image/jpeg" {
+		t.Errorf("mediaType = %q, want image/jpeg (parameters stripped)", mediaType)
+	}
+}
+
 func TestFetchSniffsWhenContentTypeNotImage(t *testing.T) {
 	pngBytes := []byte("\x89PNG\r\n\x1a\nrest-of-file")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
