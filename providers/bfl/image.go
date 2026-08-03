@@ -1,0 +1,190 @@
+package bfl
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/azrtydxb/go-ai-sdk/internal/fetchimage"
+	"github.com/azrtydxb/go-ai-sdk/provider"
+)
+
+// imageModel implements provider.ImageModel against Black Forest Labs'
+// asynchronous image-generation endpoint: a generation is created, then
+// polled at the absolute polling_url it returns until it reaches a
+// terminal state.
+type imageModel struct {
+	provider *Provider
+	modelID  string
+}
+
+func (m *imageModel) ModelID() string      { return m.modelID }
+func (m *imageModel) ProviderName() string { return providerName }
+
+// ---- wire types ----
+
+type createRequest struct {
+	Prompt string `json:"prompt"`
+	Width  int    `json:"width,omitempty"`
+	Height int    `json:"height,omitempty"`
+}
+
+type createResponse struct {
+	ID         string `json:"id"`
+	PollingURL string `json:"polling_url"`
+}
+
+// pollResponse matches BFL's polling response shape, returned by GETting
+// the absolute polling_url from createResponse.
+type pollResponse struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+	Result struct {
+		Sample string `json:"sample"`
+	} `json:"result"`
+}
+
+// failureStatuses are terminal BFL statuses that indicate the generation
+// did not succeed.
+var failureStatuses = map[string]bool{
+	"Error":             true,
+	"Content Moderated": true,
+	"Request Moderated": true,
+	"Task not found":    true,
+}
+
+func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall) (*provider.ImageResponse, error) {
+	req := createRequest{Prompt: call.Prompt}
+	if call.Size != "" {
+		w, h, ok := strings.Cut(call.Size, "x")
+		if ok {
+			if width, err := strconv.Atoi(w); err == nil {
+				req.Width = width
+			}
+			if height, err := strconv.Atoi(h); err == nil {
+				req.Height = height
+			}
+		}
+	}
+
+	reqBody, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("bfl: marshal image request: %w", err)
+	}
+	reqBody, err = applyProviderOptions(reqBody, call.ProviderOptions)
+	if err != nil {
+		return nil, fmt.Errorf("bfl: apply provider options: %w", err)
+	}
+
+	reqURL := m.provider.baseURL + "/v1/" + m.modelID
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, fmt.Errorf("bfl: build image request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("x-key", m.provider.apiKey)
+
+	resp, err := m.provider.client().Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return nil, fmt.Errorf("bfl: read image response: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, apiError(resp, body)
+	}
+
+	var created createResponse
+	if err := json.Unmarshal(body, &created); err != nil {
+		return nil, fmt.Errorf("bfl: decode image response: %w", err)
+	}
+	if created.PollingURL == "" {
+		return nil, fmt.Errorf("bfl: response contained no polling_url: %s", body)
+	}
+
+	poll, rawBody, err := m.poll(ctx, created.PollingURL)
+	if err != nil {
+		return nil, err
+	}
+
+	if poll.Result.Sample == "" {
+		return nil, fmt.Errorf("bfl: ready generation contained no sample url: %s", rawBody)
+	}
+
+	data, mediaType, err := fetchimage.Fetch(ctx, m.provider.client(), poll.Result.Sample)
+	if err != nil {
+		return nil, fmt.Errorf("bfl: fetch sample image: %w", err)
+	}
+
+	return &provider.ImageResponse{
+		Images: []provider.GeneratedImage{{Data: data, MediaType: mediaType}},
+		Raw:    json.RawMessage(rawBody),
+	}, nil
+}
+
+// poll repeatedly GETs the absolute pollingURL until the generation
+// reaches a terminal state ("Ready" or a failure status), sleeping
+// p.provider.poll() between requests. The sleep is ctx-aware: cancellation
+// returns ctx.Err() immediately instead of waiting out the interval.
+func (m *imageModel) poll(ctx context.Context, pollingURL string) (*pollResponse, []byte, error) {
+	for {
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, pollingURL, nil)
+		if err != nil {
+			return nil, nil, fmt.Errorf("bfl: build poll request: %w", err)
+		}
+		httpReq.Header.Set("x-key", m.provider.apiKey)
+
+		resp, err := m.provider.client().Do(httpReq)
+		if err != nil {
+			return nil, nil, err
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, nil, fmt.Errorf("bfl: read poll response: %w", err)
+		}
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, nil, apiError(resp, body)
+		}
+
+		var poll pollResponse
+		if err := json.Unmarshal(body, &poll); err != nil {
+			return nil, nil, fmt.Errorf("bfl: decode poll response: %w", err)
+		}
+
+		if poll.Status == "Ready" {
+			return &poll, body, nil
+		}
+		if failureStatuses[poll.Status] {
+			return nil, nil, fmt.Errorf("bfl: generation %s failed with status %q: %s", poll.ID, poll.Status, body)
+		}
+
+		if err := sleep(ctx, m.provider.poll()); err != nil {
+			return nil, nil, err
+		}
+	}
+}
+
+// sleep blocks for d or until ctx is done, whichever comes first,
+// returning ctx.Err() in the latter case.
+func sleep(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
