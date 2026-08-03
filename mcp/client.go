@@ -16,9 +16,9 @@ type clientInfo struct {
 }
 
 type initializeParams struct {
-	ProtocolVersion string     `json:"protocolVersion"`
-	ClientInfo      clientInfo `json:"clientInfo"`
-	Capabilities    struct{}   `json:"capabilities"`
+	ProtocolVersion string         `json:"protocolVersion"`
+	ClientInfo      clientInfo     `json:"clientInfo"`
+	Capabilities    map[string]any `json:"capabilities"`
 }
 
 // initializeResult is the subset of the "initialize" response this client
@@ -36,9 +36,17 @@ type initializeResult struct {
 // advertised capabilities are stored on the Client so later calls (e.g.
 // ListResources, ListPrompts) can gate on them.
 func (c *Client) Initialize(ctx context.Context) error {
+	caps := map[string]any{}
+	c.mu.Lock()
+	hasElicitationHandler := c.elicitationHandler != nil
+	c.mu.Unlock()
+	if hasElicitationHandler {
+		caps["elicitation"] = struct{}{}
+	}
 	params := initializeParams{
 		ProtocolVersion: protocolVersion,
 		ClientInfo:      clientInfo{Name: "go-ai-sdk", Version: "0.1"},
+		Capabilities:    caps,
 	}
 	raw, err := c.call(ctx, "initialize", params)
 	if err != nil {

@@ -39,13 +39,23 @@ type rpcErrorObj struct {
 }
 
 // rpcResponse is the wire shape of anything the server sends us: a response
-// to one of our requests (ID != nil), or a server-initiated request /
-// notification, which we ignore.
+// to one of our requests (ID != nil, Method empty), a server-initiated
+// request (ID != nil, Method non-empty), or a notification (ID nil).
 type rpcResponse struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      *int64          `json:"id"`
+	Method  string          `json:"method,omitempty"`
+	Params  json.RawMessage `json:"params,omitempty"`
 	Result  json.RawMessage `json:"result,omitempty"`
 	Error   *rpcErrorObj    `json:"error,omitempty"`
+}
+
+// serverRequest is a JSON-RPC request sent by the server to the client
+// (e.g. "elicitation/create"). Handled by Client.dispatchServerRequest.
+type serverRequest struct {
+	ID     int64
+	Method string
+	Params json.RawMessage
 }
 
 // RPCError is returned when the server replies with a JSON-RPC error object.
@@ -78,6 +88,10 @@ type Client struct {
 	// "resources", "prompts"). Guarded by mu. Nil until Initialize succeeds.
 	serverCaps map[string]json.RawMessage
 
+	// elicitationHandler, if set, is invoked for server-initiated
+	// "elicitation/create" requests. Guarded by mu.
+	elicitationHandler ElicitationHandler
+
 	// sendMu serializes writes to the transport: Transport only guarantees
 	// safety for one concurrent writer, but Client.call may be invoked by
 	// multiple goroutines at once (concurrent in-flight RPC calls).
@@ -105,10 +119,11 @@ func NewClient(t Transport) *Client {
 	return c
 }
 
-// recvLoop reads one message at a time and dispatches it to the waiting
-// call, by id. Messages that are not responses to a call we made (unknown
-// id, or no id at all) are dropped silently: they are either server-initiated
-// requests/notifications or stray traffic, neither of which v1 supports.
+// recvLoop reads one message at a time and dispatches it. A message with a
+// non-nil id and no method is a response to a call we made, matched by id.
+// A message with a non-nil id AND a method is a server-initiated request,
+// dispatched to dispatchServerRequest. A message with a nil id is a
+// notification and is dropped: v1 does not support incoming notifications.
 func (c *Client) recvLoop() {
 	defer close(c.loopDone)
 	for {
@@ -123,7 +138,15 @@ func (c *Client) recvLoop() {
 			continue // malformed message, drop
 		}
 		if resp.ID == nil {
-			continue // notification or server-initiated request, ignored
+			continue // notification, ignored
+		}
+		if resp.Method != "" {
+			// Server-initiated request: dispatch on a new goroutine so a
+			// slow handler doesn't block recvLoop from reading further
+			// messages (e.g. responses to our own in-flight calls).
+			req := serverRequest{ID: *resp.ID, Method: resp.Method, Params: resp.Params}
+			go c.dispatchServerRequest(req)
+			continue
 		}
 
 		c.mu.Lock()
@@ -202,6 +225,41 @@ func (c *Client) removePending(id int64) {
 		delete(c.pending, id)
 	}
 	c.mu.Unlock()
+}
+
+// serverResponseWire is the wire shape of the client's reply to a
+// server-initiated request.
+type serverResponseWire struct {
+	JSONRPC string       `json:"jsonrpc"`
+	ID      int64        `json:"id"`
+	Result  any          `json:"result,omitempty"`
+	Error   *rpcErrorObj `json:"error,omitempty"`
+}
+
+// respondServerResult sends a successful reply to a server-initiated
+// request, with the same id, serialized via sendMu like any other write.
+func (c *Client) respondServerResult(id int64, result any) {
+	resp := serverResponseWire{JSONRPC: "2.0", ID: id, Result: result}
+	b, err := json.Marshal(resp)
+	if err != nil {
+		return
+	}
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+	_ = c.transport.Send(c.ctx, b)
+}
+
+// respondServerError sends a JSON-RPC error reply to a server-initiated
+// request, with the same id.
+func (c *Client) respondServerError(id int64, code int, message string) {
+	resp := serverResponseWire{JSONRPC: "2.0", ID: id, Error: &rpcErrorObj{Code: code, Message: message}}
+	b, err := json.Marshal(resp)
+	if err != nil {
+		return
+	}
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+	_ = c.transport.Send(c.ctx, b)
 }
 
 // notify sends a JSON-RPC notification (no response expected).
