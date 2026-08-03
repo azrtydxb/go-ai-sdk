@@ -54,6 +54,45 @@ tool called through Code Mode as it does when that tool is called directly
 (no `run_code` indirection) — see
 [Tools § RuntimeContext](tools.md#runtimecontext).
 
+## Security: approvals are checked and refused, never suspended
+
+A tool wrapped in `ai.RequireApproval` (see
+[Tools § Approvals for tool execution](tools.md#approvals-for-tool-execution))
+is checked on every dispatch from sandboxed code: if
+`ApprovalRequired(ctx, args)` reports `true`, `dispatch` refuses the call
+with an error —
+
+```
+codemode: tool "delete_record" requires approval and cannot be called from code mode
+```
+
+— instead of executing it. The tool's `Execute` never runs for a refused
+call, the same way a denied call's `Execute` never runs in the ordinary tool
+loop (see [The IsError result convention](tools.md#the-iserror-result-convention)).
+
+**There is no suspension channel from inside a sandbox.** The ordinary
+`GenerateText`/`StreamText` tool loop can suspend a whole batch pending
+approval because it hands the caller a resumable
+[`PendingApprovals`](tools.md#suspension-result-shape) result and stops —
+but a sandboxed program has already been handed control and has no
+equivalent way to pause mid-execution and hand back a decision point.
+Refusing outright is the only option that doesn't silently bypass the
+approval gate.
+
+Consequences for how you compose approvals with code mode:
+
+- **Decide approvals before wrapping a tool for code mode.** If a tool's
+  approval decision can be made ahead of time (e.g. a policy check that
+  doesn't need the specific call's args, or one you're comfortable
+  pre-approving for this session), don't wrap it in `ai.RequireApproval` in
+  the tool set passed to `codemode.Tool` — pass the plain, un-wrapped tool
+  instead.
+- **Make inline decisions OUTSIDE code mode.** If a tool genuinely needs a
+  human-in-the-loop decision per call, don't route it through `run_code` at
+  all — expose it as a regular tool to `GenerateText`/`StreamText` directly,
+  where `ApproveToolCall` (or the suspend/resume `Approvals` flow) can
+  actually gate it.
+
 ## Options
 
 ```go

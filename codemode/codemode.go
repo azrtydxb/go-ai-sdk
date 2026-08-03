@@ -17,6 +17,18 @@
 // access, filesystem access, wall-clock limits — are exactly the
 // guarantees the supplied Sandbox.Execute provides. codemode does not
 // enforce sandboxing on its own.
+//
+// Security note: approvals. A tool wrapped in ai.RequireApproval is checked
+// before every dispatch from sandboxed code — if ApprovalRequired reports
+// true for the call's args, dispatch refuses it with an error instead of
+// executing it. There is no suspension channel from inside a sandbox: the
+// outer GenerateText/StreamText tool loop only suspends a batch pending
+// approval when it can hand the caller a resumable PendingApprovals result,
+// and there is no equivalent hand-back from a running sandboxed program. So
+// approval-requiring tools can never execute through code mode, refused or
+// not — decide approvals before handing tools to codemode (e.g. only wrap
+// already-approved tools), or make an inline decision (ApproveToolCall-style)
+// OUTSIDE code mode, before the call ever reaches the sandbox.
 package codemode
 
 import (
@@ -194,6 +206,15 @@ func truncateOutput(s string, n int) string {
 // passing ctx through unchanged so ai.RuntimeContextFrom works inside the
 // dispatched tool. An unknown name is reported as a plain error (never a
 // panic) listing the available tool names, sorted for determinism.
+//
+// Security: if the resolved tool implements ai.ApprovalRequirer and
+// ApprovalRequired reports true for these args, the call is refused rather
+// than executed. There is no suspension channel from inside a sandbox —
+// code mode either runs a tool to completion or not at all, so a call that
+// would otherwise suspend the outer GenerateText/StreamText loop pending a
+// human decision must not be allowed to silently execute instead. Decide
+// approvals before handing tools to codemode, or make an inline decision
+// (ApproveToolCall-style) OUTSIDE code mode.
 func (t *codeTool) dispatch(ctx context.Context, name string, args json.RawMessage) (any, error) {
 	tool, ok := t.byName[name]
 	if !ok {
@@ -203,6 +224,9 @@ func (t *codeTool) dispatch(ctx context.Context, name string, args json.RawMessa
 		}
 		sort.Strings(names)
 		return nil, fmt.Errorf("codemode: unknown tool %q; available tools: %s", name, strings.Join(names, ", "))
+	}
+	if ar, ok := tool.(ai.ApprovalRequirer); ok && ar.ApprovalRequired(ctx, args) {
+		return nil, fmt.Errorf("codemode: tool %q requires approval and cannot be called from code mode", name)
 	}
 	return tool.Execute(ctx, args)
 }

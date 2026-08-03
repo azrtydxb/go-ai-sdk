@@ -224,6 +224,98 @@ func TestSandboxErrorSurfacesAsPlainError(t *testing.T) {
 	}
 }
 
+// TestDispatchRefusesApprovalRequiringTool pins finding 2: a tool wrapped in
+// ai.RequireApproval must never execute through codemode's dispatch —
+// sandboxed code has no suspension channel, so bypassing the approval gate
+// would let model-written code silently perform an action a human was
+// supposed to sign off on.
+func TestDispatchRefusesApprovalRequiringTool(t *testing.T) {
+	var executed bool
+	guarded := ai.RequireApproval(ai.NewTool("danger", "", func(_ context.Context, _ echoArgs) (any, error) {
+		executed = true
+		return "boom", nil
+	}))
+	var callErr error
+	sb := &fakeSandbox{
+		callback: func(ctx context.Context, env Env) (*Result, error) {
+			_, callErr = env.CallTool(ctx, "danger", json.RawMessage(`{"msg":"x"}`))
+			return &Result{Output: "done"}, nil
+		},
+	}
+	tool := Tool(sb, []ai.Tool{guarded}, nil)
+
+	_, err := tool.Execute(t.Context(), json.RawMessage(`{"code":"x"}`))
+	if err != nil {
+		t.Fatalf("sandbox-level error unexpected: %v", err)
+	}
+	if callErr == nil {
+		t.Fatal("want CallTool to return an error refusing the approval-requiring tool")
+	}
+	if executed {
+		t.Fatal("tool must not execute when it requires approval")
+	}
+	if !strings.Contains(callErr.Error(), "danger") || !strings.Contains(callErr.Error(), "requires approval") {
+		t.Fatalf("err = %v, want it to mention danger and requires approval", callErr)
+	}
+}
+
+// TestDispatchConditionalApprovalWhenFuncConsulted pins finding 2's
+// conditional case: RequireApproval's when-func must actually be consulted
+// with the call's args, not treated as always-true (or always-false).
+func TestDispatchConditionalApprovalWhenFuncConsulted(t *testing.T) {
+	var executed bool
+	guarded := ai.RequireApproval(ai.NewTool("maybe_danger", "", func(_ context.Context, _ echoArgs) (any, error) {
+		executed = true
+		return "ok", nil
+	}), func(_ context.Context, args json.RawMessage) bool {
+		var a echoArgs
+		_ = json.Unmarshal(args, &a)
+		return a.Msg == "risky"
+	})
+
+	// when=false: executes normally.
+	sbSafe := &fakeSandbox{
+		callback: func(ctx context.Context, env Env) (*Result, error) {
+			res, err := env.CallTool(ctx, "maybe_danger", json.RawMessage(`{"msg":"safe"}`))
+			if err != nil {
+				return nil, err
+			}
+			return &Result{Output: fmt.Sprintf("%v", res)}, nil
+		},
+	}
+	toolSafe := Tool(sbSafe, []ai.Tool{guarded}, nil)
+	got, err := toolSafe.Execute(t.Context(), json.RawMessage(`{"code":"x"}`))
+	if err != nil {
+		t.Fatalf("safe call should execute: %v", err)
+	}
+	if !executed {
+		t.Fatal("safe call should have executed")
+	}
+	if got != "ok" {
+		t.Fatalf("got %q, want %q", got, "ok")
+	}
+
+	// when=true: refused.
+	executed = false
+	var callErr error
+	sbRisky := &fakeSandbox{
+		callback: func(ctx context.Context, env Env) (*Result, error) {
+			_, callErr = env.CallTool(ctx, "maybe_danger", json.RawMessage(`{"msg":"risky"}`))
+			return &Result{Output: "done"}, nil
+		},
+	}
+	toolRisky := Tool(sbRisky, []ai.Tool{guarded}, nil)
+	if _, err := toolRisky.Execute(t.Context(), json.RawMessage(`{"code":"x"}`)); err != nil {
+		t.Fatalf("sandbox-level error unexpected: %v", err)
+	}
+	if callErr == nil {
+		t.Fatal("want error refusing the risky call")
+	}
+	if executed {
+		t.Fatal("risky call must not execute")
+	}
+}
+
 func TestRuntimeContextVisibleInsideDispatchedTool(t *testing.T) {
 	var seen ai.RuntimeContext
 	rcTool := ai.NewTool("check_rc", "", func(ctx context.Context, _ echoArgs) (any, error) {
