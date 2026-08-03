@@ -80,8 +80,9 @@ That's the whole surface for the two most common calls — everything else
 (tool calling, structured output, embeddings, media, streaming internals,
 middleware, MCP, telemetry, provider-specific options) is one guide away
 in [`docs/`](docs/), starting at [Getting started](docs/getting-started.md).
-Complete, runnable, env-guarded examples for every feature — including the
-multi-step tool-calling loop, `ai.GenerateObject[T]`, and embeddings — live
+Complete, runnable, env-guarded examples covering text, streaming, tools,
+structured output, embeddings, images, speech, transcription, and MCP —
+including the multi-step tool-calling loop and `ai.GenerateObject[T]` — live
 in [`examples/`](examples/), each compiled by CI.
 
 ## Features
