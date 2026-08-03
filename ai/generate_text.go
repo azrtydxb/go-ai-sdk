@@ -98,6 +98,11 @@ type GenerateTextResult struct {
 	// message (round-trippable — resend it, with Approvals set to answer
 	// these calls, to resume). Not an error: OnFinish still fires, and
 	// FinishReason is the step's real finish reason (tool-calls).
+	//
+	// When a RESUMED batch (Messages ending in an unanswered assistant
+	// tool-call message) is itself still pending, the run suspends before
+	// any model call: Steps is empty, Messages is unchanged, and
+	// FinishReason is tool-calls.
 	PendingApprovals []ApprovalRequest
 }
 
