@@ -247,6 +247,30 @@ func (m *MockTranscriptionModel) ModelID() string { return "mock" }
 // ProviderName implements provider.TranscriptionModel.
 func (m *MockTranscriptionModel) ProviderName() string { return "aitest" }
 
+// MockTranslationModel is a provider.TranslationModel test double that
+// returns a scripted response or fails every call with Err if set.
+type MockTranslationModel struct {
+	Response *provider.TranslationResponse
+	Err      error                      // if set, every call fails with it
+	Calls    []provider.TranslationCall // records every Translate call
+}
+
+// Translate implements provider.TranslationModel. It records the call,
+// then returns Err if set, otherwise Response.
+func (m *MockTranslationModel) Translate(ctx context.Context, call provider.TranslationCall) (*provider.TranslationResponse, error) {
+	m.Calls = append(m.Calls, call)
+	if m.Err != nil {
+		return nil, m.Err
+	}
+	return m.Response, nil
+}
+
+// ModelID implements provider.TranslationModel.
+func (m *MockTranslationModel) ModelID() string { return "mock" }
+
+// ProviderName implements provider.TranslationModel.
+func (m *MockTranslationModel) ProviderName() string { return "aitest" }
+
 // MockStreamingTranscriptionModel is a provider.StreamingTranscriptionModel
 // test double that replays a scripted event sequence, or fails every call
 // with Err if set.

@@ -96,3 +96,11 @@ func (p *Provider) SpeechModel(id string) provider.SpeechModel {
 func (p *Provider) TranscriptionModel(id string) provider.TranscriptionModel {
 	return openaicompat.NewTranscriptionModel(p.config(), id)
 }
+
+// TranslationModel returns a provider.TranslationModel for the given
+// OpenAI audio translation model ID, e.g. "whisper-1". OpenAI's
+// audio/translations endpoint always produces English text regardless of
+// the source audio's language.
+func (p *Provider) TranslationModel(id string) provider.TranslationModel {
+	return openaicompat.NewTranslationModel(p.config(), id)
+}
