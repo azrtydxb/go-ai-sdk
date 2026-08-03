@@ -4,17 +4,19 @@
 documented wire format only (see the package doc comment in
 `providers/replicate/replicate.go`).
 
-Replicate offers no language models through this package — it only
-implements `provider.ImageModel`, against Replicate's synchronous
-(`Prefer: wait`) predictions API. See
-[Media: images, speech, transcription](../core/media.md) for the
-`ai.GenerateImage` call shape this provider plugs into.
+Replicate offers no language models through this package — it implements
+`provider.ImageModel` and `provider.VideoModel`, both against Replicate's
+synchronous (`Prefer: wait`) predictions API. See
+[Media: images, video, speech, transcription, translation](../core/media.md)
+for the `ai.GenerateImage`/`ai.GenerateVideo` call shapes this provider
+plugs into.
 
 ```go
 provider := replicate.New(
 	replicate.WithAPIKey("..."),
 )
 image := provider.ImageModel("black-forest-labs/flux-schnell")
+video := provider.VideoModel("minimax/video-01")
 ```
 
 `WithAPIKey` defaults to `os.Getenv("REPLICATE_API_TOKEN")`; `WithBaseURL`
@@ -29,6 +31,9 @@ header.
   `POST /v1/models/{modelID}/predictions` with header `Prefer: wait` (so
   the call blocks until the prediction resolves rather than requiring a
   separate poll), JSON body, JSON response.
+- `Provider.VideoModel(id)` — `provider.VideoModel`: the same
+  `POST /v1/models/{modelID}/predictions` + `Prefer: wait` shape, with
+  `Prompt`/`AspectRatio` nested under `input` (see ProviderOptions below).
 - No `Model`, `EmbeddingModel`, `SpeechModel`, or `TranscriptionModel`.
 
 ## Quirks
@@ -63,6 +68,14 @@ header.
   `{"detail":"..."}` (e.g. auth errors) or an RFC-7807-style problem object
   with `"title"`/`"detail"`; `errorMessage` in
   `providers/replicate/replicate.go` prefers `detail`, then `title`.
+- **Video reuses the image path's shared helpers.** `predictionResponse`,
+  `outputURLs` (string-or-array `output` normalization), and `errorText`
+  are shared verbatim between `image.go` and `video.go` — no duplication
+  for the response-parsing side, only the request-building side differs
+  (`Prompt`/`AspectRatio` vs. image's fuller field set). Video downloads
+  use a separate `fetchVideo` helper (not `internal/fetchimage`, which is
+  image-specific): `MediaType` comes from the response's `Content-Type`
+  header, defaulting to `"video/mp4"`.
 
 ## ProviderOptions
 
@@ -90,3 +103,5 @@ _, err := ai.GenerateImage(context.Background(), ai.GenerateImageOpts{
 - [`providers/replicate/replicate.go`](../../providers/replicate/replicate.go)
 - [`providers/replicate/image.go`](../../providers/replicate/image.go)
 - [`providers/replicate/image_test.go`](../../providers/replicate/image_test.go)
+- [`providers/replicate/video.go`](../../providers/replicate/video.go)
+- [`providers/replicate/video_test.go`](../../providers/replicate/video_test.go)

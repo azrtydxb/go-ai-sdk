@@ -20,7 +20,8 @@ exists — the SDK's public API is implemented and documented end-to-end (see
 - [Agents](core/agents.md) — `agent.Agent`, `RunOpts`, `AsTool` sub-agent delegation
 - [Code Mode](core/code-mode.md) — `codemode.Tool`, the `Sandbox` contract, `APIDoc`
 - [Embeddings](core/embeddings.md) — `Embed` / `EmbedMany`, batching, similarity
-- [Media](core/media.md) — image, speech, and transcription generation
+- [Media](core/media.md) — image, video, speech, transcription (including
+  live streaming), and translation generation
 - [Streaming](core/streaming.md) — `StreamPart` reference, `SmoothStream`, iterator semantics, suspension in streams
 - [Reasoning](core/reasoning.md) — thinking/reasoning content across providers
 - [Middleware and registry](core/middleware-and-registry.md) — `WrapModel`, built-in middlewares, `Registry`

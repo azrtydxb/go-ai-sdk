@@ -4,17 +4,20 @@
 documented wire format only (see the package doc comment in
 `providers/deepgram/deepgram.go`).
 
-Deepgram offers no language models through this package — it only
-implements `provider.TranscriptionModel`, against Deepgram's `/v1/listen`
-speech-to-text endpoint. See
-[Media: images, speech, transcription](../core/media.md) for the
-`ai.Transcribe` call shape this provider plugs into.
+Deepgram offers no language models through this package — it implements
+`provider.TranscriptionModel` (against Deepgram's `/v1/listen` REST
+endpoint) and `provider.StreamingTranscriptionModel` (against Deepgram's
+`/v1/listen` **live** WebSocket endpoint). See
+[Media: images, video, speech, transcription, translation](../core/media.md)
+for the `ai.Transcribe`/`ai.StreamTranscribe` call shapes this provider
+plugs into.
 
 ```go
 provider := deepgram.New(
 	deepgram.WithAPIKey("..."),
 )
 transcription := provider.TranscriptionModel("nova-3")
+live := provider.StreamingTranscriptionModel("nova-3")
 ```
 
 `WithAPIKey` defaults to `os.Getenv("DEEPGRAM_API_KEY")`; `WithBaseURL`
@@ -27,6 +30,12 @@ defaults to `"https://api.deepgram.com"`; `WithHTTPClient` overrides the
 - `Provider.TranscriptionModel(id)` — `provider.TranscriptionModel`:
   `POST /v1/listen`, raw audio bytes as the request body (not JSON, not
   multipart), JSON response with word-level timestamps.
+- `Provider.StreamingTranscriptionModel(id)` —
+  `provider.StreamingTranscriptionModel`: dials
+  `wss://<host>/v1/listen?model=..&language=..&encoding=..&sample_rate=..`
+  (derived from the configured `baseURL` by swapping `http(s)://` for
+  `ws(s)://`) with an `Authorization: Token <key>` header. See
+  [Live streaming transcription](#live-streaming-transcription) below.
 - No `Model`, `EmbeddingModel`, `ImageModel`, or `SpeechModel`.
 
 ## Quirks
@@ -112,8 +121,47 @@ Verified in
 `providers/deepgram/transcription_test.go`
 (`TestTranscribe_ProviderOptionsRepeatedListParam`).
 
+## Live streaming transcription
+
+⚠ **Not yet verified against the real Deepgram live-streaming endpoint** —
+implemented and tested strictly against Deepgram's documented WebSocket
+message shapes, replayed by a fixture WebSocket server
+(`internal/websocket/websockettest`), the same caveat as the REST path
+above.
+
+```go
+model := deepgram.New().StreamingTranscriptionModel("nova-3")
+
+stream, err := ai.StreamTranscribe(context.Background(), ai.StreamTranscribeOpts{
+	Model:     model,
+	MediaType: "audio/pcm;rate=16000",
+})
+```
+
+- **Dial URL and query params.** `MediaType`/`SampleRate` map to Deepgram's
+  `encoding`/`sample_rate` query params: `audio/pcm`/`audio/l16` (with an
+  optional `;rate=N` parameter) map to `encoding=linear16`; any other
+  `MediaType` (or an empty one) omits `encoding`/`sample_rate` entirely,
+  letting Deepgram auto-detect. `ProviderOptions["deepgram"]` entries are
+  added as extra query params (same convention as the REST path, including
+  the `[]any`/`[]string` repeated-parameter rule), applied after the SDK's
+  own params so they can override `model`/`language`/`encoding`.
+- **`Send`** writes a binary frame (raw audio bytes).
+- **`CloseSend`** sends the text frame `{"type":"CloseStream"}` (Deepgram's
+  documented end-of-audio signal); idempotent.
+- **Events.** A `Results` message becomes a `TranscriptEvent{Text, Final:
+  is_final, StartSec: start, EndSec: start+duration}`; a message with an
+  empty transcript is skipped entirely (no event emitted) — **including
+  when it carries `is_final:true`** — since Deepgram sends empty-transcript
+  results for silence/non-speech audio. A `Metadata` message (Deepgram's
+  end-of-stream marker, sent after `CloseStream` is processed) or a
+  peer-initiated close both end the stream cleanly (`Err() == nil`).
+- **Auth.** The same `Authorization: Token <key>` header as the REST path.
+
 ## Source of truth
 
 - [`providers/deepgram/deepgram.go`](../../providers/deepgram/deepgram.go)
 - [`providers/deepgram/transcription.go`](../../providers/deepgram/transcription.go)
 - [`providers/deepgram/transcription_test.go`](../../providers/deepgram/transcription_test.go)
+- [`providers/deepgram/live.go`](../../providers/deepgram/live.go)
+- [`providers/deepgram/live_test.go`](../../providers/deepgram/live_test.go)

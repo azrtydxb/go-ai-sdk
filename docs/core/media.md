@@ -1,12 +1,15 @@
-# Media: images, speech, transcription
+# Media: images, video, speech, transcription, translation
 
-`ai.GenerateImage`, `ai.GenerateSpeech`, and `ai.Transcribe` wrap
-`provider.ImageModel`, `provider.SpeechModel`, and
-`provider.TranscriptionModel` respectively, all with the same shape as
+`ai.GenerateImage`, `ai.GenerateVideo`, `ai.GenerateSpeech`, `ai.Transcribe`,
+and `ai.Translate` wrap `provider.ImageModel`, `provider.VideoModel`,
+`provider.SpeechModel`, `provider.TranscriptionModel`, and
+`provider.TranslationModel` respectively, all with the same shape as
 `ai.GenerateText`: a `nil` `Model` returns `ai.ErrModelRequired`, each has
 its own required-field error, and every call goes through the standard
 retry wrapper (`MaxRetries`, default 2 — see
-[Errors and retries](errors-and-retries.md)).
+[Errors and retries](errors-and-retries.md)). `ai.StreamTranscribe`
+(live, bidirectional transcription) is the one exception — see
+[StreamTranscribe](#streamtranscribe) below for why it has no retry.
 
 ## GenerateImage
 
@@ -70,6 +73,51 @@ then defaults itself). fal maps `N` to `num_images` the same way; Replicate
 maps it to `num_outputs`. Luma rejects `N > 1` outright (`"luma: multiple
 images per call are not supported"`) since Dream Machine's image endpoint
 produces exactly one image per generation.
+
+## GenerateVideo
+
+```go
+model := luma.New().VideoModel("ray-2")
+
+result, err := ai.GenerateVideo(context.Background(), ai.GenerateVideoOpts{
+	Model:       model,
+	Prompt:      "a drone shot flying over a mountain range at sunset",
+	AspectRatio: "16:9",
+})
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(result.Video.MediaType) // first video; result.Videos holds all of them
+```
+
+`GenerateVideoOpts.Prompt` is required (`ai.ErrPromptRequired` if empty).
+`AspectRatio`, `Resolution`, and `DurationSec` are all optional and
+provider-defined when unset. `provider.GeneratedVideo` carries `Data`
+(downloaded video bytes), `MediaType`, and `URL` (the provider's source
+URL, which may expire — download `Data` yourself if you need the bytes
+past that window).
+
+### Provider matrix
+
+| Provider | Flow | Notes |
+|---|---|---|
+| [Luma](../providers/luma.md) | Asynchronous: `POST /dream-machine/v1/generations` then poll `GET .../generations/{id}` until `"completed"`/`"failed"` | `DurationSec` maps to Luma's `"5s"`-style duration string; same poll-until-terminal shape as Luma's image endpoint. |
+| [fal](../providers/fal.md) | Synchronous: `POST {base}/{modelID}` | Only `Prompt` and `AspectRatio` (`"aspect_ratio"`) are first-class wire fields — fal's video model catalog has no shared field name for resolution/duration, so those are `ProviderOptions`-only. |
+| [Replicate](../providers/replicate.md) | Synchronous (`Prefer: wait`): `POST /v1/models/{id}/predictions` | `Prompt`/`AspectRatio` nest under `input`, same as Replicate's image endpoint; `ProviderOptions` merges into `input` too. |
+
+All three video providers download the video bytes from the URL(s) in the
+provider's response themselves — `internal/fetchimage` is image-specific
+(it sniffs unrecognized content types as image formats via
+`internal/imagesniff`), so each video provider package has its own small
+`fetchVideo` helper instead: it takes the `MediaType` from the response's
+`Content-Type` header, defaulting to `"video/mp4"` when absent, with no
+byte-sniffing. A non-2xx response from that download is still surfaced as
+a retryable `*ai.APICallError`, same as the generation request itself.
+
+`ai.Registry.VideoModel(id)` resolves a `"provider:model"` string into a
+`provider.VideoModel` the same way `Registry.ImageModel` does, for any
+registered provider implementing the (unexported) `VideoModelProvider`
+interface — today that's Luma, fal, and Replicate.
 
 ## GenerateSpeech
 
@@ -150,6 +198,171 @@ with `Content-Type: MediaType` (defaulting the same way). AssemblyAI,
 Gladia, and Rev.ai are all asynchronous — see each provider's page for its
 exact upload/create/poll endpoint sequence and error-body shape.
 
+## StreamTranscribe
+
+`ai.StreamTranscribe` opens a live, bidirectional transcription session —
+one goroutine can `Send` audio chunks while another ranges over interim and
+final transcript events:
+
+```go
+model := deepgram.New().StreamingTranscriptionModel("nova-3")
+
+stream, err := ai.StreamTranscribe(context.Background(), ai.StreamTranscribeOpts{
+	Model:     model,
+	MediaType: "audio/pcm;rate=16000",
+})
+if err != nil {
+	log.Fatal(err)
+}
+defer stream.Close()
+
+go func() {
+	stream.Send(context.Background(), audioChunk) // repeat per chunk
+	stream.CloseSend(context.Background())         // signals end-of-audio
+}()
+
+for event := range stream.Events() {
+	fmt.Println(event.Text, event.Final)
+}
+if err := stream.Err(); err != nil {
+	log.Fatal(err)
+}
+```
+
+Unlike every other call on this page, **`StreamTranscribe` has no retry
+wrapper** — a live connection failing mid-stream can't be transparently
+retried the way a single request/response call can. `opts.Model == nil`
+still returns `ai.ErrModelRequired` before any dial is attempted.
+
+`TranscriptionStream.Events()` is single-use (ranges over a channel closed
+exactly once when the stream ends); `Err()` reports `nil` on a clean end —
+either the provider closing the connection or the caller calling `Close()`
+— and the terminal error (including `context.Canceled`) otherwise. `Send`
+after `CloseSend`, or either after `Close`, returns a descriptive error
+rather than panicking. If a consumer stops ranging over `Events()` before
+the stream ends (e.g. `break`s out early) without cancelling `ctx`, calling
+`Close()` still reclaims the reader goroutine — the provider's internal
+event-delivery loop selects on the connection closing, not just on the
+channel having a reader.
+
+### Provider matrix
+
+| Provider | Endpoint | Notes |
+|---|---|---|
+| [Deepgram](../providers/deepgram.md) | `wss://.../v1/listen` (live) | `MediaType`/`SampleRate` map to `encoding`/`sample_rate` query params (same convention as the REST `Transcribe` path); `CloseSend` sends `{"type":"CloseStream"}` (idempotent); a `Results` message with an empty transcript is skipped — including when it carries `is_final:true`. |
+| [OpenAI](../providers/openai.md) | `wss://.../realtime?intent=transcription` | Sends a `transcription_session.update` on open (`input_audio_format`, `input_audio_transcription.model`/`.language`); `Send` base64-encodes audio into `input_audio_buffer.append`; `CloseSend` sends `input_audio_buffer.commit` (idempotent); `...delta`/`...completed` events map to interim/final `TranscriptEvent`s, an `error` event ends the stream via `Err()`. |
+
+Both providers derive their `wss://` dial URL from the provider's
+configured `baseURL` by swapping `http(s)://` for `ws(s)://` — never
+hardcoded — so `WithBaseURL` works transparently against test fixtures the
+same way it does for REST calls.
+
+⚠ **Neither provider's live-transcription wire format has been verified
+against the real API** — both are implemented and tested strictly against
+the documented message shapes, replayed by an `httptest`-style WebSocket
+fixture server (`internal/websocket/websockettest`). Live verification
+against a real Deepgram/OpenAI realtime endpoint should happen before
+relying on either in production; see each provider's page for the
+"not yet verified" note.
+
+`ai.StreamTranscribe` is not wired into `ai.Registry` — construct the
+provider-specific `provider.StreamingTranscriptionModel` directly (as in
+the example above) and pass it to `StreamTranscribe`.
+
+## Translate
+
+`ai.Translate` translates audio in any supported source language into
+**English** text, regardless of the source language — unlike `Transcribe`,
+which transcribes in the audio's own language:
+
+```go
+model := openai.New().TranslationModel("whisper-1")
+
+audio, _ := os.ReadFile("french-meeting.mp3")
+result, err := ai.Translate(context.Background(), ai.TranslateOpts{
+	Model:     model,
+	Audio:     audio,
+	MediaType: "audio/mpeg",
+})
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(result.Text) // English translation, regardless of source language
+```
+
+`TranslateOpts.Audio` is required (`ai.ErrAudioRequired` if empty). OpenAI
+is the only provider today: `internal/openaicompat.NewTranslationModel`
+multipart-POSTs to `{base}/audio/translations` with `response_format`
+always `verbose_json` (the translations endpoint has no
+`gpt-4o-transcribe`-style restriction the way `Transcribe` does), returning
+`Text`/`Language`/`DurationSec`. `ai.Translate` is not wired into
+`ai.Registry` (a niche modality this wave) — construct
+`openai.New().TranslationModel(id)` directly.
+
+**`StreamTranslate` was not shipped this wave.** None of the providers
+targeted so far expose a live/streaming audio-translation API (as opposed
+to streaming *transcription*, which Deepgram and OpenAI both support — see
+[StreamTranscribe](#streamtranscribe) above); `ai.Translate` covers the
+REST translation use case instead. See
+[Migrating from the Vercel AI SDK](../migrating-from-vercel-ai-sdk.md#ai-sdk-6-delta)
+for the full scope ruling.
+
+## Realtime voice session (OpenAI-only)
+
+`providers/openai` also exposes a minimal realtime voice session over the
+same `internal/websocket` client, independent of `ai.StreamTranscribe`:
+`(*openai.Provider).RealtimeSession` dials OpenAI's Realtime API, sends
+audio/text into a live conversation, and streams back audio/text deltas:
+
+```go
+p := openai.New()
+session, err := p.RealtimeSession(context.Background(), openai.RealtimeConfig{
+	Model: "gpt-4o-realtime-preview",
+	Voice: "alloy",
+})
+if err != nil {
+	log.Fatal(err)
+}
+defer session.Close()
+
+session.SendText(context.Background(), "Say hello in French.")
+session.CreateResponse(context.Background())
+
+for event := range session.Events() {
+	if event.TextDelta != "" {
+		fmt.Print(event.TextDelta)
+	}
+}
+if err := session.Err(); err != nil {
+	log.Fatal(err)
+}
+```
+
+`SendAudio`/`CommitAudio`/`SendText`/`CreateResponse` map to
+`input_audio_buffer.append`/`.commit`, `conversation.item.create`, and
+`response.create` respectively. `RealtimeEvent.Raw` is always set (the
+full server event); `AudioDelta` and `TextDelta` are populated for both the
+old and new OpenAI delta event names (`response.audio.delta` /
+`response.output_audio.delta`, and the three text-delta variants) —
+deliberate future-proofing since OpenAI has renamed these event types
+before. **Server `error` events are recorded but do not end the
+session** — they surface as an ordinary `RealtimeEvent{Type: "error"}` and
+iteration continues; only a socket failure, `ctx` cancellation, or
+`Close()` ends `Events()`. This is the one place `RealtimeSession`
+deliberately diverges from `StreamTranscribe`'s streams, where an `error`
+event *is* terminal.
+
+`RealtimeSession` is **OpenAI-only**: there is no generic
+`provider.RealtimeModel` interface this wave, and it is not wired into
+`ai.Registry` — construct it directly against an `*openai.Provider`, as
+above. Vercel's WebRTC realtime transport is out of scope entirely (see
+the migration guide); this SDK's realtime support is WebSocket-only.
+
+⚠ **Not yet verified against a real OpenAI Realtime endpoint** — tested
+only against a WebSocket fixture server. See
+[OpenAI § Realtime](../providers/openai.md#realtime-transcription-and-voice-session)
+for the live-testing note.
+
 ## FilePart attachment matrix
 
 A `provider.FilePart` attaches a file to a *user* message (an assistant
@@ -194,19 +407,115 @@ returns an error):
 | `application/vnd.ms-excel` | `xls` |
 | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` | `xlsx` |
 
+### FileID and URL variants
+
+`FilePart` also accepts `FileID` (a reference to a file already uploaded
+to a provider's file store — see [Files & skills](#files--skills) below)
+or `URL` (an externally-hosted file) instead of inline `Data`. **Exactly
+one** of `Data`/`FileID`/`URL` must be set — a converter rejects a
+`FilePart` with none set, or with more than one:
+
+```go
+provider.FilePart{FileID: info.ID} // info from ai.UploadFile, below
+```
+
+Per-family support (families not listed reject both variants, same as an
+unsupported `Data` `MediaType`):
+
+| Provider | `FileID` | `URL` |
+|---|---|---|
+| OpenAI and other `openaicompat` providers | `{"type":"file","file":{"file_id":...}}` | ✗ (no file-URL wire shape) |
+| Anthropic | A `"document"` block with `source: {"type":"file","file_id":...}` | A `"document"` block with `source: {"type":"url","url":...}` |
+| Google, Vertex AI (`geminicompat`) | ✗ (no wire shape) | A `fileData` part: `{"fileData":{"fileUri":...,"mimeType":...}}` (`mimeType` omitted when `MediaType` is empty; also accepts Gemini Files API URIs) |
+| Amazon Bedrock | ✗ | ✗ (Converse's document block has no file-reference primitive) |
+
+## Files & skills
+
+`ai.UploadFile`/`ai.DeleteFile` wrap `provider.FileStore`, the interface a
+provider's file-upload API implements — upload once, then reference the
+returned ID from any later prompt via `FilePart.FileID` above:
+
+```go
+store := openai.New().Files() // or anthropic.New().Files()
+
+info, err := ai.UploadFile(context.Background(), ai.UploadFileOpts{
+	Store:    store,
+	Data:     pdfBytes,
+	Filename: "report.pdf",
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+msg := provider.Message{
+	Role: provider.RoleUser,
+	Content: []provider.ContentPart{
+		provider.TextPart{Text: "Summarize this document."},
+		provider.FilePart{FileID: info.ID},
+	},
+}
+```
+
+`UploadFileOpts.Store`/`.Data`/`.Filename` are required
+(`ai.ErrStoreRequired`/`ai.ErrDataRequired`/`ai.ErrFilenameRequired`);
+`ai.DeleteFile(ctx, ai.DeleteFileOpts{Store, ID})` requires `Store`/`ID`
+(`ai.ErrStoreRequired`/`ai.ErrIDRequired`). Both wrap the call in the
+standard retry logic (`MaxRetries`, default 2).
+
+| Provider | `Files()` endpoint | Beta header | Notes |
+|---|---|---|---|
+| OpenAI | `POST /files` (multipart, field `file` + `purpose`, default `"user_data"`), `DELETE /files/{id}` | none | See [OpenAI § Files](../providers/openai.md#files). |
+| Anthropic | `POST /v1/files` (multipart, field `file`), `DELETE /v1/files/{id}` | `anthropic-beta: files-api-2025-04-14` | See [Anthropic § Files and skills](../providers/anthropic.md#files-and-skills). |
+
+`FileStore` is **not** wired into `ai.Registry` — call `.Files()` on a
+constructed provider directly, as above.
+
+**Anthropic skills** (`uploadSkill` in Vercel's terms) are a distinct,
+**Anthropic-only** capability with no generic `provider` interface —
+`(*anthropic.Provider).UploadSkill`/`.DeleteSkill` upload a `skill.zip` to
+`POST /v1/skills` (multipart, file part `files[]`, field `display_name`)
+with `anthropic-beta: skills-2025-10-02`:
+
+```go
+p := anthropic.New()
+skill, err := p.UploadSkill(context.Background(), anthropic.UploadSkillCall{
+	Zip:         skillZipBytes,
+	DisplayName: "my-skill",
+})
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(skill.ID)
+```
+
+See [Anthropic § Files and skills](../providers/anthropic.md#files-and-skills)
+for the beta-header isolation note (it's set only on `files.go`/`skills.go`
+requests, never on `/v1/messages`) and the live-testing caveat.
+
 ## Source of truth
 
 - [`ai/generate_image.go`](../../ai/generate_image.go),
+  [`ai/generate_video.go`](../../ai/generate_video.go),
   [`ai/generate_speech.go`](../../ai/generate_speech.go),
-  [`ai/transcribe.go`](../../ai/transcribe.go)
+  [`ai/transcribe.go`](../../ai/transcribe.go),
+  [`ai/stream_transcribe.go`](../../ai/stream_transcribe.go),
+  [`ai/translate.go`](../../ai/translate.go),
+  [`ai/upload_file.go`](../../ai/upload_file.go)
 - [`provider/image.go`](../../provider/image.go),
+  [`provider/video.go`](../../provider/video.go),
   [`provider/speech.go`](../../provider/speech.go),
-  [`provider/transcription.go`](../../provider/transcription.go)
+  [`provider/transcription.go`](../../provider/transcription.go),
+  [`provider/transcription_stream.go`](../../provider/transcription_stream.go),
+  [`provider/translation.go`](../../provider/translation.go),
+  [`provider/files.go`](../../provider/files.go)
 - [`internal/openaicompat/image.go`](../../internal/openaicompat/image.go),
   [`internal/geminicompat/image.go`](../../internal/geminicompat/image.go),
   [`providers/fal/image.go`](../../providers/fal/image.go),
   [`providers/replicate/image.go`](../../providers/replicate/image.go),
   [`providers/luma/image.go`](../../providers/luma/image.go)
+- [`providers/luma/video.go`](../../providers/luma/video.go),
+  [`providers/fal/video.go`](../../providers/fal/video.go),
+  [`providers/replicate/video.go`](../../providers/replicate/video.go)
 - [`internal/openaicompat/speech.go`](../../internal/openaicompat/speech.go),
   [`providers/elevenlabs/speech.go`](../../providers/elevenlabs/speech.go),
   [`providers/lmnt/speech.go`](../../providers/lmnt/speech.go),
@@ -217,6 +526,15 @@ returns an error):
   [`providers/assemblyai/transcription.go`](../../providers/assemblyai/transcription.go),
   [`providers/gladia/transcription.go`](../../providers/gladia/transcription.go),
   [`providers/revai/transcription.go`](../../providers/revai/transcription.go)
+- [`providers/deepgram/live.go`](../../providers/deepgram/live.go),
+  [`providers/openai/realtime_transcription.go`](../../providers/openai/realtime_transcription.go)
+  (streaming transcription); [`providers/openai/realtime.go`](../../providers/openai/realtime.go)
+  (realtime voice session); [`internal/websocket`](../../internal/websocket)
+  (the underlying WebSocket client — see [Architecture](../architecture.md))
+- [`internal/openaicompat/translation.go`](../../internal/openaicompat/translation.go)
+- [`providers/openai/files.go`](../../providers/openai/files.go),
+  [`providers/anthropic/files.go`](../../providers/anthropic/files.go),
+  [`providers/anthropic/skills.go`](../../providers/anthropic/skills.go)
 - [`provider/message.go`](../../provider/message.go) (`FilePart` doc
   comment)
 - [`providers/bedrock/wire.go`](../../providers/bedrock/wire.go)

@@ -33,6 +33,9 @@ baked into the package, not configurable via an `Option`).
 - **Extended thinking** — see below.
 - **No embeddings, no images, no speech, no transcription** — not exposed by
   this package.
+- **Files and skills** — `p.Files()` → `provider.FileStore`, plus a
+  provider-specific `p.UploadSkill`/`p.DeleteSkill` (no generic interface).
+  See [Files and skills](#files-and-skills) below.
 
 ## Quirks and notes
 
@@ -120,6 +123,35 @@ result, err := ai.GenerateText(context.Background(), ai.GenerateTextOpts{
 })
 ```
 
+## Files and skills
+
+`p.Files()` returns a `provider.FileStore`: `UploadFile` is a multipart
+`POST {base}/v1/files` (field `file`), parsing
+`{"id","filename","size_bytes","mime_type"}`; `DeleteFile` is `DELETE
+{base}/v1/files/{id}`. Both send the standard `x-api-key`/
+`anthropic-version` headers plus `anthropic-beta: files-api-2025-04-14` —
+**this beta header is set only in `providers/anthropic/files.go`, never on
+the shared `/v1/messages` path** (`providers/anthropic/language_model.go`),
+verified by a dedicated test asserting the header doesn't leak onto a
+chat request. Not wired into `ai.Registry`; call `.Files()` directly. See
+[Media § Files & skills](../core/media.md#files--skills).
+
+`p.UploadSkill(ctx, anthropic.UploadSkillCall{Zip, DisplayName})` /
+`p.DeleteSkill(ctx, id)` are a **distinct, Anthropic-only** capability
+(`uploadSkill` in Vercel's terms) with no generic `provider` interface —
+unlike Files, which implements `provider.FileStore`. `UploadSkill`
+multipart-POSTs to `{base}/v1/skills` with the file part named `files[]`
+(filename `skill.zip`) and a `display_name` field, sending
+`anthropic-beta: skills-2025-10-02` (isolated to `skills.go` the same way
+the Files beta header is isolated to `files.go`); `DeleteSkill` is `DELETE
+{base}/v1/skills/{id}` with the same beta header.
+
+⚠ **Neither the Files nor the Skills endpoint has been verified against
+the real Anthropic API** — both are implemented and tested strictly
+against the documented multipart request/JSON response shapes, via an
+`httptest` fixture server. Live verification should happen before relying
+on either in production.
+
 ## Source of truth
 
 - [`providers/anthropic/anthropic.go`](../../providers/anthropic/anthropic.go)
@@ -132,6 +164,10 @@ result, err := ai.GenerateText(context.Background(), ai.GenerateTextOpts{
 - [`providers/anthropic/provideroptions_test.go`](../../providers/anthropic/provideroptions_test.go)
 - [`ai/generate_object.go`](../../ai/generate_object.go) (`buildObjectCall`,
   tool-mode fallback)
+- [`providers/anthropic/files.go`](../../providers/anthropic/files.go),
+  [`providers/anthropic/files_test.go`](../../providers/anthropic/files_test.go)
+- [`providers/anthropic/skills.go`](../../providers/anthropic/skills.go),
+  [`providers/anthropic/skills_test.go`](../../providers/anthropic/skills_test.go)
 
 See also: [Reasoning](../core/reasoning.md) for the extended-thinking worked
 example and signature round-trip rules; [Provider options](../core/provider-options.md)

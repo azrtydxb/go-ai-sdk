@@ -22,7 +22,7 @@ page.
 parity (ai-sdk.dev, snapshot 2026-08-03) is in progress, tracked wave by
 wave in the
 [v6 parity roadmap](superpowers/plans/2026-08-03-v6-parity-roadmap.md). This
-table is the feature-by-feature status as of the current wave (11):
+table is the feature-by-feature status as of the current wave (12):
 
 | AI SDK 6 feature | Status |
 |---|---|
@@ -42,9 +42,11 @@ table is the feature-by-feature status as of the current wave (11):
 | Agents (`ToolLoopAgent` equivalent, agent-as-tool subagents) | **Shipped** — `agent.Agent` (`Generate`/`Stream`, `RunOpts`), `agent.AsTool` for agent-as-tool sub-agent delegation. Named plainly `Agent`, not `ToolLoopAgent` — see [Agents § Naming](core/agents.md#naming-toolloopagent-vs-agent). Contains no loop logic of its own; assembles a `GenerateTextOpts` and delegates entirely to `ai.GenerateText`/`ai.StreamText`. See [Agents](core/agents.md). |
 | Tool-execution approvals (approval func, policy hook, resumable pending-approval flow) | **Shipped** — `ai.RequireApproval`/`ai.ApprovalRequirer`, `GenerateTextOpts.ApproveToolCall`/`.Approvals`, `GenerateTextResult.PendingApprovals`. Decision order is `Approvals` then `ApproveToolCall` then pending; a pending call suspends its whole batch atomically; denial is recorded as `*ai.ToolApprovalDeniedError` on an `IsError` tool result, never raised. Vercel models a pending approval as a special message part surfaced to a UI stream; `go-ai-sdk` has no UI layer, so it models the same idea as a suspended result (`PendingApprovals`) plus `Approvals` on the resume call instead — see [Tools § Approvals for tool execution](core/tools.md#approvals-for-tool-execution). |
 | Sandbox interface / Code Mode | **Shipped** — `codemode.Tool(sandbox, tools, opts)` wraps a set of `ai.Tool`s into a single `run_code` tool; `codemode.Sandbox` is the interface the caller implements against their own runtime (subprocess, container, embedded interpreter) — the SDK ships no bundled code runtime, and security/isolation is entirely the sandbox implementer's responsibility. See [Code Mode](core/code-mode.md). |
-| Video generation (`GenerateVideo`) | Planned — wave 12. |
-| Realtime/streaming transcription and translation (`StreamTranscribe`, `StreamTranslate`, a minimal realtime voice session) | Planned — wave 12, over a stdlib WebSocket client — Vercel's WebRTC realtime transport is out of scope (see below). |
-| File/skill upload (`uploadFile`, `uploadSkill`) | Planned — wave 12. |
+| Video generation (`GenerateVideo`) | **Shipped** — `ai.GenerateVideo`, `provider.VideoModel`, `Registry.VideoModel`; Luma (Dream Machine, async poll), fal, and Replicate (both synchronous) implement it. See [Media § GenerateVideo](core/media.md#generatevideo). |
+| Realtime/streaming transcription (`StreamTranscribe`, a minimal realtime voice session) | **Shipped**, over a stdlib-only WebSocket client (`internal/websocket`) — `ai.StreamTranscribe`/`provider.StreamingTranscriptionModel` (Deepgram live, OpenAI Realtime API in transcription mode); `(*openai.Provider).RealtimeSession` (OpenAI-only voice/text session, no generic provider interface, not wired into `ai.Registry`). Vercel's WebRTC realtime transport is out of scope (see below) — this SDK's realtime support is WebSocket-only. See [Media § StreamTranscribe](core/media.md#streamtranscribe) and [§ Realtime voice session](core/media.md#realtime-voice-session-openai-only). |
+| Streaming audio translation (`StreamTranslate`) | **Not shipped.** None of the providers targeted so far expose a live/streaming audio-translation API (as distinct from streaming *transcription*, which is shipped — see above); `ai.Translate` (below) covers the REST translation use case instead. |
+| Audio translation (`translate` / a translation model) | **Shipped as `ai.Translate` (REST), not `StreamTranslate`.** `ai.Translate`/`provider.TranslationModel`, OpenAI only (`internal/openaicompat.NewTranslationModel`, multipart `POST /audio/translations`, always English output regardless of source language). Not wired into `ai.Registry`. See [Media § Translate](core/media.md#translate). |
+| File/skill upload (`uploadFile`, `uploadSkill`) | **Shipped.** `ai.UploadFile`/`ai.DeleteFile`/`provider.FileStore` (OpenAI, Anthropic — both with `files-api-2025-04-14`-equivalent beta gating on Anthropic's side), referenced from a prompt via the new `provider.FilePart.FileID`/`.URL` variants. `uploadSkill` is **Anthropic-only**: `(*anthropic.Provider).UploadSkill`/`.DeleteSkill`, a provider-specific capability with no generic interface (`anthropic-beta: skills-2025-10-02`). Neither is wired into `ai.Registry`. See [Media § Files & skills](core/media.md#files--skills). |
 | MCP extensions (resources, prompts, sampling, roots, elicitation, token-provider auth) | Planned — wave 13; today's client is tools-only, see [MCP is tools-only](#mcp-is-tools-only). |
 | Provider fleet (Moonshot, Qwen, MiniMax, DeepInfra, Hugging Face, Baseten, LM Studio, NVIDIA NIM, Voyage, Mixedbread, Cartesia, Prodia, Black Forest Labs, AI Gateway) | Planned — wave 13. |
 | OpenTelemetry bridge | Planned — wave 14, as a separate nested Go module (`contrib/otel/`) so the root module stays zero-dependency; `ai.Telemetry` is the seam it will plug into today. |
@@ -65,7 +67,11 @@ package `github.com/azrtydxb/go-ai-sdk/ai`, imported as `ai`.
 | `embedMany(opts)` | `ai.EmbedMany(ctx, ai.EmbedManyOpts{...})` | Batches internally per `EmbeddingModel.MaxBatchSize()`. |
 | `generateImage(opts)` | `ai.GenerateImage(ctx, ai.GenerateImageOpts{...})` | |
 | `generateSpeech(opts)` | `ai.GenerateSpeech(ctx, ai.GenerateSpeechOpts{...})` | |
+| `generateVideo(opts)` (AI SDK 6) | `ai.GenerateVideo(ctx, ai.GenerateVideoOpts{...})` | Luma, fal, Replicate. |
 | `transcribe(opts)` | `ai.Transcribe(ctx, ai.TranscribeOpts{...})` | |
+| *(no direct equivalent — Vercel's realtime is WebRTC-based)* | `ai.StreamTranscribe(ctx, ai.StreamTranscribeOpts{...})` | Live bidirectional transcription over a stdlib WebSocket client; Deepgram, OpenAI. No retry (see [Media § StreamTranscribe](core/media.md#streamtranscribe)). |
+| *(no direct equivalent)* | `ai.Translate(ctx, ai.TranslateOpts{...})` | English-only audio translation, OpenAI only; not `StreamTranslate` — see the [AI SDK 6 delta](#ai-sdk-6-delta) ruling above. |
+| *(no direct equivalent)* | `ai.UploadFile`/`ai.DeleteFile(ctx, ...)` | `provider.FileStore`, OpenAI/Anthropic; referenced later via `provider.FilePart.FileID`. |
 | `tool({ description, inputSchema, execute })` | `ai.NewTool[Args](name, description, fn)` | `Args` is inferred by Go's generics from `fn`'s signature; schema is derived by reflection, not written by hand (see below). |
 | `cosineSimilarity(a, b)` | `ai.CosineSimilarity(a, b []float64) (float64, error)` | Returns an error instead of `NaN`/throwing on mismatched lengths or a zero vector. |
 | `createProviderRegistry({...})` | `ai.NewRegistry()` + `reg.Register(name, provider)` | `reg.LanguageModel("anthropic:claude-sonnet-5")` etc. replace `registry.languageModel(id)`. |

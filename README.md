@@ -141,8 +141,30 @@ in [`examples/`](examples/), each compiled by CI.
 - **Reranking** — `ai.Rerank` ranks documents by relevance to a query via
   `provider.RerankingModel` (Cohere this wave). See
   [Embeddings § Reranking](docs/core/embeddings.md#reranking).
-- **Media** — image generation, speech synthesis, and transcription
-  behind the same provider-agnostic pattern. See [Media](docs/core/media.md).
+- **Media** — image generation, video generation, speech synthesis,
+  transcription (including live streaming transcription), and audio
+  translation, all behind the same provider-agnostic pattern where one
+  exists. See [Media](docs/core/media.md).
+- **Video generation** — `ai.GenerateVideo`/`provider.VideoModel`, Luma
+  (Dream Machine, async poll), fal, and Replicate (both synchronous). See
+  [Media § GenerateVideo](docs/core/media.md#generatevideo).
+- **Streaming transcription** — `ai.StreamTranscribe`/
+  `provider.StreamingTranscriptionModel`, a live bidirectional session over
+  a stdlib-only WebSocket client (`internal/websocket`); Deepgram and
+  OpenAI (Realtime API, transcription mode) implement it. See
+  [Media § StreamTranscribe](docs/core/media.md#streamtranscribe).
+- **Audio translation** — `ai.Translate`/`provider.TranslationModel`
+  (English-only output, regardless of source language), OpenAI only. See
+  [Media § Translate](docs/core/media.md#translate).
+- **Realtime voice session** — `(*openai.Provider).RealtimeSession`, a
+  live bidirectional voice/text conversation over OpenAI's Realtime API;
+  OpenAI-only, no generic provider interface. See
+  [Media § Realtime voice session](docs/core/media.md#realtime-voice-session-openai-only).
+- **Files and skills** — `ai.UploadFile`/`ai.DeleteFile`/
+  `provider.FileStore` (OpenAI, Anthropic), referenced from a prompt via
+  `provider.FilePart.FileID`; Anthropic's Skills API
+  (`(*anthropic.Provider).UploadSkill`) is a distinct, Anthropic-only
+  capability. See [Media § Files & skills](docs/core/media.md#files--skills).
 - **Middleware and registry** — compose behavior onto any
   `provider.LanguageModel` (`ExtractReasoningMiddleware`,
   `SimulateStreamingMiddleware`, `DefaultSettingsMiddleware`,
@@ -212,8 +234,16 @@ Supported providers for media capabilities:
 | Capability | OpenAI | Google | Vertex AI | xAI | ElevenLabs | Groq | fal | Replicate | Luma | Deepgram | LMNT | Hume | AssemblyAI | Gladia | Rev.ai |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | `GenerateImage` | ✅ gpt-image-1 | ✅ imagen-3.0-generate-002 | ✅ imagen-3.0-generate-002 | ✅ grok-2-image | — | — | ✅ fal-ai/flux/schnell | ✅ black-forest-labs/flux-schnell | ✅ photon-1 | — | — | — | — | — | — |
+| `GenerateVideo` | — | — | — | — | — | — | ✅ fal-ai/kling-video/v1/standard/text-to-video | ✅ minimax/video-01 | ✅ ray-2 | — | — | — | — | — | — |
 | `GenerateSpeech` | ✅ gpt-4o-mini-tts | — | — | — | ✅ eleven_multilingual_v2 | — | — | — | — | — | ✅ blizzard | ✅ (model ID has no wire effect) | — | — | — |
 | `Transcribe` | ✅ whisper-1 | — | — | — | ✅ scribe_v1 | ✅ whisper-large-v3-turbo | — | — | — | ✅ nova-3 | — | — | ✅ universal | ✅ (model ID unused) | ✅ (model ID unused) |
+| `StreamTranscribe`⁶ | ✅ gpt-4o-transcribe (Realtime API) | — | — | — | — | — | — | — | — | ✅ nova-3 (live) | — | — | — | — | — |
+| `Translate`⁶ | ✅ whisper-1 | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
+
+⁶ `StreamTranscribe` and `Translate` are not `ai.Registry` capabilities
+(construct the provider-specific model directly) — included here for
+completeness, not as part of the `ai.Registry`-backed capability matrix
+above. See [Media](docs/core/media.md).
 
 **Note:** This closes out the Vercel-supported transcription roster (fal,
 Replicate, Luma, Deepgram, LMNT, Hume, AssemblyAI, Gladia, Rev.ai). A

@@ -4,18 +4,20 @@
 documented wire format only (see the package doc comment in
 `providers/luma/luma.go`).
 
-Luma offers no language models through this package — it only implements
-`provider.ImageModel`, against Luma's Dream Machine image-generation API.
-Unlike the other five media providers added alongside it, Luma's API is
-asynchronous: a generation is created, then polled until it reaches a
-terminal state. See [Media: images, speech, transcription](../core/media.md)
-for the `ai.GenerateImage` call shape this provider plugs into.
+Luma offers no language models through this package — it implements
+`provider.ImageModel` and `provider.VideoModel`, against Luma's Dream
+Machine image- and video-generation APIs. Both are asynchronous: a
+generation is created, then polled until it reaches a terminal state. See
+[Media: images, video, speech, transcription, translation](../core/media.md)
+for the `ai.GenerateImage`/`ai.GenerateVideo` call shapes this provider
+plugs into.
 
 ```go
 provider := luma.New(
 	luma.WithAPIKey("..."),
 )
 image := provider.ImageModel("photon-1")
+video := provider.VideoModel("ray-2")
 ```
 
 `WithAPIKey` defaults to `os.Getenv("LUMA_API_KEY")`; `WithBaseURL` defaults
@@ -35,6 +37,13 @@ hook so fixtures can poll fast; production callers generally don't need it.
   `POST /dream-machine/v1/generations/image` to create a generation, then
   `GET /dream-machine/v1/generations/{id}` polled in a loop until
   `state` is `"completed"` or `"failed"`.
+- `Provider.VideoModel(id)` — `provider.VideoModel`:
+  `POST /dream-machine/v1/generations` (video) to create a generation, then
+  the same `GET /dream-machine/v1/generations/{id}` poll loop. `DurationSec`
+  maps to Luma's `"5s"`-style duration string
+  (`strconv.FormatFloat(sec, 'f', -1, 64) + "s"`, so `2.5` → `"2.5s"`); a
+  `"failed"` terminal state surfaces `FailureReason` in the returned error
+  when present.
 - No `Model`, `EmbeddingModel`, `SpeechModel`, or `TranscriptionModel`.
 
 ## Quirks
@@ -55,6 +64,13 @@ hook so fixtures can poll fast; production callers generally don't need it.
 - **Error body shape.** Luma's error responses use `{"detail":"..."}`
   (`errorMessage` in `providers/luma/luma.go`), with a fallback to the raw
   body when that shape doesn't parse.
+- **Video download is not sniffed, unlike images.** `internal/fetchimage`
+  (used for image downloads) sniffs an unrecognized `Content-Type` as an
+  image format via `internal/imagesniff`; video downloads use a local
+  `fetchVideo` helper instead (`providers/luma/video.go`) that takes
+  `MediaType` from the response's `Content-Type` header, defaulting to
+  `"video/mp4"` when absent — no byte-sniffing, since there's no
+  video-bytes sniffer in this codebase.
 
 ## ProviderOptions
 
@@ -86,3 +102,5 @@ on the poll requests.
 - [`providers/luma/luma.go`](../../providers/luma/luma.go)
 - [`providers/luma/image.go`](../../providers/luma/image.go)
 - [`providers/luma/image_test.go`](../../providers/luma/image_test.go)
+- [`providers/luma/video.go`](../../providers/luma/video.go)
+- [`providers/luma/video_test.go`](../../providers/luma/video_test.go)

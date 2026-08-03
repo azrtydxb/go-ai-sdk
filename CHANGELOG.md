@@ -8,17 +8,99 @@ once it reaches 1.0.
 
 ## [Unreleased]
 
-Waves 9, 10, and 11 of the [AI SDK 6 parity roadmap](docs/superpowers/plans/2026-08-03-v6-parity-roadmap.md).
+Waves 9, 10, 11, and 12 of the [AI SDK 6 parity roadmap](docs/superpowers/plans/2026-08-03-v6-parity-roadmap.md).
 Wave 9: v5 leftovers plus quick AI SDK 6 wins. Wave 10: output modes on
 `GenerateText`, reranking, a unified reasoning option, and the full
 lifecycle-callback event set. Wave 11: tool-execution approvals with a
 resumable pending-approval flow, `RuntimeContext`, an `agent.Agent`
-package, and Code Mode (`codemode.Tool`/`Sandbox`). Full parity with the
-AI SDK 5 core is maintained; AI SDK 6 parity is in progress — see
+package, and Code Mode (`codemode.Tool`/`Sandbox`). Wave 12: video
+generation, a stdlib-only WebSocket client, streaming transcription,
+audio translation, a minimal OpenAI realtime voice session, and
+file/skill upload. Full parity with the AI SDK 5 core is maintained; AI
+SDK 6 parity is in progress — see
 [Migrating from the Vercel AI SDK § AI SDK 6 delta](docs/migrating-from-vercel-ai-sdk.md#ai-sdk-6-delta)
 for the feature-by-feature status.
 
 ### Added
+
+**Wave 12**
+
+- `ai.GenerateVideo`/`provider.VideoModel`/`Registry.VideoModel`: video
+  generation, mirroring `ai.GenerateImage`'s shape exactly (`Prompt`
+  required, `AspectRatio`/`Resolution`/`DurationSec` optional and
+  provider-defined when unset, standard retry wrapper). Luma (Dream
+  Machine, `POST /dream-machine/v1/generations` then poll until
+  `"completed"`/`"failed"`, `DurationSec` mapped to a `"5s"`-style
+  duration string), fal (synchronous `POST {base}/{modelID}`; only
+  `Prompt`/`AspectRatio` are first-class fields, everything else is
+  `ProviderOptions`-only), and Replicate (synchronous `Prefer: wait`,
+  `Prompt`/`AspectRatio` nested under `input`) implement it.
+  `provider.GeneratedVideo` additionally carries `URL` (the provider's
+  source URL, which may expire) alongside `Data`/`MediaType`. See
+  [Media § GenerateVideo](docs/core/media.md#generatevideo).
+- `internal/websocket`: a dependency-free, client-only RFC 6455 WebSocket
+  implementation (`Dial`, `Conn.Read`/`WriteText`/`WriteBinary`/`Close`,
+  ctx-aware cancellation, automatic ping/pong and close-frame handling,
+  `MaxMessageBytes` enforcement before any oversized payload is read) —
+  the transport underlying every streaming/realtime feature below.
+  `internal/websocket/websockettest` ships exported server-side test
+  helpers (`Accept`/`Upgrade`/`ReadMessage`/`WriteMessage`/`WriteClose`)
+  reused by the providers' fixture tests. Internal — no public API of its
+  own; see [Architecture](docs/architecture.md).
+- `ai.StreamTranscribe`/`provider.StreamingTranscriptionModel`/
+  `TranscriptionStream`/`TranscriptEvent`: live, bidirectional
+  transcription — one goroutine can `Send` audio while another ranges
+  over `Events()`. No retry wrapper (a live connection can't be
+  transparently retried). `Events()` is single-use; `Err()` is `nil` on a
+  clean end (provider close or caller `Close()`); `Send`/`CloseSend`
+  after `Close`, or `Send` after `CloseSend`, return descriptive errors;
+  an abandoned `Events()` range followed by `Close()` still reclaims the
+  reader goroutine. Deepgram (`wss://.../v1/listen` live, query-param
+  encoding/sample-rate mapping reusing the REST path's convention, empty-
+  transcript `Results` messages skipped even when `is_final:true`) and
+  OpenAI (`wss://.../realtime?intent=transcription`,
+  `transcription_session.update` on open, `error` events terminal)
+  implement it. See
+  [Media § StreamTranscribe](docs/core/media.md#streamtranscribe).
+- `ai.Translate`/`provider.TranslationModel`: audio translation into
+  English text regardless of source language, same retry-wrapped shape as
+  `ai.Transcribe`. OpenAI only (`internal/openaicompat.NewTranslationModel`,
+  multipart `POST /audio/translations`, `response_format` always
+  `verbose_json`). Not wired into `ai.Registry`. `StreamTranslate` was
+  **not** shipped this wave — none of the targeted providers expose a
+  live/streaming audio-translation API. See
+  [Media § Translate](docs/core/media.md#translate).
+- `(*openai.Provider).RealtimeSession`/`RealtimeConfig`/`RealtimeEvent`: a
+  minimal realtime voice/text session over OpenAI's Realtime API —
+  `SendAudio`/`CommitAudio`/`SendText`/`CreateResponse`, single-use
+  `Events()` (both old and new audio/text delta event names mapped),
+  `Raw` always set on every event. Unlike `StreamTranscribe`'s streams, a
+  server `error` event does **not** end the session — it surfaces as an
+  ordinary event, and only a socket failure, ctx cancellation, or
+  `Close()` ends iteration. OpenAI-only: no generic
+  `provider.RealtimeModel` interface, not wired into `ai.Registry`. See
+  [Media § Realtime voice session](docs/core/media.md#realtime-voice-session-openai-only).
+- `provider.FilePart` gains `FileID`/`URL` fields (exactly one of
+  `Data`/`FileID`/`URL` must be set): OpenAI and other `openaicompat`
+  providers (`FileID` only, `{"file":{"file_id":...}}`), Anthropic
+  (`FileID` and `URL`, both as `"document"` block source variants),
+  Google/Vertex AI (`geminicompat`, `URL` only, a `fileData` part).
+  Bedrock accepts neither (Converse's document block has no
+  file-reference primitive). See
+  [Media § FileID and URL variants](docs/core/media.md#fileid-and-url-variants).
+- `ai.UploadFile`/`ai.DeleteFile`/`provider.FileStore`: upload once,
+  reference the returned ID from a later prompt via the new
+  `FilePart.FileID`. OpenAI (`POST`/`DELETE /files`) and Anthropic
+  (`POST`/`DELETE /v1/files`, `anthropic-beta: files-api-2025-04-14` —
+  isolated to `files.go`, never leaking onto `/v1/messages`) implement
+  `FileStore`. Not wired into `ai.Registry`. See
+  [Media § Files & skills](docs/core/media.md#files--skills).
+- `(*anthropic.Provider).UploadSkill`/`.DeleteSkill`: Anthropic's Skills
+  API (`uploadSkill` in Vercel's terms) — a distinct, **Anthropic-only**
+  capability with no generic `provider` interface, unlike Files.
+  Multipart `POST /v1/skills` (file part `files[]`, field
+  `display_name`), `anthropic-beta: skills-2025-10-02`. See
+  [Media § Files & skills](docs/core/media.md#files--skills).
 
 **Wave 11**
 

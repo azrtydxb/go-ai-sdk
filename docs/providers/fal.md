@@ -4,16 +4,19 @@
 documented wire format only (see the package doc comment in
 `providers/fal/fal.go`).
 
-fal.ai offers no language models through this package — it only implements
-`provider.ImageModel`, against fal.ai's synchronous `fal.run` image-generation
-endpoint. See [Media: images, speech, transcription](../core/media.md) for
-the `ai.GenerateImage` call shape this provider plugs into.
+fal.ai offers no language models through this package — it implements
+`provider.ImageModel` and `provider.VideoModel`, both against fal.ai's
+synchronous `fal.run` endpoint. See
+[Media: images, video, speech, transcription, translation](../core/media.md)
+for the `ai.GenerateImage`/`ai.GenerateVideo` call shapes this provider
+plugs into.
 
 ```go
 provider := fal.New(
 	fal.WithAPIKey("..."),
 )
 image := provider.ImageModel("fal-ai/flux/schnell")
+video := provider.VideoModel("fal-ai/kling-video/v1/standard/text-to-video")
 ```
 
 `WithAPIKey` defaults to `os.Getenv("FAL_API_KEY")`, falling back to
@@ -28,6 +31,10 @@ request.
 - `Provider.ImageModel(id)` — `provider.ImageModel`: `POST /{modelID}`
   against the configured base URL (e.g. `fal.run/fal-ai/flux/schnell`),
   JSON body, JSON response containing image URLs (or inline `data:` URLs).
+- `Provider.VideoModel(id)` — `provider.VideoModel`: `POST /{modelID}`,
+  same synchronous shape as images. Only `Prompt` and `AspectRatio` are
+  first-class wire fields (see Quirks below); the response accepts either
+  a `{"video":{...}}` object or a `{"videos":[...]}` array.
 - No `Model`, `EmbeddingModel`, `SpeechModel`, or `TranscriptionModel`.
 
 ## Quirks
@@ -56,6 +63,14 @@ request.
 - **`Seed` passthrough, `N` as `num_images`.** `ImageCall.N` maps to
   `num_images`, `ImageCall.Seed` maps to `seed` when non-nil; both are
   omitted from the wire request when unset.
+- **Video: only `Prompt`/`AspectRatio` are first-class fields.** fal's
+  video model catalog has no shared field-name convention for
+  resolution/duration across models, so `VideoCall.Resolution` and
+  `.DurationSec` have no dedicated wire field — reach them via
+  `ProviderOptions["fal"]`, keyed under whatever field name the target
+  model expects. Video downloads use a local `fetchVideo` helper (not
+  `internal/fetchimage`, which is image-specific): `MediaType` is taken
+  from the response's `Content-Type` header, defaulting to `"video/mp4"`.
 
 ## ProviderOptions
 
@@ -87,3 +102,5 @@ JSON request body, winning over whatever the SDK built
 - [`providers/fal/fal.go`](../../providers/fal/fal.go)
 - [`providers/fal/image.go`](../../providers/fal/image.go)
 - [`providers/fal/image_test.go`](../../providers/fal/image_test.go)
+- [`providers/fal/video.go`](../../providers/fal/video.go)
+- [`providers/fal/video_test.go`](../../providers/fal/video_test.go)

@@ -28,33 +28,47 @@ hatch used throughout the pages below) are documented once, generically, in
 ✓ = supported · ✗ = not exposed by this package · ⚠ = supported with a
 caveat, see that provider's page
 
-| Provider | Chat & streaming | Tool calling | Structured output | Embeddings | Reranking | Images | Speech (TTS) | Transcription (STT) |
-|---|---|---|---|---|---|---|---|---|
-| [OpenAI](openai.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✓ | ✓ | ✓ |
-| [Azure OpenAI](azure.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✗ | ✗ | ✗ |
-| [Groq](groq.md) | ✓ | ✓ | ✓ native | ✗ | ✗ | ✗ | ✗ | ✓ |
-| [xAI](xai.md) | ✓ | ✓ | ✓ native | ✗ | ✗ | ✓ ⚠¹ | ✗ | ✗ |
-| [DeepSeek](deepseek.md) | ✓ | ✓ | ⚠² `json_object`-only | ✗ | ✗ | ✗ | ✗ | ✗ |
-| [Cerebras](cerebras.md) | ✓ | ✓ | ✓ native | ✗ | ✗ | ✗ | ✗ | ✗ |
-| [Together](together.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✗ | ✗ | ✗ |
-| [Fireworks](fireworks.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✗ | ✗ | ✗ |
-| [Perplexity](perplexity.md) | ✓ | ⚠³ no live tools | ✓ native | ✗ | ✗ | ✗ | ✗ | ✗ |
-| [Mistral](mistral.md) | ✓ | ✓ | ⚠⁴ schema dropped | ✓ | ✗ | ✗ | ✗ | ✗ |
-| [Cohere](cohere.md) | ✓ | ✓ | ✓ native | ✓ | ✓ | ✗ | ✗ | ✗ |
-| [ElevenLabs](elevenlabs.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ |
-| [Anthropic](anthropic.md) | ✓ | ✓ | ⚠⁵ tool-mode | ✗ | ✗ | ✗ | ✗ | ✗ |
-| [Google](google.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✓ | ✗ | ✗ |
-| [Vertex AI](vertex.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✓ | ✗ | ✗ |
-| [Amazon Bedrock](bedrock.md) | ✓ | ✓ | ⚠⁵ tool-mode | ✓ | ✗ | ✗ | ✗ | ✗ |
-| [fal](fal.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ |
-| [Replicate](replicate.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ |
-| [Luma](luma.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ |
-| [Deepgram](deepgram.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
-| [LMNT](lmnt.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
-| [Hume](hume.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
-| [AssemblyAI](assemblyai.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
-| [Gladia](gladia.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
-| [Rev.ai](revai.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
+| Provider | Chat & streaming | Tool calling | Structured output | Embeddings | Reranking | Images | Video | Speech (TTS) | Transcription (STT) |
+|---|---|---|---|---|---|---|---|---|---|
+| [OpenAI](openai.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✓ | ✗ | ✓ | ✓ ⚠⁶ live |
+| [Azure OpenAI](azure.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| [Groq](groq.md) | ✓ | ✓ | ✓ native | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
+| [xAI](xai.md) | ✓ | ✓ | ✓ native | ✗ | ✗ | ✓ ⚠¹ | ✗ | ✗ | ✗ |
+| [DeepSeek](deepseek.md) | ✓ | ✓ | ⚠² `json_object`-only | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| [Cerebras](cerebras.md) | ✓ | ✓ | ✓ native | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| [Together](together.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| [Fireworks](fireworks.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| [Perplexity](perplexity.md) | ✓ | ⚠³ no live tools | ✓ native | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| [Mistral](mistral.md) | ✓ | ✓ | ⚠⁴ schema dropped | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| [Cohere](cohere.md) | ✓ | ✓ | ✓ native | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ |
+| [ElevenLabs](elevenlabs.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ |
+| [Anthropic](anthropic.md) | ✓ | ✓ | ⚠⁵ tool-mode | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| [Google](google.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ |
+| [Vertex AI](vertex.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ |
+| [Amazon Bedrock](bedrock.md) | ✓ | ✓ | ⚠⁵ tool-mode | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| [fal](fal.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| [Replicate](replicate.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| [Luma](luma.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| [Deepgram](deepgram.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ ⚠⁶ live |
+| [LMNT](lmnt.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
+| [Hume](hume.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
+| [AssemblyAI](assemblyai.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
+| [Gladia](gladia.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
+| [Rev.ai](revai.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
+
+Video (`ai.GenerateVideo`, `provider.VideoModel`) is Luma/fal/Replicate
+this wave — see [Media § GenerateVideo](../core/media.md#generatevideo).
+"Transcription (STT)" above is the REST `ai.Transcribe` capability; ⁶
+marks the two providers (OpenAI, Deepgram) that additionally implement
+**live, bidirectional** streaming transcription
+(`provider.StreamingTranscriptionModel`, `ai.StreamTranscribe`) over a
+WebSocket — not itself a column here since it's not an `ai.Registry`
+capability. `ai.Translate` (English-only audio translation, `provider.TranslationModel`)
+and OpenAI's realtime voice session (`RealtimeSession`) are both
+OpenAI-only and also not `ai.Registry`-backed; `provider.FileStore`
+(`ai.UploadFile`/`DeleteFile`) is implemented by OpenAI and Anthropic,
+likewise outside the registry. See [Media](../core/media.md) for all of
+these.
 
 Reranking (`ai.Rerank`, `provider.RerankingModel`) is Cohere-only this wave;
 Voyage and Mixedbread are planned alongside their providers in a later wave
@@ -172,6 +186,17 @@ each page above carries a "⚠ Not yet verified against the live API" note,
 and their corresponding package doc comments state the same thing. Live
 verification against real API keys should happen before relying on any of
 the nine in production.
+
+The same caveat applies to this wave's new WebSocket-backed endpoints —
+Deepgram's and OpenAI's live streaming transcription, and OpenAI's
+realtime voice session — which carry their own "⚠ Not yet verified" notes
+on [Deepgram](deepgram.md#live-streaming-transcription) and
+[OpenAI](openai.md#realtime-transcription-and-voice-session)'s pages, and
+on OpenAI's new Files/Translation endpoints and Anthropic's new
+Files/Skills endpoints (see [OpenAI](openai.md) and
+[Anthropic](anthropic.md#files-and-skills)). A live/streaming WebSocket
+protocol is the hardest of these to fixture-verify with full confidence —
+prioritize it first if you're doing this verification work.
 
 ## Source of truth
 

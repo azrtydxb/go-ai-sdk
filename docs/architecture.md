@@ -21,8 +21,11 @@ github.com/azrtydxb/go-ai-sdk
 │   └── ...
 ├── internal/        Shared plumbing not part of the public API: SSE
 │   ├── openaicompat/   parsing, retry/backoff, JSON Schema reflection,
-│   ├── geminicompat/    SigV4 signing, Google auth, and the two compat
-│   └── ...              bases (openaicompat, geminicompat — see below)
+│   ├── geminicompat/    SigV4 signing, Google auth, a client-only RFC 6455
+│   ├── websocket/       WebSocket client (underlying the streaming-
+│   └── ...              transcription/realtime features — see
+│                        docs/core/media.md), and the two compat bases
+│                        (openaicompat, geminicompat — see below)
 ├── mcp/             MCP client, independent of the above (produces
 │                    []ai.Tool, doesn't touch LanguageModel)
 └── examples/        Runnable, env-guarded example programs, one per feature
