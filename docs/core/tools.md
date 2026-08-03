@@ -100,6 +100,14 @@ searchTool := ai.NewTool("search", "Search the knowledge base",
   provider's wire format has no equivalent field — see
   [AddToolInputExamplesMiddleware](#addtoolinputexamplesmiddleware) below
   for folding examples into `Description` text on those providers instead.
+  On anthropic, sending `input_examples` requires the
+  `anthropic-beta: advanced-tool-use-2025-11-20` header; the anthropic
+  provider sends this automatically whenever any tool in the outgoing
+  `Call` has a non-empty `InputExamples` (see
+  [`providers/anthropic/language_model.go`](../../providers/anthropic/language_model.go)),
+  so callers don't need to set it themselves. A caller-supplied
+  `anthropic-beta` header via `Call.Headers` takes precedence and is never
+  overridden or duplicated.
 
 Both default to their zero value (`false`/`nil`) when the option isn't
 used, so existing 3-argument `NewTool(name, description, fn)` call sites

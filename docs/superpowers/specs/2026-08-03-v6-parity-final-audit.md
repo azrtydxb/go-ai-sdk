@@ -187,6 +187,42 @@ does not affect the "full v6 core parity" determination, since it isn't
 part of the core generate/stream contract Vercel's own docs treat as v6
 baseline (it's an experimental extension in both SDKs).
 
+## Release procedure: root v0.2.0 + contrib/otel v0.2.0
+
+`contrib/otel/go.mod` currently requires `github.com/azrtydxb/go-ai-sdk
+v0.1.0` (with a dev-only `replace github.com/azrtydxb/go-ai-sdk => ../..`
+that makes the branch build against the local root module regardless of
+that require line). v0.1.0 predates this wave's `OnSpanStart(ctx, ...)`
+signature and `CorrelationID` additions to `ai.Telemetry`/`ai.SpanInfo`,
+so **do not bump the require to `v0.2.0` yet** — no such tag exists, and a
+premature bump would break `go build` for anyone resolving modules
+normally (only the local replace papers over it today).
+
+The tag-time sequence, in order, is:
+
+1. Tag the root module first: `git tag v0.2.0` (on the commit that ships
+   this wave's CHANGELOG entry) and push the tag.
+2. Only after that tag exists, edit `contrib/otel/go.mod`: bump
+   `require github.com/azrtydxb/go-ai-sdk` from `v0.1.0` to `v0.2.0`. The
+   `replace ... => ../..` directive may be kept for local development (it
+   only affects builds run from within this repo checkout) or removed —
+   either way, `go mod tidy` inside `contrib/otel` should be run to verify
+   the require resolves and the go.sum is consistent.
+3. Commit that go.mod/go.sum change, then tag the submodule:
+   `git tag contrib/otel/v0.2.0` and push it.
+
+Until step 3 has happened, external consumers running `go get
+github.com/azrtydxb/go-ai-sdk/contrib/otel` resolve the untagged
+submodule to whatever pseudo-version its latest commit produces, and that
+commit's `go.mod` still requires root `v0.1.0` — which lacks the symbols
+`contrib/otel`'s code calls. Until the bump-and-tag above lands, external
+consumers must either add their own
+`replace github.com/azrtydxb/go-ai-sdk => github.com/azrtydxb/go-ai-sdk
+v0.2.0` (or a local path) in their own go.mod, or depend on a commit
+pseudo-version of `contrib/otel` from after the bump. `contrib/otel/README.md`
+has been corrected to state this accurately instead of claiming
+tagged-consumer resolution works today.
+
 ## Source of truth
 
 - [Migrating from the Vercel AI SDK § AI SDK 6 delta](../../migrating-from-vercel-ai-sdk.md#ai-sdk-6-delta) —

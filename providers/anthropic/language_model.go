@@ -31,7 +31,36 @@ func (m *languageModel) Capabilities() provider.Capabilities {
 // headers from provider.Call.Headers must not be able to override it.
 const anthropicAuthHeader = "x-api-key"
 
-func (m *languageModel) doRequest(ctx context.Context, req messagesRequest, providerOptions map[string]any, headers map[string]string) (*http.Response, error) {
+// toolInputExamplesBetaHeader is the anthropic-beta header value required
+// for the Anthropic Messages API to accept a tool's "input_examples" field
+// (see wire.go's ToolDef.InputExamples serialization). Without this header,
+// a request carrying input_examples on any tool is rejected with a 400.
+const toolInputExamplesBetaHeader = "advanced-tool-use-2025-11-20"
+
+// callToolsNeedInputExamplesBeta reports whether any tool in tools carries a
+// non-empty InputExamples, and therefore requires toolInputExamplesBetaHeader
+// to be sent on the request.
+func callToolsNeedInputExamplesBeta(tools []provider.ToolDef) bool {
+	for _, t := range tools {
+		if len(t.InputExamples) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// headerIsSet reports whether headers already has an entry for key,
+// compared case-insensitively (HTTP header names are case-insensitive).
+func headerIsSet(headers map[string]string, key string) bool {
+	for k := range headers {
+		if strings.EqualFold(k, key) {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *languageModel) doRequest(ctx context.Context, req messagesRequest, providerOptions map[string]any, headers map[string]string, tools []provider.ToolDef) (*http.Response, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: marshal request: %w", err)
@@ -49,6 +78,14 @@ func (m *languageModel) doRequest(ctx context.Context, req messagesRequest, prov
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set(anthropicAuthHeader, m.provider.apiKey)
 	httpReq.Header.Set("anthropic-version", anthropicVersion)
+	// Auto-send the advanced-tool-use beta header when any tool carries
+	// InputExamples, so the wire.go-serialized "input_examples" field is
+	// accepted instead of 400ing. Only set when the caller hasn't already
+	// supplied their own anthropic-beta value via Call.Headers, so the
+	// override loop below always wins.
+	if callToolsNeedInputExamplesBeta(tools) && !headerIsSet(headers, "anthropic-beta") {
+		httpReq.Header.Set("anthropic-beta", toolInputExamplesBetaHeader)
+	}
 	for k, v := range headers {
 		if strings.EqualFold(k, anthropicAuthHeader) {
 			continue
@@ -69,7 +106,7 @@ func (m *languageModel) Generate(ctx context.Context, call provider.Call) (*prov
 		return nil, err
 	}
 
-	resp, err := m.doRequest(ctx, req, call.ProviderOptions, call.Headers)
+	resp, err := m.doRequest(ctx, req, call.ProviderOptions, call.Headers, call.Tools)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +135,7 @@ func (m *languageModel) Stream(ctx context.Context, call provider.Call) (provide
 		return nil, err
 	}
 
-	resp, err := m.doRequest(ctx, req, call.ProviderOptions, call.Headers)
+	resp, err := m.doRequest(ctx, req, call.ProviderOptions, call.Headers, call.Tools)
 	if err != nil {
 		return nil, err
 	}

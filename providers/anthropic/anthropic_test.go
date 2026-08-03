@@ -388,6 +388,108 @@ func TestRequestShapeToolsAndSchema(t *testing.T) {
 	}
 }
 
+// TestRequestShapeInputExamplesBetaHeader verifies that Generate sends the
+// advanced-tool-use beta header when a tool carries InputExamples, so the
+// wire.go-serialized "input_examples" field is accepted by the Messages API
+// instead of 400ing.
+func TestRequestShapeInputExamplesBetaHeader(t *testing.T) {
+	var gotBeta string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBeta = r.Header.Get("anthropic-beta")
+		w.Header().Set("Content-Type", "application/json")
+		resp := messageResponse{
+			Content:    []wireContentBlock{{Type: "text", Text: "hi"}},
+			StopReason: "end_turn",
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	t.Cleanup(srv.Close)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{provider.UserText("simple")},
+		Tools: []provider.ToolDef{{
+			Name:          "get_weather",
+			Schema:        json.RawMessage(`{"type":"object"}`),
+			InputExamples: []json.RawMessage{json.RawMessage(`{"city":"Ghent"}`)},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if gotBeta != toolInputExamplesBetaHeader {
+		t.Errorf("anthropic-beta = %q, want %q", gotBeta, toolInputExamplesBetaHeader)
+	}
+}
+
+// TestRequestShapeNoInputExamplesNoBetaHeader verifies that Generate does
+// NOT send the advanced-tool-use beta header when no tool carries
+// InputExamples, even when tools are present.
+func TestRequestShapeNoInputExamplesNoBetaHeader(t *testing.T) {
+	var gotBeta string
+	var sawHeader bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBeta, sawHeader = r.Header.Get("anthropic-beta"), r.Header.Get("anthropic-beta") != ""
+		w.Header().Set("Content-Type", "application/json")
+		resp := messageResponse{
+			Content:    []wireContentBlock{{Type: "text", Text: "hi"}},
+			StopReason: "end_turn",
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	t.Cleanup(srv.Close)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{provider.UserText("simple")},
+		Tools: []provider.ToolDef{{
+			Name:   "get_weather",
+			Schema: json.RawMessage(`{"type":"object"}`),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if sawHeader {
+		t.Errorf("anthropic-beta = %q, want empty (no tool has InputExamples)", gotBeta)
+	}
+}
+
+// TestRequestShapeInputExamplesBetaHeaderRespectsCallerOverride verifies
+// that a caller-supplied anthropic-beta header via Call.Headers wins over
+// the auto-sent InputExamples beta header, rather than being duplicated or
+// clobbered.
+func TestRequestShapeInputExamplesBetaHeaderRespectsCallerOverride(t *testing.T) {
+	var gotBeta string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBeta = r.Header.Get("anthropic-beta")
+		w.Header().Set("Content-Type", "application/json")
+		resp := messageResponse{
+			Content:    []wireContentBlock{{Type: "text", Text: "hi"}},
+			StopReason: "end_turn",
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	t.Cleanup(srv.Close)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{provider.UserText("simple")},
+		Tools: []provider.ToolDef{{
+			Name:          "get_weather",
+			Schema:        json.RawMessage(`{"type":"object"}`),
+			InputExamples: []json.RawMessage{json.RawMessage(`{"city":"Ghent"}`)},
+		}},
+		Headers: map[string]string{"anthropic-beta": "custom-beta-2099-01-01"},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if gotBeta != "custom-beta-2099-01-01" {
+		t.Errorf("anthropic-beta = %q, want caller override to win", gotBeta)
+	}
+}
+
 func TestRequestShapeToolChoiceModes(t *testing.T) {
 	srv, fs := newFixtureServer(t)
 	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")

@@ -65,7 +65,10 @@ for the closing record.
   honored as `"strict":true` by openaicompat-based providers, ignored
   (no wire param, no error) by anthropic, geminicompat, bedrock, cohere,
   mistral. `InputExamples` is sent natively only by anthropic
-  (`input_examples`); every other provider needs
+  (`input_examples`); the anthropic provider automatically sends the
+  required `anthropic-beta: advanced-tool-use-2025-11-20` header whenever
+  a tool carries `InputExamples`, without the caller needing to set it.
+  Every other provider needs
   `ai.AddToolInputExamplesMiddleware(model)`, which folds each tool's
   examples into its `Description` as text (`"\n\nExample inputs:\n"` plus
   one compact-JSON example per line) and clears `InputExamples`, so a
