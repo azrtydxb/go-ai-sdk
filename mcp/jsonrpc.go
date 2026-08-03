@@ -73,6 +73,11 @@ type Client struct {
 	mu      sync.Mutex
 	pending map[int64]chan rpcResponse
 
+	// serverCaps is the raw "capabilities" object from the server's
+	// "initialize" response, keyed by top-level capability name (e.g.
+	// "resources", "prompts"). Guarded by mu. Nil until Initialize succeeds.
+	serverCaps map[string]json.RawMessage
+
 	// sendMu serializes writes to the transport: Transport only guarantees
 	// safety for one concurrent writer, but Client.call may be invoked by
 	// multiple goroutines at once (concurrent in-flight RPC calls).
