@@ -212,6 +212,18 @@ type GenerateTextOpts struct {
 	// before either of those normal-path outcomes. If the repaired call
 	// fails again — still unknown, or Execute fails again — RepairToolCall
 	// is not invoked a second time for that original call.
+	//
+	// Repair × approval ordering: a bad-args repair is re-checked against
+	// ApprovalRequirer using the REPAIRED call's tool and args before it
+	// executes — not the decision (if any) that let the ORIGINAL call reach
+	// execution. Repair may rename the call to a different tool that
+	// requires approval, or change the args of an already-approved
+	// approval-requiring call (the approval covered the original args, not
+	// the repaired ones); either way, there is no suspension possible
+	// mid-execution, so a repaired call that now requires approval is
+	// recorded as a denial (&ToolApprovalDeniedError{ToolName, Reason:
+	// "approval required for repaired call"} on ToolResultRecord.Err)
+	// rather than executed or silently allowed through.
 	RepairToolCall func(ctx context.Context, call ToolCallRecord, toolErr error) (ToolCallRecord, bool)
 
 	// OnModelCallStart fires immediately before each underlying model

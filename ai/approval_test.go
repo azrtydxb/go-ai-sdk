@@ -458,6 +458,138 @@ func TestLifecycleEventsFiredForDeniedCall(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------
+// Finding 3: repair must re-consult ApprovalRequired on the repaired call
+// ---------------------------------------------------------------------
+
+// TestBadArgsRepairRenamingToApprovalToolIsDenied pins finding 3's
+// rename-repro: RepairToolCall's bad-args repair path may rename a call to a
+// DIFFERENT tool. If that tool now requires approval, executing it directly
+// (as the pre-fix code did) bypasses the approval gate entirely — there is
+// no suspension possible mid-execution, so the repaired call must instead be
+// recorded as a denial.
+func TestBadArgsRepairRenamingToApprovalToolIsDenied(t *testing.T) {
+	var addExecuted, weatherExecuted bool
+	addTool := NewTool("add_tool", "", func(_ context.Context, a weatherArgs) (any, error) {
+		addExecuted = true
+		return "added", nil
+	})
+	guarded := RequireApproval(approvalWeatherTool(&weatherExecuted))
+
+	m := &aitest.MockModel{Responses: []*provider.Response{
+		// "bogus" is not a field of weatherArgs -> strict decode fails with
+		// *InvalidToolArgumentsError, offering RepairToolCall a chance.
+		toolCallResponse("add_tool", "c1", `{"bogus":1}`),
+		{Content: []provider.ContentPart{provider.TextPart{Text: "done"}}, FinishReason: provider.FinishStop},
+	}}
+	res, err := GenerateText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "x", Tools: []Tool{addTool, guarded}, MaxSteps: 2,
+		RepairToolCall: func(_ context.Context, call ToolCallRecord, toolErr error) (ToolCallRecord, bool) {
+			var iae *InvalidToolArgumentsError
+			if errors.As(toolErr, &iae) {
+				return ToolCallRecord{ID: call.ID, Name: "get_weather", Args: []byte(`{"city":"Ghent"}`)}, true
+			}
+			return ToolCallRecord{}, false
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if addExecuted || weatherExecuted {
+		t.Fatal("neither the original nor the repaired-to tool should execute when the repaired call requires approval")
+	}
+	var denied *ToolApprovalDeniedError
+	if !errors.As(res.Steps[0].ToolResults[0].Err, &denied) {
+		t.Fatalf("err = %v, want *ToolApprovalDeniedError", res.Steps[0].ToolResults[0].Err)
+	}
+	if denied.ToolName != "get_weather" {
+		t.Fatalf("denied.ToolName = %q, want get_weather", denied.ToolName)
+	}
+}
+
+// TestBadArgsRepairChangingApprovalToolArgsIsDenied pins finding 3's
+// changed-args repro: the ORIGINAL call already targeted an
+// approval-requiring tool and was approved (for its original args), but
+// RepairToolCall's bad-args repair then changed those args. The approval
+// that was granted covered the original args, not the repaired ones — the
+// repaired call must be re-checked (and, here, re-denied) rather than riding
+// on the stale decision.
+func TestBadArgsRepairChangingApprovalToolArgsIsDenied(t *testing.T) {
+	var weatherExecuted bool
+	guarded := RequireApproval(approvalWeatherTool(&weatherExecuted))
+
+	var approveCalls int
+	m := &aitest.MockModel{Responses: []*provider.Response{
+		// "bogus" is an unknown field -> *InvalidToolArgumentsError from
+		// Execute, even though ApprovalRequired (a permissive partial
+		// unmarshal) still resolves City fine from the same JSON.
+		toolCallResponse("get_weather", "c1", `{"city":"Ghent","bogus":1}`),
+		{Content: []provider.ContentPart{provider.TextPart{Text: "done"}}, FinishReason: provider.FinishStop},
+	}}
+	res, err := GenerateText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "x", Tools: []Tool{guarded}, MaxSteps: 2,
+		ApproveToolCall: func(_ context.Context, req ApprovalRequest) (ApprovalDecision, bool) {
+			approveCalls++
+			return ApprovalDecision{ToolCallID: req.Call.ID, Approved: true}, true
+		},
+		RepairToolCall: func(_ context.Context, call ToolCallRecord, toolErr error) (ToolCallRecord, bool) {
+			var iae *InvalidToolArgumentsError
+			if errors.As(toolErr, &iae) {
+				call.Args = []byte(`{"city":"Bruges"}`)
+				return call, true
+			}
+			return ToolCallRecord{}, false
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if weatherExecuted {
+		t.Fatal("repaired call must not execute: its (changed) args were never approved")
+	}
+	if approveCalls != 1 {
+		t.Fatalf("ApproveToolCall calls = %d, want 1 (only for the original call)", approveCalls)
+	}
+	var denied *ToolApprovalDeniedError
+	if !errors.As(res.Steps[0].ToolResults[0].Err, &denied) {
+		t.Fatalf("err = %v, want *ToolApprovalDeniedError", res.Steps[0].ToolResults[0].Err)
+	}
+}
+
+// TestBadArgsRepairNonApprovalToolStillWorks verifies the fix is scoped:
+// bad-args repair for a tool that never requires approval executes normally
+// even when an unrelated approval-requiring tool is present in Tools.
+func TestBadArgsRepairNonApprovalToolStillWorks(t *testing.T) {
+	guarded := RequireApproval(approvalWeatherTool(nil))
+	plain := NewTool("plain", "", func(_ context.Context, a weatherArgs) (any, error) {
+		return "plain result for " + a.City, nil
+	})
+	m := &aitest.MockModel{Responses: []*provider.Response{
+		toolCallResponse("plain", "c1", `{"bogus":1}`),
+		{Content: []provider.ContentPart{provider.TextPart{Text: "done"}}, FinishReason: provider.FinishStop},
+	}}
+	res, err := GenerateText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "x", Tools: []Tool{plain, guarded}, MaxSteps: 2,
+		RepairToolCall: func(_ context.Context, call ToolCallRecord, toolErr error) (ToolCallRecord, bool) {
+			var iae *InvalidToolArgumentsError
+			if errors.As(toolErr, &iae) {
+				call.Args = []byte(`{"city":"Ghent"}`)
+				return call, true
+			}
+			return ToolCallRecord{}, false
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Steps[0].ToolResults[0].Err != nil {
+		t.Fatalf("err = %v, want nil (non-approval repair unaffected)", res.Steps[0].ToolResults[0].Err)
+	}
+	if res.Steps[0].ToolResults[0].Result != "plain result for Ghent" {
+		t.Fatalf("result = %v", res.Steps[0].ToolResults[0].Result)
+	}
+}
+
+// ---------------------------------------------------------------------
 // Race test on the StreamText suspension path
 // ---------------------------------------------------------------------
 

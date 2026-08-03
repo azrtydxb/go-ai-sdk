@@ -500,8 +500,24 @@ func executeToolCall(ctx context.Context, byName map[string]Tool, c provider.Too
 			rc, ok := repair(ctx, ToolCallRecord{ID: c.ID, Name: c.Name, Args: c.Args}, err)
 			if ok {
 				if rt, known := byName[rc.Name]; known {
-					res, err = rt.Execute(ctx, rc.Args)
 					c.ID, c.Name = rc.ID, rc.Name
+					// The repaired call is re-checked against
+					// ApprovalRequirer before it executes — repair can
+					// rename the call to a different (approval-requiring)
+					// tool, or change the args of an already-approved
+					// approval-requiring call, and either way the
+					// decision that let this call reach executeToolCall
+					// (if any) was made against the ORIGINAL call, not
+					// this one. There is no suspension possible
+					// mid-execution, so a repaired call that now requires
+					// approval is recorded as a denial rather than
+					// executed or silently allowed through. See
+					// GenerateTextOpts.RepairToolCall's doc.
+					if ar, needsApproval := rt.(ApprovalRequirer); needsApproval && ar.ApprovalRequired(ctx, rc.Args) {
+						res, err = nil, &ToolApprovalDeniedError{ToolName: rc.Name, Reason: "approval required for repaired call"}
+					} else {
+						res, err = rt.Execute(ctx, rc.Args)
+					}
 				}
 				// else: repair renamed the call to a tool that isn't in
 				// the active set either; res/err are left as the

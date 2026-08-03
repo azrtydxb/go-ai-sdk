@@ -167,6 +167,27 @@ fails again — still an unknown tool, or `Execute` fails again —
 second failure's normal semantics apply (`*NoSuchToolError` aborts the
 batch, `*InvalidToolArgumentsError` is recorded on the result).
 
+**Repair × approval ordering.** A bad-args repair is re-checked against
+`ApprovalRequirer` using the *repaired* call's tool and args, before it
+executes — never against whatever decision (if any) let the *original* call
+reach execution. Two ways this matters:
+
+- Repair renames the call to a *different* tool that requires approval,
+  while the original tool needed no decision at all.
+- Repair changes the *args* of an already-approved approval-requiring call —
+  the approval that was granted covered the original args, not the repaired
+  ones.
+
+Either way, there is no suspension possible mid-execution — approval
+decisions are only ever resolved before a batch starts executing, not
+partway through one call's repair retry — so a repaired call that now
+requires approval is never executed and never silently allowed through on
+the strength of a stale decision. It is recorded on that call's
+`ToolResultRecord.Err` as `&ai.ToolApprovalDeniedError{ToolName, Reason:
+"approval required for repaired call"}`, the same `IsError`-on-the-wire
+shape as any other denial (see
+[Approvals for tool execution](#approvals-for-tool-execution) below).
+
 ## Multi-modal tool results
 
 A tool's `Execute` may return an `ai.ToolResultContent` (or
