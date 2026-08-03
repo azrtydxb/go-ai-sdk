@@ -134,8 +134,13 @@ func TestExtractJSONMiddleware_Stream_StripsFenceInOneDelta(t *testing.T) {
 		}
 		got += td.Text
 	}
-	if got != `{"a":1}`+"\n" {
-		t.Fatalf("got %q, want %q", got, `{"a":1}`+"\n")
+	// No trailing newline: the "\n" immediately before the closing fence is
+	// whitespace immediately preceding "```", which stripFences' trailing
+	// TrimSpace also removes in Generate — see
+	// TestExtractJSONMiddleware_GenerateStreamParity for the same shape
+	// asserted against Generate directly.
+	if got != `{"a":1}` {
+		t.Fatalf("got %q, want %q", got, `{"a":1}`)
 	}
 	last := parts[len(parts)-1]
 	if !reflect.DeepEqual(last, provider.StreamPart(provider.FinishPart{Reason: provider.FinishStop})) {
@@ -173,8 +178,10 @@ func TestExtractJSONMiddleware_Stream_FenceSplitAcrossDeltas(t *testing.T) {
 	if err := sr.Err(); err != nil {
 		t.Fatalf("stream error: %v", err)
 	}
-	if got != `{"a":1}`+"\n" {
-		t.Fatalf("got %q, want %q", got, `{"a":1}`+"\n")
+	// No trailing newline — see the matching comment in
+	// TestExtractJSONMiddleware_Stream_StripsFenceInOneDelta.
+	if got != `{"a":1}` {
+		t.Fatalf("got %q, want %q", got, `{"a":1}`)
 	}
 }
 
@@ -328,6 +335,207 @@ func TestExtractJSONMiddleware_Stream_TruncatedNoClosingFence(t *testing.T) {
 	}
 	if got != `{"a":1}` {
 		t.Fatalf("got %q, want %q (opening fence stripped, no closing fence to strip)", got, `{"a":1}`)
+	}
+}
+
+// streamText runs text through ExtractJSONMiddleware's Stream path as a
+// single TextDelta and returns the concatenated stripped output. Used by
+// the regression and parity tests below, where the shape of interest is
+// the fence rule itself, not delta chunking.
+func streamText(t *testing.T, text string) string {
+	t.Helper()
+	mock := &aitest.MockModel{
+		Streams: [][]provider.StreamPart{{
+			provider.TextDelta{Text: text},
+			provider.FinishPart{Reason: provider.FinishStop},
+		}},
+	}
+	wrapped := ExtractJSONMiddleware(mock)
+	sr, err := wrapped.Stream(context.Background(), provider.Call{})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var got string
+	for p := range sr.Parts() {
+		if d, ok := p.(provider.TextDelta); ok {
+			got += d.Text
+		}
+	}
+	if err := sr.Err(); err != nil {
+		t.Fatalf("stream error: %v", err)
+	}
+	return got
+}
+
+// streamTextSplit is streamText, but delivers text split across len(chunks)
+// separate TextDeltas (chunks holds the split points, e.g. []int{2, 7} cuts
+// text into three pieces) instead of a single delta — used to verify a
+// fence marker (or tag, or trailing whitespace) split across arbitrary
+// delta boundaries is still recognized correctly.
+func streamTextSplit(t *testing.T, text string, cuts []int) string {
+	t.Helper()
+	var parts []provider.StreamPart
+	prev := 0
+	for _, c := range cuts {
+		parts = append(parts, provider.TextDelta{Text: text[prev:c]})
+		prev = c
+	}
+	parts = append(parts, provider.TextDelta{Text: text[prev:]})
+	parts = append(parts, provider.FinishPart{Reason: provider.FinishStop})
+
+	mock := &aitest.MockModel{Streams: [][]provider.StreamPart{parts}}
+	wrapped := ExtractJSONMiddleware(mock)
+	sr, err := wrapped.Stream(context.Background(), provider.Call{})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var got string
+	for p := range sr.Parts() {
+		if d, ok := p.(provider.TextDelta); ok {
+			got += d.Text
+		}
+	}
+	if err := sr.Err(); err != nil {
+		t.Fatalf("stream error: %v", err)
+	}
+	return got
+}
+
+// generateText runs text through ExtractJSONMiddleware's Generate path and
+// returns the stripped result, for direct comparison against streamText in
+// the parity table below.
+func generateText(t *testing.T, text string) string {
+	t.Helper()
+	mock := &aitest.MockModel{
+		Responses: []*provider.Response{
+			{Content: []provider.ContentPart{provider.TextPart{Text: text}}},
+		},
+	}
+	wrapped := ExtractJSONMiddleware(mock)
+	resp, err := wrapped.Generate(context.Background(), provider.Call{})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	tp, ok := resp.Content[0].(provider.TextPart)
+	if !ok {
+		t.Fatalf("Content[0] = %#v, want TextPart", resp.Content[0])
+	}
+	return tp.Text
+}
+
+// TestExtractJSONMiddleware_Stream_NoNewlineAtAllContentLoss is a regression
+// test for a bug found in a scoped re-review of commit bc2ab7b: a fenced
+// payload with NO newline anywhere ("```json{"a":1}```", single delta) used
+// to stream as "" — the opening-fence handling discarded bytes unbounded
+// until a newline, and none ever arrived, so the entire body was silently
+// lost. Generate (via stripFences) correctly yields `{"a":1}` for the same
+// text.
+func TestExtractJSONMiddleware_Stream_NoNewlineAtAllContentLoss(t *testing.T) {
+	got := streamText(t, "```json{\"a\":1}```")
+	if got != `{"a":1}` {
+		t.Fatalf("got %q, want %q", got, `{"a":1}`)
+	}
+}
+
+// TestExtractJSONMiddleware_Stream_ClosingFenceGluedToContentLeakage is a
+// regression test for the second bug found in that re-review: a closing
+// fence glued directly to content with no preceding newline
+// ("```json\n{\"a\":1}```") used to leak the literal "```" straight into the
+// output, because closing-fence detection only ever looked at line starts.
+func TestExtractJSONMiddleware_Stream_ClosingFenceGluedToContentLeakage(t *testing.T) {
+	got := streamText(t, "```json\n{\"a\":1}```")
+	if got != `{"a":1}` {
+		t.Fatalf("got %q, want %q", got, `{"a":1}`)
+	}
+}
+
+// TestExtractJSONMiddleware_Stream_NoNewlineAtAll_SplitAcrossDeltas covers
+// the no-newline-at-all shape delivered across several TextDeltas, cutting
+// through the opening fence marker, the "json" tag, and the closing fence
+// marker at different points.
+func TestExtractJSONMiddleware_Stream_NoNewlineAtAll_SplitAcrossDeltas(t *testing.T) {
+	text := "```json{\"a\":1}```"
+	cases := [][]int{
+		{1, 2, 3, 7, len(text) - 2, len(text) - 1}, // cut inside opening ticks, tag, and closing ticks
+		{3},             // cut right after the opening fence
+		{7},             // cut right after "json"
+		{len(text) - 3}, // cut right before the closing fence
+	}
+	for _, cuts := range cases {
+		got := streamTextSplit(t, text, cuts)
+		if got != `{"a":1}` {
+			t.Errorf("cuts=%v: got %q, want %q", cuts, got, `{"a":1}`)
+		}
+	}
+}
+
+// TestExtractJSONMiddleware_Stream_ClosingFenceGlued_SplitAcrossDeltas
+// covers the closing-fence-glued-to-content shape delivered across several
+// TextDeltas.
+func TestExtractJSONMiddleware_Stream_ClosingFenceGlued_SplitAcrossDeltas(t *testing.T) {
+	text := "```json\n{\"a\":1}```"
+	cases := [][]int{
+		{1, 2, 3, 8, len(text) - 2, len(text) - 1},
+		{8},             // cut right after the newline, start of body
+		{len(text) - 3}, // cut right before the closing fence
+	}
+	for _, cuts := range cases {
+		got := streamTextSplit(t, text, cuts)
+		if got != `{"a":1}` {
+			t.Errorf("cuts=%v: got %q, want %q", cuts, got, `{"a":1}`)
+		}
+	}
+}
+
+// TestExtractJSONMiddleware_GenerateStreamParity runs a table of fence
+// shapes through BOTH Generate and Stream and asserts they produce
+// IDENTICAL output, directly enforcing the "Stream mirrors Generate's rule
+// as closely as streaming allows" contract rather than checking each path
+// in isolation. Where Stream's one documented, deliberate divergence
+// applies (a truncated stream with an opening fence but no closing one),
+// that case is listed separately below, not in this table.
+func TestExtractJSONMiddleware_GenerateStreamParity(t *testing.T) {
+	cases := []struct {
+		name string
+		text string
+	}{
+		{"no fence", `{"a":1}`},
+		{"standard fenced with newlines", "```json\n{\"a\":1}\n```"},
+		{"fenced, no tag", "```\n{\"a\":1}\n```"},
+		{"no newline at all", "```json{\"a\":1}```"},
+		{"closing fence glued to content", "```json\n{\"a\":1}```"},
+		{"opening fence glued to tag and body, no newline before close, extra trailing ws", "```json{\"a\":1}   ```"},
+		{"prose with embedded fences", "Some prose\n```\ncode\n```\nmore prose"},
+		{"uppercase tag not recognized", "```JSON\n{\"a\":1}\n```"},
+		{"leading whitespace before fence", "  ```json\n{\"a\":1}\n```"},
+		{"fence with trailing whitespace before close", "```json\n{\"a\":1}\n   \n```"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gen := generateText(t, tc.text)
+			stream := streamText(t, tc.text)
+			if gen != stream {
+				t.Errorf("Generate = %q, Stream = %q (want identical)", gen, stream)
+			}
+		})
+	}
+}
+
+// TestExtractJSONMiddleware_GenerateStreamParity_TruncatedDivergence pins
+// the one deliberate, documented divergence between Generate and Stream
+// (see ExtractJSONMiddleware's doc comment): a stream that's truncated
+// before any closing fence appears still has its opening fence stripped,
+// while Generate — which requires both ends to match before stripping
+// either — leaves the whole text untouched.
+func TestExtractJSONMiddleware_GenerateStreamParity_TruncatedDivergence(t *testing.T) {
+	text := "```json\n{\"a\":1}"
+	gen := generateText(t, text)
+	stream := streamText(t, text)
+	if gen != text {
+		t.Errorf("Generate = %q, want unchanged %q (no closing fence, stripFences requires both ends)", gen, text)
+	}
+	if stream != `{"a":1}` {
+		t.Errorf("Stream = %q, want %q (opening fence stripped even though truncated)", stream, `{"a":1}`)
 	}
 }
 

@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"bytes"
 	"context"
 	"iter"
 
@@ -20,25 +21,35 @@ import (
 // fence lines embedded in the middle of otherwise-unfenced prose.
 //
 // Stream strips fences incrementally, mirroring that whole-text rule as
-// closely as streaming allows:
+// closely as streaming allows — and, unlike Generate, with no notion of
+// "lines": a fence marker is recognized purely by the literal three-byte
+// "```" sequence and its position relative to the start/end of the stream,
+// exactly like stripFences looks at the start/end of the (trimmed) string
+// rather than at line boundaries.
 //
-//   - An opening fence line is stripped only when it is the first
-//     non-empty line of the stream (mirroring the leading-fence half of
-//     stripFences) — this can be decided and emitted immediately, no
-//     buffering needed.
-//   - A closing fence line is stripped only when it terminates the
-//     stream — nothing but whitespace follows it before the stream ends
-//     (mirroring the trailing-fence half of stripFences). Since streaming
-//     can't know "nothing follows" until the stream actually ends, a
-//     candidate closing-fence line (plus any whitespace after it) is
-//     buffered rather than emitted immediately; if non-whitespace content
-//     later arrives, the buffered candidate is flushed verbatim as
-//     ordinary text — it wasn't terminal after all — before scanning
-//     resumes from that point.
-//   - Every other "```"-prefixed line — one that is neither the first
-//     non-empty line nor turns out to terminate the stream — passes
-//     through unchanged, same as prose-embedded fences under Generate's
-//     rule.
+//   - An opening fence is resolved once, at the very start of the stream:
+//     any leading whitespace is buffered, and if the first non-whitespace
+//     bytes are "```", that marker is stripped immediately, followed by an
+//     exact, case-sensitive "json" tag if present (mirroring stripFences'
+//     literal strings.TrimPrefix(t, "json") — "```JSON"/"```javascript"
+//     are NOT recognized as a tag and are left as literal text, same as
+//     Generate), followed by any further leading whitespace (mirroring the
+//     final strings.TrimSpace in stripFences). None of this requires a
+//     newline anywhere — "```json{...}```" with no newlines at all is
+//     handled the same as the more common "```json\n{...}\n```".
+//   - A closing fence is only a CANDIDATE until it's known to terminate the
+//     stream: found via the same technique the "```" is searched for
+//     anywhere in the remaining body (not just at a line start), it (and
+//     any whitespace-only bytes after it) is buffered, not emitted, until
+//     either non-whitespace content arrives (the candidate wasn't terminal
+//     after all — flush it verbatim as ordinary text, then resume
+//     scanning for the next "```" from that point) or the stream ends with
+//     nothing but whitespace having followed the candidate (it WAS the
+//     terminal closing fence — discard it, buffered whitespace included).
+//   - Any other "```" occurring in the body — one that isn't part of the
+//     resolved opening and doesn't turn out to be the terminal closing
+//     fence — passes through unchanged, same as prose-embedded fences
+//     under Generate's rule.
 //
 // One divergence from Generate's whole-text rule is unavoidable in
 // streaming: Generate requires BOTH a leading and a trailing fence before
@@ -49,9 +60,9 @@ import (
 // without a matching closing fence — a truncated stream ends up with its
 // opening fence stripped and no closing fence to strip (there being none).
 //
-// A fence marker split across two deltas (e.g. two backticks then
-// "`json\n") is still recognized in both directions, since the relevant
-// undecided prefix carries over between feeds.
+// A fence marker split across any number of deltas is still recognized
+// correctly in both directions, since the relevant undecided/pending bytes
+// carry over between feeds.
 func ExtractJSONMiddleware(model provider.LanguageModel) provider.LanguageModel {
 	return &extractJSONModel{model: model}
 }
@@ -99,9 +110,9 @@ func (m *extractJSONModel) Stream(ctx context.Context, call provider.Call) (prov
 // extractJSONStream wraps a provider.StreamResponse, running its TextDeltas
 // through a fenceScanner and re-emitting whatever it lets through as new
 // TextDelta parts (dropping the delta entirely if the scanner produced no
-// output for it, e.g. it was wholly a fence line). Non-text parts pass
-// through unchanged and reset the scanner's line-start tracking, mirroring
-// ExtractReasoningMiddleware's stream boundary handling.
+// output for it, e.g. it was wholly a fence marker). Non-text parts pass
+// through unchanged and reset the scanner's opening-fence tracking,
+// mirroring ExtractReasoningMiddleware's stream boundary handling.
 type extractJSONStream struct {
 	inner provider.StreamResponse
 }
@@ -149,50 +160,64 @@ func (s *extractJSONStream) Parts() iter.Seq[provider.StreamPart] {
 func (s *extractJSONStream) Err() error   { return s.inner.Err() }
 func (s *extractJSONStream) Close() error { return s.inner.Close() }
 
-// fenceScanner state values.
+// fencePhase values, in the order a stream moves through them (monotonic —
+// a scanner never moves back to an earlier phase). The first four resolve
+// the opening fence once, at the very start of the stream; phaseBody then
+// handles the rest of the stream, including closing-fence detection.
 const (
-	fenceLineStart      = iota // deciding whether the current line starts with "```"
-	fencePassthrough           // mid-line, known not a fence line: pass bytes through
-	fenceOpeningDiscard        // mid the (unconditionally stripped) opening-fence line: discard bytes to end of line
-	fenceCandidateLine         // mid a candidate closing-fence line: buffering bytes to end of line, undecided
-	fenceCandidateHold         // candidate closing-fence line fully read; buffering subsequent bytes pending resolution
+	phaseLeadWS   = iota // buffering leading whitespace, deciding if a "```" opening fence follows
+	phaseOpenTick        // 1-2 backticks seen, deciding if a 3rd completes "```"
+	phaseTagCheck        // opening fence confirmed; buffering up to 4 bytes to check for an exact "json" tag
+	phaseTrailWS         // opening fence (+ "json" tag, if matched) confirmed; discarding whitespace before the body starts
+	phaseBody            // general body scanning, including closing-fence candidate detection
 )
 
-// fenceScanner incrementally strips markdown code-fence lines from a byte
+// fenceMarker is the literal three-backtick fence marker fenceScanner looks
+// for, both at the start of the stream (opening fence) and anywhere in the
+// body (candidate closing fence).
+var fenceMarker = []byte("```")
+
+// fenceScanner incrementally strips markdown code-fence markers from a byte
 // stream, emitting everything else via emit. It mirrors stripFences'
 // whole-text semantics (see ExtractJSONMiddleware's doc comment) as closely
-// as streaming allows:
+// as streaming allows, working purely off the literal "```" byte sequence
+// and its position relative to the start/end of the stream — there is no
+// notion of "lines" here, matching stripFences (which trims and checks
+// prefix/suffix on the whole string, not per line):
 //
-//   - The first non-empty line of the stream, if it starts with "```", is
-//     an opening fence: stripped unconditionally and immediately (no
-//     buffering needed — this decision never depends on what follows).
-//   - Any later line that starts with "```" is only a CANDIDATE closing
-//     fence: it (and any whitespace-only lines/bytes after it) is buffered,
-//     not emitted, until either non-whitespace content arrives (the
-//     candidate wasn't terminal after all — flush it verbatim as ordinary
-//     text, then resume scanning from the triggering byte) or the stream
-//     ends with nothing but whitespace having followed the candidate (it
-//     WAS the terminal closing fence — discard it, buffered whitespace
-//     included).
+//   - Leading whitespace, then (if present) a literal "```" followed by an
+//     exact "json" tag and more whitespace, are all resolved once at the
+//     very start of the stream and, if matched, discarded immediately —
+//     this never depends on what follows, so no buffering beyond the
+//     handful of bytes needed to recognize "```"/"json" themselves is ever
+//     needed for the opening side.
+//   - Once in the body, any "```" found is only a CANDIDATE closing fence:
+//     it (plus any whitespace-only bytes after it) is buffered, not
+//     emitted, until either non-whitespace content arrives (not terminal
+//     after all — flush the candidate verbatim as ordinary text, then keep
+//     scanning for the next "```" from that point) or the stream ends with
+//     nothing but whitespace having followed it (it WAS the terminal
+//     closing fence — discard it, buffered whitespace included).
 //
-// At most one candidate closing-fence line (plus whatever whitespace
+// At most one candidate closing-fence marker (plus whatever whitespace
 // follows it, until resolved) is ever buffered; everything else streams
-// through with no buffering at all.
+// through with no more than a few bytes of lookback.
 type fenceScanner struct {
-	state int
+	phase int
 
-	lineBuf []byte // up to 3 bytes, used in fenceLineStart to detect "```"
+	lead  []byte // phaseLeadWS: buffered leading whitespace, pending resolution
+	ticks []byte // phaseOpenTick: buffered backticks (1-2) seen so far
+	tag   []byte // phaseTagCheck: buffered bytes (<4) being checked against "json"
 
-	beforeFirstLine bool // true until the first non-empty line has begun
-	lineIsFirst     bool // captured beforeFirstLine at the start of the line currently being buffered in lineBuf
-
-	candidate []byte // buffered candidate closing-fence line (+ trailing bytes); used in fenceCandidateLine/fenceCandidateHold
+	buf               []byte // phaseBody: rolling buffer — an unresolved possible-"whitespace*+```" suffix when !candidateActive, or a confirmed candidate span (preceding whitespace + marker + trailing bytes pending resolution) when candidateActive
+	candidateActive   bool
+	candidateMarkerAt int // phaseBody, candidateActive: offset of the "```" marker within buf (bytes before it are held-back preceding whitespace)
 
 	emit func(string)
 }
 
 func newFenceScanner(emit func(string)) *fenceScanner {
-	return &fenceScanner{emit: emit, beforeFirstLine: true}
+	return &fenceScanner{emit: emit}
 }
 
 // isFenceWhitespace reports whether b is one of the ASCII whitespace bytes
@@ -206,125 +231,243 @@ func isFenceWhitespace(b byte) bool {
 	return false
 }
 
+// feed advances the scanner through data, in whichever phase it's currently
+// in. The pre-body phases (leading whitespace / opening "```" / "json" tag /
+// trailing whitespace) are resolved byte-by-byte, since each byte can flip
+// the outcome; once phaseBody is reached (immediately, if the stream never
+// had an opening fence to resolve), any remaining bytes in this call are
+// handed to bodyFeed in bulk.
 func (s *fenceScanner) feed(data []byte) {
-	for _, b := range data {
-		s.step(b)
-	}
-}
-
-func (s *fenceScanner) step(b byte) {
-	switch s.state {
-	case fenceLineStart:
-		if b == '\n' {
-			// A line shorter than 3 bytes can never be a fence marker
-			// ("```" requires exactly 3 backticks): flush whatever was
-			// buffered plus this newline as ordinary text, and stay at
-			// line start for the next line. A wholly empty line (buf still
-			// empty) doesn't resolve beforeFirstLine either way.
-			if len(s.lineBuf) > 0 {
-				s.emit(string(s.lineBuf))
-				s.lineBuf = nil
-				s.beforeFirstLine = false
+	i := 0
+	for i < len(data) && s.phase != phaseBody {
+		b := data[i]
+		i++
+		switch s.phase {
+		case phaseLeadWS:
+			if isFenceWhitespace(b) {
+				s.lead = append(s.lead, b)
+				continue
 			}
-			s.emit("\n")
-			return
-		}
+			if b == '`' {
+				s.ticks = append(s.ticks, b)
+				s.phase = phaseOpenTick
+				continue
+			}
+			// Not a fence: whatever was buffered as possible leading
+			// whitespace, plus this byte, is ordinary text after all.
+			s.emit(string(s.lead) + string(b))
+			s.lead = nil
+			s.phase = phaseBody
 
-		if len(s.lineBuf) == 0 {
-			// This is the first byte of a new line: capture whether THIS
-			// line is the stream's first non-empty line before flipping
-			// the flag — the flip must happen now, not when the 3-byte
-			// fence decision resolves a couple of bytes later, since this
-			// line claims the "first non-empty line" slot regardless of
-			// whether it turns out to be a fence.
-			s.lineIsFirst = s.beforeFirstLine
-			s.beforeFirstLine = false
-		}
+		case phaseOpenTick:
+			if b == '`' {
+				s.ticks = append(s.ticks, b)
+				if len(s.ticks) == 3 {
+					// Confirmed opening fence marker: the leading
+					// whitespace and the marker itself are both discarded,
+					// mirroring stripFences' TrimSpace + TrimPrefix("```").
+					s.lead = nil
+					s.ticks = nil
+					s.phase = phaseTagCheck
+				}
+				continue
+			}
+			// Fewer than 3 backticks, followed by something else: not a
+			// fence marker after all. Flush the buffered whitespace,
+			// backticks, and this byte, verbatim.
+			s.emit(string(s.lead) + string(s.ticks) + string(b))
+			s.lead = nil
+			s.ticks = nil
+			s.phase = phaseBody
 
-		s.lineBuf = append(s.lineBuf, b)
-		if len(s.lineBuf) < 3 {
-			return
-		}
-
-		if string(s.lineBuf) == "```" {
-			s.lineBuf = nil
-			if s.lineIsFirst {
-				s.state = fenceOpeningDiscard
+		case phaseTagCheck:
+			if len(s.tag) == 0 && isFenceWhitespace(b) {
+				// The very first byte right after the opening fence is
+				// whitespace: "json" can never match (it starts with 'j'),
+				// and per stripFences' final TrimSpace this whitespace (and
+				// any more that follows) is trimmed away rather than kept
+				// as literal content — reprocess it as trailing whitespace
+				// instead of buffering it as a (doomed) tag attempt.
+				s.phase = phaseTrailWS
+				i--
+				continue
+			}
+			s.tag = append(s.tag, b)
+			if len(s.tag) < 4 {
+				continue
+			}
+			if string(s.tag) == "json" {
+				// Exact, case-sensitive match, mirroring
+				// strings.TrimPrefix(t, "json") — "JSON"/"jsonl"/anything
+				// else is NOT a recognized tag and is left as literal text
+				// (the else branch below), same as Generate.
+				s.tag = nil
+				s.phase = phaseTrailWS
 			} else {
-				s.candidate = append(s.candidate, '`', '`', '`')
-				s.state = fenceCandidateLine
+				s.emit(string(s.tag))
+				s.tag = nil
+				s.phase = phaseBody
 			}
-		} else {
-			flushed := string(s.lineBuf)
-			s.lineBuf = nil
-			s.emit(flushed)
-			s.state = fencePassthrough
-		}
 
-	case fencePassthrough:
-		s.emit(string(b))
-		if b == '\n' {
-			s.state = fenceLineStart
+		case phaseTrailWS:
+			if isFenceWhitespace(b) {
+				continue // discarded, mirroring the final TrimSpace in stripFences
+			}
+			s.phase = phaseBody
+			i-- // reprocess this (non-whitespace) byte as the start of the body
 		}
-
-	case fenceOpeningDiscard:
-		if b == '\n' {
-			s.state = fenceLineStart
-		}
-		// Every other byte on the opening-fence line is discarded, whether
-		// or not it's part of a "json" suffix.
-
-	case fenceCandidateLine:
-		s.candidate = append(s.candidate, b)
-		if b == '\n' {
-			s.state = fenceCandidateHold
-		}
-
-	case fenceCandidateHold:
-		if isFenceWhitespace(b) {
-			s.candidate = append(s.candidate, b)
-			return
-		}
-		// Non-whitespace content arrived: the buffered candidate was not,
-		// after all, the terminal closing fence. Flush it verbatim as
-		// ordinary text, then reprocess b fresh from the resulting
-		// position — mid-line if the candidate's last byte wasn't a
-		// newline, otherwise at a new line's start (so b itself is
-		// eligible to begin a fresh candidate).
-		flushed := string(s.candidate)
-		atLineStart := len(s.candidate) == 0 || s.candidate[len(s.candidate)-1] == '\n'
-		s.candidate = nil
-		s.emit(flushed)
-		if atLineStart {
-			s.state = fenceLineStart
-		} else {
-			s.state = fencePassthrough
-		}
-		s.step(b)
+	}
+	if i < len(data) && s.phase == phaseBody {
+		s.bodyFeed(data[i:])
 	}
 }
 
-// finish flushes or discards whatever's pending at the end of input:
+// bodyFeed scans data for "```" occurrences (anywhere, not line-anchored),
+// flushing safe text immediately and buffering only:
 //
-//   - fenceLineStart with a short undecided prefix buffered (fewer than 3
-//     bytes, no newline yet) can never complete into a fence line: it is
-//     emitted as ordinary text, verbatim.
-//   - fenceCandidateLine/fenceCandidateHold means a candidate closing-fence
-//     line (plus, in the Hold case, only whitespace) reached the end of the
-//     stream with nothing else following it — it IS the terminal closing
-//     fence, so it (and any buffered trailing whitespace) is discarded,
+//   - when candidateActive is false: an unresolved suffix that could still
+//     turn into "whitespace* + ```" once more data arrives (candidateMarkerAt
+//     is unused in this state);
+//   - when candidateActive is true: a confirmed candidate closing-fence
+//     span — any whitespace immediately BEFORE the "```" (mirroring
+//     stripFences' TrimSpace trimming trailing whitespace immediately
+//     before the removed suffix), the marker itself (at offset
+//     candidateMarkerAt within buf), and any whitespace observed AFTER it
+//     so far (mirroring TrimSpace's leading-trim on whatever, if anything,
+//     came after — here, nothing may ever come after, which is what makes
+//     it terminal).
+//
+// Preceding whitespace must be held back speculatively (not flushed as soon
+// as it's seen) because it might turn out to immediately precede a "```"
+// arriving in a later delta — by the time that marker is found, already-
+// flushed bytes can no longer be un-flushed.
+func (s *fenceScanner) bodyFeed(data []byte) {
+	s.buf = append(s.buf, data...)
+	for {
+		if s.candidateActive {
+			i := s.candidateMarkerAt + len(fenceMarker)
+			for i < len(s.buf) && isFenceWhitespace(s.buf[i]) {
+				i++
+			}
+			if i == len(s.buf) {
+				// Still unresolved (marker, possibly followed by
+				// whitespace only, with no non-whitespace byte seen yet):
+				// wait for more data.
+				return
+			}
+			// s.buf[i] is non-whitespace: the candidate was not, after
+			// all, the terminal closing fence. Flush the whole span
+			// (preceding whitespace + marker + following whitespace)
+			// verbatim, then keep scanning for the next "```" starting
+			// from the triggering byte.
+			flushed := string(s.buf[:i])
+			rest := append([]byte(nil), s.buf[i:]...)
+			s.buf = rest
+			s.candidateActive = false
+			s.candidateMarkerAt = 0
+			s.emit(flushed)
+			continue
+		}
+
+		idx := bytes.Index(s.buf, fenceMarker)
+		if idx >= 0 {
+			// Extend the candidate span backward over any whitespace run
+			// immediately preceding the marker — that whitespace's fate
+			// (discarded vs. flushed) is decided together with the
+			// marker's, not before.
+			start := idx
+			for start > 0 && isFenceWhitespace(s.buf[start-1]) {
+				start--
+			}
+			if start > 0 {
+				s.emit(string(s.buf[:start]))
+			}
+			s.buf = s.buf[start:]
+			s.candidateMarkerAt = idx - start
+			s.candidateActive = true
+			continue
+		}
+
+		// No complete "```" found yet. The unresolved tail that must be
+		// held back is: an incomplete backtick-prefix of the marker (0-2
+		// trailing backticks — 3 would have been found above), plus any
+		// whitespace run immediately before THAT, since a "```" arriving
+		// in a later delta could turn that whitespace into a preceding-
+		// candidate span too.
+		end := len(s.buf)
+		tickStart := end
+		for tickStart > 0 && s.buf[tickStart-1] == '`' && end-tickStart < len(fenceMarker)-1 {
+			tickStart--
+		}
+		wsStart := tickStart
+		for wsStart > 0 && isFenceWhitespace(s.buf[wsStart-1]) {
+			wsStart--
+		}
+		if wsStart > 0 {
+			s.emit(string(s.buf[:wsStart]))
+		}
+		s.buf = s.buf[wsStart:]
+		return
+	}
+}
+
+// finish flushes or discards whatever's pending at the end of input,
+// resolving whichever phase the scanner is currently in:
+//
+//   - phaseLeadWS/phaseOpenTick: the buffered whitespace/backticks never
+//     completed into a fence marker (or the stream ended before 3
+//     backticks were confirmed) — emitted as ordinary text, verbatim.
+//   - phaseTagCheck: a confirmed opening fence was followed by fewer than 4
+//     more bytes, too few to be conclusively "json" or not — emitted as
+//     ordinary text, verbatim (it can't have been the "json" tag).
+//   - phaseTrailWS: only whitespace followed a confirmed opening fence (or
+//     "```json" tag) before the stream ended — fully absorbed, nothing to
+//     flush, mirroring stripFences' TrimSpace.
+//   - phaseBody: delegated to bodyFinish.
+func (s *fenceScanner) finish() {
+	switch s.phase {
+	case phaseLeadWS:
+		if len(s.lead) > 0 {
+			s.emit(string(s.lead))
+			s.lead = nil
+		}
+	case phaseOpenTick:
+		if len(s.lead) > 0 || len(s.ticks) > 0 {
+			s.emit(string(s.lead) + string(s.ticks))
+			s.lead = nil
+			s.ticks = nil
+		}
+	case phaseTagCheck:
+		if len(s.tag) > 0 {
+			s.emit(string(s.tag))
+			s.tag = nil
+		}
+	case phaseTrailWS:
+		// Nothing buffered in this phase; whitespace is discarded as it's
+		// consumed in feed.
+	case phaseBody:
+		s.bodyFinish()
+	}
+}
+
+// bodyFinish resolves whatever bodyFeed left pending at the end of input:
+//
+//   - candidateActive: the buffered "```" (plus any whitespace since)
+//     reached the end of the stream with nothing else following — it IS
+//     the terminal closing fence, so it's discarded, whitespace included,
 //     mirroring stripFences removing the trailing "```" and the whitespace
 //     TrimSpace would have absorbed around it.
-//   - fencePassthrough/fenceOpeningDiscard have nothing buffered (already
-//     emitted or already discarded byte-by-byte) — nothing to do.
-func (s *fenceScanner) finish() {
-	switch s.state {
-	case fenceLineStart:
-		if len(s.lineBuf) > 0 {
-			s.emit(string(s.lineBuf))
-			s.lineBuf = nil
-		}
-	case fenceCandidateLine, fenceCandidateHold:
-		s.candidate = nil
+//   - otherwise: whatever's left in buf is an unresolved "```"-prefix that
+//     never completed (e.g. a lone "“" at the very end) — emitted as
+//     ordinary text, verbatim.
+func (s *fenceScanner) bodyFinish() {
+	if s.candidateActive {
+		s.buf = nil
+		s.candidateActive = false
+		return
+	}
+	if len(s.buf) > 0 {
+		s.emit(string(s.buf))
+		s.buf = nil
 	}
 }
