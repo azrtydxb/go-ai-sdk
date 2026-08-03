@@ -49,6 +49,7 @@ exists — the SDK's public API is implemented and documented end-to-end (see
 
 ## Reference
 
+- [Troubleshooting](troubleshooting.md) — auth failures, structured-output errors, streaming and tool-calling issues, MCP debugging
 - [Migrating from the Vercel AI SDK](migrating-from-vercel-ai-sdk.md)
 - [Architecture](architecture.md)
 - [Changelog](../CHANGELOG.md) — release history

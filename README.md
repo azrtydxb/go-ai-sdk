@@ -141,7 +141,8 @@ in [`examples/`](examples/), each compiled by CI.
   [Telemetry](docs/core/telemetry.md) · [MCP](docs/mcp.md)
 - **Providers**: [overview and capability matrix](docs/providers/README.md),
   plus one page per vendor under [`docs/providers/`](docs/providers/)
-- **Reference**: [Migrating from the Vercel AI SDK](docs/migrating-from-vercel-ai-sdk.md) ·
+- **Reference**: [Troubleshooting](docs/troubleshooting.md) ·
+  [Migrating from the Vercel AI SDK](docs/migrating-from-vercel-ai-sdk.md) ·
   [Architecture](docs/architecture.md)
 - [`docs/README.md`](docs/README.md) is the full index of the tree above.
 
