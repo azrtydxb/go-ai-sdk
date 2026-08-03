@@ -73,17 +73,17 @@ func Rerank(ctx context.Context, opts RerankOpts) (*RerankResult, error) {
 			ProviderOptions: opts.ProviderOptions,
 		})
 	})
+	callErr := translateRetryErr(err)
 
 	if opts.OnRerankEnd != nil {
-		opts.OnRerankEnd(resp, err)
+		// OnRerankEnd sees the SAME error the caller gets (callErr, the
+		// translated *RetryError on retry exhaustion) — not the raw
+		// *retry.ExhaustedError from retry.Do.
+		opts.OnRerankEnd(resp, callErr)
 	}
 
-	if err != nil {
-		var exhausted *retry.ExhaustedError
-		if errors.As(err, &exhausted) {
-			return nil, &RetryError{Attempts: exhausted.Attempts, LastErr: exhausted.LastErr}
-		}
-		return nil, err
+	if callErr != nil {
+		return nil, callErr
 	}
 
 	results := make([]RankedDocument, 0, len(resp.Results))

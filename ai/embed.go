@@ -22,6 +22,15 @@ type EmbedOpts struct {
 	// semantics. It only has an effect when Model implements
 	// provider.EmbeddingModelWithOptions; it is silently ignored otherwise.
 	ProviderOptions map[string]any
+
+	// OnEmbedStart, when non-nil, fires once before the first attempt of
+	// the underlying provider call.
+	OnEmbedStart func(values []string)
+	// OnEmbedEnd, when non-nil, fires once after the final attempt (success
+	// or retry exhaustion). err, when non-nil, is the SAME error Embed
+	// itself returns (retry exhaustion translated to *RetryError). resp is
+	// nil on error.
+	OnEmbedEnd func(resp *provider.EmbeddingResponse, err error)
 }
 
 // EmbedResult is the outcome of an Embed call.
@@ -42,15 +51,21 @@ func Embed(ctx context.Context, opts EmbedOpts) (*EmbedResult, error) {
 		maxRetries = *opts.MaxRetries
 	}
 
+	values := []string{opts.Value}
+	if opts.OnEmbedStart != nil {
+		opts.OnEmbedStart(values)
+	}
+
 	resp, err := retry.Do(ctx, maxRetries, func() (*provider.EmbeddingResponse, error) {
-		return embedCall(ctx, opts.Model, []string{opts.Value}, opts.ProviderOptions)
+		return embedCall(ctx, opts.Model, values, opts.ProviderOptions)
 	})
-	if err != nil {
-		var exhausted *retry.ExhaustedError
-		if errors.As(err, &exhausted) {
-			return nil, &RetryError{Attempts: exhausted.Attempts, LastErr: exhausted.LastErr}
-		}
-		return nil, err
+	callErr := translateRetryErr(err)
+
+	if opts.OnEmbedEnd != nil {
+		opts.OnEmbedEnd(resp, callErr)
+	}
+	if callErr != nil {
+		return nil, callErr
 	}
 
 	if len(resp.Embeddings) < 1 {
@@ -73,6 +88,17 @@ type EmbedManyOpts struct {
 	// semantics. It only has an effect when Model implements
 	// provider.EmbeddingModelWithOptions; it is silently ignored otherwise.
 	ProviderOptions map[string]any
+
+	// OnEmbedStart, when non-nil, fires once per underlying provider call —
+	// once per batch, in batch order — before the first attempt of that
+	// batch.
+	OnEmbedStart func(values []string)
+	// OnEmbedEnd, when non-nil, fires once per batch (in batch order) after
+	// the final attempt of that batch (success or retry exhaustion). err,
+	// when non-nil, is the SAME error EmbedMany itself returns for that
+	// failure (retry exhaustion translated to *RetryError). resp is nil on
+	// error.
+	OnEmbedEnd func(resp *provider.EmbeddingResponse, err error)
 }
 
 // embedCall calls model.Embed, or model.EmbedCall (with providerOptions)
@@ -131,15 +157,20 @@ func EmbedMany(ctx context.Context, opts EmbedManyOpts) (*EmbedManyResult, error
 		}
 		batch := opts.Values[i:end]
 
+		if opts.OnEmbedStart != nil {
+			opts.OnEmbedStart(batch)
+		}
+
 		resp, err := retry.Do(ctx, maxRetries, func() (*provider.EmbeddingResponse, error) {
 			return embedCall(ctx, opts.Model, batch, opts.ProviderOptions)
 		})
-		if err != nil {
-			var exhausted *retry.ExhaustedError
-			if errors.As(err, &exhausted) {
-				return nil, &RetryError{Attempts: exhausted.Attempts, LastErr: exhausted.LastErr}
-			}
-			return nil, err
+		callErr := translateRetryErr(err)
+
+		if opts.OnEmbedEnd != nil {
+			opts.OnEmbedEnd(resp, callErr)
+		}
+		if callErr != nil {
+			return nil, callErr
 		}
 
 		// Validate that the model returned the expected number of embeddings

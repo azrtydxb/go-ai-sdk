@@ -187,6 +187,59 @@ type GenerateTextOpts struct {
 	// fails again — still unknown, or Execute fails again — RepairToolCall
 	// is not invoked a second time for that original call.
 	RepairToolCall func(ctx context.Context, call ToolCallRecord, toolErr error) (ToolCallRecord, bool)
+
+	// OnModelCallStart fires immediately before each underlying model
+	// request (once per step, in both GenerateText and StreamText), with
+	// the step index (0-based) and the exact provider.Call about to be
+	// sent. It fires exactly once per step, outside the retry loop — before
+	// the FIRST attempt, regardless of how many retries that step's call
+	// ends up needing.
+	OnModelCallStart func(stepIndex int, call provider.Call)
+	// OnModelCallEnd fires when the model request for a step completes —
+	// exactly once, after the FINAL attempt (success or retry exhaustion),
+	// pairing with OnModelCallStart.
+	//
+	// In GenerateText, Response is the provider response (nil on error),
+	// and Err — when non-nil — is the SAME error GenerateText itself
+	// returns for that failure (retry exhaustion is translated to
+	// *RetryError before this callback sees it, never the raw
+	// retry-internal error).
+	//
+	// In StreamText, Response is always nil (there is no single Response
+	// value for a stream); Usage/FinishReason carry what the step's
+	// FinishPart reported (zero values if the step's stream errored before
+	// a FinishPart arrived). On StreamText's abort path — see OnAbort: the
+	// consumer abandoning iteration early, or ctx cancellation causing the
+	// termination — OnModelCallEnd does NOT fire for that step; OnAbort
+	// covers it instead, so every step's Start/End pair either both fire or
+	// (on the abort path) neither Err-bearing End fires alone without an
+	// abort signal.
+	OnModelCallEnd func(end ModelCallEnd)
+	// OnToolExecutionStart fires before each tool Execute (after the call
+	// has been validated/repaired into a known tool, before the tool
+	// runs). OnToolExecutionEnd fires after, with the result record and the
+	// raw execution error (nil on success; note the loop also reports tool
+	// errors through the result record's Err field, which mirrors this
+	// argument). Both fire exactly once per tool call record: when
+	// RepairToolCall retries a failed Execute, that whole
+	// execute-and-maybe-repair sequence counts as one execution, not two —
+	// there is one Start/End pair per original tool call, not one per
+	// attempt. Neither callback fires for a call that never reaches
+	// Execute at all (e.g. one that aborts the whole batch as an unknown
+	// tool with no successful repair).
+	OnToolExecutionStart func(stepIndex int, call ToolCallRecord)
+	OnToolExecutionEnd   func(stepIndex int, result ToolResultRecord, err error)
+}
+
+// ModelCallEnd is the argument to GenerateTextOpts.OnModelCallEnd — see that
+// field's doc for how its fields are populated differently between
+// GenerateText and StreamText.
+type ModelCallEnd struct {
+	StepIndex    int
+	Response     *provider.Response // GenerateText only
+	Usage        provider.Usage
+	FinishReason provider.FinishReason
+	Err          error
 }
 
 // StepCountIs returns a StopWhen function that stops the tool loop once at

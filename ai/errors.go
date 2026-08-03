@@ -2,7 +2,10 @@ package ai
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+
+	"github.com/azrtydxb/go-ai-sdk/internal/retry"
 )
 
 // APICallError represents an error from an AI provider API call.
@@ -110,4 +113,24 @@ func (e *RetryError) Error() string {
 // Unwrap implements the error unwrapping interface.
 func (e *RetryError) Unwrap() error {
 	return e.LastErr
+}
+
+// translateRetryErr translates err as returned by retry.Do into the same
+// error a caller-facing function (Rerank, Embed, EmbedMany, GenerateText,
+// StreamText) ultimately returns: a *retry.ExhaustedError becomes a
+// *RetryError; any other error (including nil) passes through unchanged.
+//
+// This is the single place that implements the lifecycle-callback
+// convention: an End callback (OnRerankEnd, OnEmbedEnd, OnModelCallEnd) must
+// see the SAME error value the caller gets, never the raw retry-internal
+// *retry.ExhaustedError.
+func translateRetryErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	var exhausted *retry.ExhaustedError
+	if errors.As(err, &exhausted) {
+		return &RetryError{Attempts: exhausted.Attempts, LastErr: exhausted.LastErr}
+	}
+	return err
 }

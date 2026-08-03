@@ -83,8 +83,20 @@ func StreamText(ctx context.Context, opts GenerateTextOpts) (*TextStream, error)
 		}
 	}
 
+	if opts.OnModelCallStart != nil {
+		opts.OnModelCallStart(0, call)
+	}
 	stream, err := startStream(ctx, s.model, call, call.Messages, maxRetries)
 	if err != nil {
+		// No *TextStream has been returned to a caller yet at this point,
+		// so there is no possibility of the OnAbort path applying here (it
+		// requires an existing TextStream) — unlike the in-loop failures
+		// below, this End always fires unconditionally on failure. On
+		// success, End does NOT fire here: it fires later, from Parts(),
+		// once step 0's FinishPart is actually observed.
+		if opts.OnModelCallEnd != nil {
+			opts.OnModelCallEnd(ModelCallEnd{StepIndex: 0, Err: err})
+		}
 		return nil, err
 	}
 	s.current = stream
@@ -126,6 +138,7 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 			if stream == nil {
 				return
 			}
+			stepIndex := len(s.steps)
 
 			var text string
 			var reasoningText string
@@ -200,10 +213,12 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 				s.err = err
 				_ = stream.Close()
 				s.current = nil
+				s.fireModelCallEnd(ModelCallEnd{StepIndex: stepIndex, Err: err})
 				s.reportAbortOrError(err)
 				return
 			}
 			_ = stream.Close()
+			s.fireModelCallEnd(ModelCallEnd{StepIndex: stepIndex, Usage: finish.Usage, FinishReason: finish.Reason})
 
 			// Fill in any tool calls that only arrived as deltas (no
 			// ToolCallEnd), using the accumulated ArgsDelta as fallback.
@@ -287,7 +302,7 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 			hasToolCalls := len(toolCalls) > 0
 
 			if hasToolCalls {
-				results, err := runToolCalls(s.ctx, s.opts.Tools, toolCalls, s.activeTools, s.opts.RepairToolCall)
+				results, err := runToolCalls(s.ctx, s.opts.Tools, toolCalls, s.activeTools, s.opts.RepairToolCall, stepIndex, s.opts.OnToolExecutionStart, s.opts.OnToolExecutionEnd)
 				if err != nil {
 					s.err = err
 					step.ToolResults = nil
@@ -355,10 +370,15 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 					}
 				}
 			}
+			nextStepIndex := len(s.steps)
+			if s.opts.OnModelCallStart != nil {
+				s.opts.OnModelCallStart(nextStepIndex, call)
+			}
 			next, err := startStream(s.ctx, s.model, call, call.Messages, s.maxRetries)
 			if err != nil {
 				s.err = err
 				s.current = nil
+				s.fireModelCallEnd(ModelCallEnd{StepIndex: nextStepIndex, Err: err})
 				s.reportAbortOrError(err)
 				return
 			}
@@ -401,6 +421,24 @@ func (s *TextStream) reportAbortOrError(err error) {
 	if s.opts.OnError != nil {
 		s.opts.OnError(err)
 	}
+}
+
+// fireModelCallEnd invokes opts.OnModelCallEnd, if set, for a step's model
+// call within the tool loop (i.e. everywhere except the very first call,
+// which StreamText itself handles before any *TextStream exists to abort).
+// When end.Err is non-nil AND s.ctx is canceled, it does NOT fire — that
+// termination is instead reported solely via OnAbort (see
+// GenerateTextOpts.OnModelCallEnd and OnAbort), mirroring the same
+// ctx-cancellation check reportAbortOrError performs for OnError. When
+// end.Err is nil (the step's model call succeeded), it always fires.
+func (s *TextStream) fireModelCallEnd(end ModelCallEnd) {
+	if s.opts.OnModelCallEnd == nil {
+		return
+	}
+	if end.Err != nil && s.ctx.Err() != nil {
+		return
+	}
+	s.opts.OnModelCallEnd(end)
 }
 
 // fireAbort invokes opts.OnAbort, if set, the first time it is called for

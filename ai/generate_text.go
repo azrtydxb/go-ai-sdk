@@ -134,15 +134,27 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 			}
 		}
 
+		if opts.OnModelCallStart != nil {
+			opts.OnModelCallStart(stepIndex, stepCall)
+		}
+
 		resp, err := retry.Do(ctx, maxRetries, func() (*provider.Response, error) {
 			return model.Generate(ctx, stepCall)
 		})
-		if err != nil {
-			var exhausted *retry.ExhaustedError
-			if errors.As(err, &exhausted) {
-				return fail(&RetryError{Attempts: exhausted.Attempts, LastErr: exhausted.LastErr})
+		callErr := translateRetryErr(err)
+
+		if opts.OnModelCallEnd != nil {
+			end := ModelCallEnd{StepIndex: stepIndex, Err: callErr}
+			if callErr == nil {
+				end.Response = resp
+				end.Usage = resp.Usage
+				end.FinishReason = resp.FinishReason
 			}
-			return fail(err)
+			opts.OnModelCallEnd(end)
+		}
+
+		if callErr != nil {
+			return fail(callErr)
 		}
 
 		step := buildStep(resp)
@@ -172,7 +184,7 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 		}
 
 		if hasToolCalls {
-			results, err := runToolCalls(ctx, opts.Tools, toolCalls, active, opts.RepairToolCall)
+			results, err := runToolCalls(ctx, opts.Tools, toolCalls, active, opts.RepairToolCall, stepIndex, opts.OnToolExecutionStart, opts.OnToolExecutionEnd)
 			if err != nil {
 				return fail(err)
 			}
@@ -277,7 +289,7 @@ type repairFunc func(ctx context.Context, call ToolCallRecord, toolErr error) (T
 // again. A *ToolExecutionError, or any InvalidToolArgumentsError when repair
 // is nil or declines, is recorded on ToolResultRecord.Err rather than
 // aborting.
-func runToolCalls(ctx context.Context, tools []Tool, calls []provider.ToolCallPart, active map[string]bool, repair repairFunc) ([]ToolResultRecord, error) {
+func runToolCalls(ctx context.Context, tools []Tool, calls []provider.ToolCallPart, active map[string]bool, repair repairFunc, stepIndex int, onStart func(int, ToolCallRecord), onEnd func(int, ToolResultRecord, error)) ([]ToolResultRecord, error) {
 	byName := make(map[string]Tool, len(tools))
 	for _, t := range tools {
 		if active != nil && !active[t.Name()] {
@@ -310,6 +322,9 @@ func runToolCalls(ctx context.Context, tools []Tool, calls []provider.ToolCallPa
 	results := make([]ToolResultRecord, 0, len(resolved))
 	for _, c := range resolved {
 		t := byName[c.Name]
+		if onStart != nil {
+			onStart(stepIndex, ToolCallRecord{ID: c.ID, Name: c.Name, Args: c.Args})
+		}
 		res, err := t.Execute(ctx, c.Args)
 		if err != nil && repair != nil {
 			var iae *InvalidToolArgumentsError
@@ -329,12 +344,16 @@ func runToolCalls(ctx context.Context, tools []Tool, calls []provider.ToolCallPa
 				}
 			}
 		}
-		results = append(results, ToolResultRecord{
+		result := ToolResultRecord{
 			ToolCallID: c.ID,
 			Name:       c.Name,
 			Result:     res,
 			Err:        err,
-		})
+		}
+		if onEnd != nil {
+			onEnd(stepIndex, result, err)
+		}
+		results = append(results, result)
 	}
 	return results, nil
 }

@@ -94,7 +94,7 @@ func TestRunToolCallsValidatesBeforeExecuting(t *testing.T) {
 		{ID: "c1", Name: "known", Args: []byte(`{"city":"x"}`)},
 		{ID: "c2", Name: "unknown", Args: []byte(`{}`)},
 	}
-	_, err := runToolCalls(t.Context(), []Tool{known}, calls, nil, nil)
+	_, err := runToolCalls(t.Context(), []Tool{known}, calls, nil, nil, 0, nil, nil)
 	var nst *NoSuchToolError
 	if !errors.As(err, &nst) || nst.ToolName != "unknown" {
 		t.Fatalf("err = %v", err)
