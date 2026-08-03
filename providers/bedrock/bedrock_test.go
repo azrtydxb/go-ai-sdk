@@ -807,6 +807,32 @@ func TestRequestShape_ToolResultMultiModal(t *testing.T) {
 	}
 }
 
+// TestToolResultContentPointerVariant verifies toolResultContent handles a
+// *ai.ToolResultContent (not just the value type) the same way as the value
+// type, and that a nil *ai.ToolResultContent degrades to a single empty
+// text entry rather than panicking.
+func TestToolResultContentPointerVariant(t *testing.T) {
+	v := &ai.ToolResultContent{Text: "hi", Images: []provider.GeneratedImage{
+		{Data: []byte("x"), MediaType: "image/png"},
+	}}
+	got, err := toolResultContent(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got = %#v, want 2 entries", got)
+	}
+
+	var nilPtr *ai.ToolResultContent
+	got, err = toolResultContent(nilPtr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Text != "" {
+		t.Errorf("nil *ai.ToolResultContent: got = %#v, want single empty-text entry", got)
+	}
+}
+
 // TestRequestShapeUserMessageFilePartPDF verifies a PDF FilePart becomes a
 // Converse "document" content block with format "pdf", Name derived from
 // Filename (sans extension), and the base64 bytes carried the same way an

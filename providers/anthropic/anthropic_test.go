@@ -610,6 +610,33 @@ func TestRequestShapeToolResultMultiModal(t *testing.T) {
 	}
 }
 
+// TestToolResultContentPointerVariant verifies toolResultContent handles a
+// *ai.ToolResultContent (not just the value type) the same way as the value
+// type, and that a nil *ai.ToolResultContent degrades to an empty string
+// rather than panicking.
+func TestToolResultContentPointerVariant(t *testing.T) {
+	v := &ai.ToolResultContent{Text: "hi", Images: []provider.GeneratedImage{
+		{Data: []byte("x"), MediaType: "image/png"},
+	}}
+	got, err := toolResultContent(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks, ok := got.([]wireContentBlock)
+	if !ok || len(blocks) != 2 {
+		t.Fatalf("got = %#v, want 2 wireContentBlocks", got)
+	}
+
+	var nilPtr *ai.ToolResultContent
+	got, err = toolResultContent(nilPtr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "" {
+		t.Errorf("nil *ai.ToolResultContent: got = %#v, want empty string", got)
+	}
+}
+
 func TestRequestShapeToolMessageFilePartErrors(t *testing.T) {
 	srv, _ := newFixtureServer(t)
 	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
