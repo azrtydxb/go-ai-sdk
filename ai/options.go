@@ -36,7 +36,15 @@ import (
 type Timeout struct {
 	Total time.Duration // whole run (all steps); a derived context.WithTimeout at entry
 	Step  time.Duration // each individual model call/step; a derived per-step context.WithTimeout
-	Chunk time.Duration // StreamText only: max gap between yielded provider.StreamParts before the stream is aborted
+	// Chunk (StreamText only) is the max gap between yielded
+	// provider.StreamParts before the stream is aborted with a
+	// *TimeoutError{Dimension: "chunk"}. It is implemented with a timer that
+	// resets on every yielded part; there is an inherent, rare TOCTOU window
+	// in that design — a part arriving at (almost) the same instant the
+	// timer fires can still lose the race and surface as a chunk timeout
+	// even though the stream wasn't really stalled. This is a property of
+	// any timer-based watchdog, not a bug to be designed away here.
+	Chunk time.Duration
 }
 
 // GenerateTextOpts configures a GenerateText call.

@@ -228,9 +228,11 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 				// fires, carrying PendingApprovals) when that's why we're
 				// here; otherwise (nothing left to do, and nothing was ever
 				// pending) this is a no-op, matching the pre-approvals
-				// behavior.
+				// behavior. finishOrTimeout (not finish) because the resume
+				// batch's tool execution, in StreamText, ran before any
+				// *TextStream existed to check ctx against.
 				if len(s.pendingApprovals) > 0 && len(s.steps) == 0 {
-					s.finish()
+					s.finishOrTimeout()
 				}
 				return
 			}
@@ -468,7 +470,7 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 						s.opts.OnStepFinish(step)
 					}
 					s.current = nil
-					s.finish()
+					s.finishOrTimeout()
 					return
 				}
 				step.ToolResults = batch.results
@@ -490,17 +492,17 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 
 			if !hasToolCalls {
 				s.current = nil
-				s.finish()
+				s.finishOrTimeout()
 				return
 			}
 			if len(s.steps) >= s.maxSteps {
 				s.current = nil
-				s.finish()
+				s.finishOrTimeout()
 				return
 			}
 			if stopByCondition {
 				s.current = nil
-				s.finish()
+				s.finishOrTimeout()
 				return
 			}
 
@@ -652,6 +654,40 @@ func (s *TextStream) finish() {
 		return
 	}
 	s.opts.OnFinish(s.buildResult())
+}
+
+// finishOrTimeout is what every natural-end point in Parts() calls instead
+// of finish() directly: a step's tool execution (runApprovalAwareToolCalls)
+// can take arbitrarily long, and — unlike a step's model call/stream, which
+// is always followed by a ctx check before the next one starts — nothing
+// else checks ctx between tool execution finishing and a natural-end return
+// (no more tool calls, MaxSteps reached, StopWhen true, or a pending-approval
+// suspension). Without this check, OUR Total bound elapsing during that
+// window would otherwise be reported as silent success: s.err nil, OnFinish
+// firing normally, with the breach visible only buried in a
+// ToolResultRecord.Err.
+//
+// If s.ctx is done because OUR Total sentinel fired, this substitutes a
+// *TimeoutError and reports it via OnError (never OnFinish) — an
+// SDK-imposed limit is an error, not a user abort. If s.ctx is done for any
+// OTHER reason (the caller's own ctx canceled or reaching its own deadline),
+// this fires OnAbort instead — the same distinction reportAbortOrError
+// makes for a mid-stream error, applied here so a genuine user cancel during
+// this window is classified identically wherever it's observed. Only when
+// s.ctx is not done at all does this proceed to the normal success path.
+func (s *TextStream) finishOrTimeout() {
+	if s.ctx.Err() != nil {
+		if te, ok := timeoutErrorFor(s.ctx, s.opts.Timeout); ok {
+			s.err = te
+			if s.opts.OnError != nil {
+				s.opts.OnError(te)
+			}
+			return
+		}
+		s.fireAbort()
+		return
+	}
+	s.finish()
 }
 
 // buildResult assembles a *GenerateTextResult from the stream's accumulated

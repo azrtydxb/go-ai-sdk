@@ -184,6 +184,14 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 			return fail(berr)
 		}
 		if len(batch.pending) > 0 {
+			// The resume batch's tool execution above can take arbitrarily
+			// long; nothing else checks ctx before this success return, so
+			// OUR Total bound firing during it would otherwise be reported
+			// as silent success (see the identical check after the loop
+			// below for the full rationale).
+			if te, ok := timeoutErrorFor(ctx, opts.Timeout); ok {
+				return fail(te)
+			}
 			result := &GenerateTextResult{
 				Messages:         messages,
 				FinishReason:     provider.FinishToolCalls,
@@ -368,6 +376,25 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 	}
 
 	last := steps[len(steps)-1]
+
+	// The loop can reach a natural end (no more tool calls, MaxSteps
+	// reached, StopWhen true, the Output tool-mode forced break, or a
+	// pending-approval suspension) immediately after a step's tool
+	// execution — runToolCalls/runApprovalAwareToolCalls can take
+	// arbitrarily long, and no OTHER path checks ctx between there and
+	// here. Without this check, OUR Total (or Step, though Step's own ctx
+	// is already gone by this point — see withStepTimeout's per-call
+	// scoping) bound elapsing during that window would otherwise be
+	// reported as silent success: err nil, OnFinish firing, with the
+	// breach visible only buried in a ToolResultRecord.Err. A genuine
+	// caller ctx cancellation in that same window is deliberately NOT
+	// caught here — GenerateText has never promised to detect a mid-loop
+	// user cancel except where a ctx-aware call itself fails (see
+	// GenerateTextOpts.OnAbort's doc: GenerateText has no abort notion at
+	// all) — only OUR sentinel is substituted into a *TimeoutError.
+	if te, ok := timeoutErrorFor(ctx, opts.Timeout); ok {
+		return fail(te)
+	}
 
 	// Output decoding is skipped entirely when the run suspended (see
 	// GenerateTextResult.PendingApprovals): the suspended step's Text has

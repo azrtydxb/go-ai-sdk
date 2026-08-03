@@ -50,6 +50,16 @@ func withStepTimeout(ctx context.Context, t *Timeout) (context.Context, context.
 // checking context.Cause on the deepest context actually used for a call
 // correctly reflects whichever bound — Total, Step, or Chunk — fired first,
 // with no extra bookkeeping needed to figure out precedence.
+//
+// The switch below matches sentinels by pointer identity (==), not
+// errors.Is/errors.As — this is deliberate and relies on errTotalTimeout/
+// errStepTimeout/errChunkTimeout never being wrapped between where
+// withTotalTimeout/withStepTimeout/newChunkWatchdog install them as a
+// cancellation cause and where context.Cause retrieves them back
+// (context.Cause never wraps the cause you pass to WithTimeoutCause/
+// WithCancelCause; it returns the exact value). If that ever changes —
+// e.g. a future call site wraps one of these sentinels before installing
+// it — switch this to errors.Is to keep matching correctly.
 func timeoutErrorFor(ctx context.Context, t *Timeout) (*TimeoutError, bool) {
 	if t == nil || ctx.Err() == nil {
 		return nil, false

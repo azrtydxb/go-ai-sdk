@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"iter"
 	"runtime"
@@ -11,6 +12,21 @@ import (
 	"github.com/azrtydxb/go-ai-sdk/ai/aitest"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
+
+// slowToolArgs is the (empty) argument struct for the "slow" tool used by
+// the terminal-tool-execution timeout tests below.
+type slowToolArgs struct{}
+
+// newSlowTool returns a Tool whose Execute blocks for delay unconditionally
+// (it does NOT select on ctx — mirroring a real external call that ignores
+// cancellation), used to simulate the tool-execution phase of a step taking
+// longer than a Total/user-ctx bound that elapses while it runs.
+func newSlowTool(delay time.Duration) Tool {
+	return NewTool("slow", "", func(_ context.Context, _ slowToolArgs) (any, error) {
+		time.Sleep(delay)
+		return "done", nil
+	})
+}
 
 // slowGenModel is a provider.LanguageModel whose Generate blocks for delay
 // (returning resp) unless ctx is done first (returning ctx.Err()) — used to
@@ -379,5 +395,166 @@ func TestTimeoutErrorMessage(t *testing.T) {
 	err := &TimeoutError{Dimension: "chunk", Limit: 5 * time.Second}
 	if got := err.Error(); got == "" {
 		t.Fatal("Error() is empty")
+	}
+}
+
+// --- Regression: Total elapsing during the FINAL step's tool execution ---
+//
+// Repro (confirmed by review): GenerateText with Timeout{Total: 10ms}, a
+// tool taking 50ms, MaxSteps: 1 previously returned err == nil, fired
+// OnFinish normally, and never fired OnError — the breach was visible only
+// buried in Steps[0].ToolResults[0].Err. Root cause: TimeoutError
+// classification only happened at the NEXT model call's ctx check; when the
+// loop ends naturally (MaxSteps reached / no tool calls / StopWhen) right
+// after tool execution, no path checked ctx before returning success. Fixed
+// by checking timeoutErrorFor at every natural-end return point in both
+// loops (see the check right after the main loop in GenerateText, and
+// TextStream.finishOrTimeout in stream_text.go).
+
+func TestGenerateTextTotalTimeoutDuringTerminalToolExecution(t *testing.T) {
+	m := &aitest.MockModel{Responses: []*provider.Response{
+		{
+			Content:      []provider.ContentPart{provider.ToolCallPart{ID: "1", Name: "slow", Args: json.RawMessage(`{}`)}},
+			FinishReason: provider.FinishToolCalls,
+		},
+	}}
+	var onFinishFired bool
+	var onErrErr error
+	res, err := GenerateText(t.Context(), GenerateTextOpts{
+		Model:    m,
+		Prompt:   "hi",
+		Tools:    []Tool{newSlowTool(50 * time.Millisecond)},
+		MaxSteps: 1,
+		Timeout:  &Timeout{Total: 10 * time.Millisecond},
+		OnFinish: func(*GenerateTextResult) { onFinishFired = true },
+		OnError:  func(e error) { onErrErr = e },
+	})
+
+	var te *TimeoutError
+	if !errors.As(err, &te) || te.Dimension != "total" {
+		t.Fatalf("err = %v (%T); want *TimeoutError{Dimension: total} (res=%+v)", err, err, res)
+	}
+	if onFinishFired {
+		t.Fatal("OnFinish fired; want it suppressed — a Total breach discovered after terminal tool execution must not report success")
+	}
+	if !errors.As(onErrErr, &te) || te.Dimension != "total" {
+		t.Fatalf("OnError err = %v; want *TimeoutError{Dimension: total}", onErrErr)
+	}
+}
+
+// TestGenerateTextUserCtxCancelDuringTerminalToolExecutionIsNotTimeoutError
+// is the control for the fix above: a genuine user ctx cancellation (not one
+// of our sentinels) occurring during that same terminal-tool-execution
+// window must NOT be misclassified as a *TimeoutError. GenerateText has no
+// OnAbort notion (see GenerateTextOpts.OnAbort's doc), so — unlike
+// StreamText — this case simply isn't caught here at all, exactly as before
+// this fix: the run still reports success.
+func TestGenerateTextUserCtxCancelDuringTerminalToolExecutionIsNotTimeoutError(t *testing.T) {
+	m := &aitest.MockModel{Responses: []*provider.Response{
+		{
+			Content:      []provider.ContentPart{provider.ToolCallPart{ID: "1", Name: "slow", Args: json.RawMessage(`{}`)}},
+			FinishReason: provider.FinishToolCalls,
+		},
+	}}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
+	defer cancel()
+
+	var onErrErr error
+	_, err := GenerateText(ctx, GenerateTextOpts{
+		Model:    m,
+		Prompt:   "hi",
+		Tools:    []Tool{newSlowTool(50 * time.Millisecond)},
+		MaxSteps: 1,
+		OnError:  func(e error) { onErrErr = e },
+	})
+
+	var te *TimeoutError
+	if errors.As(err, &te) {
+		t.Fatalf("err = %v; want no *TimeoutError for a user-ctx-caused cancellation", err)
+	}
+	if errors.As(onErrErr, &te) {
+		t.Fatalf("OnError err = %v; want no *TimeoutError for a user-ctx-caused cancellation", onErrErr)
+	}
+}
+
+func TestStreamTextTotalTimeoutDuringTerminalToolExecution(t *testing.T) {
+	m := &aitest.MockModel{Streams: [][]provider.StreamPart{{
+		provider.ToolCallEnd{Call: provider.ToolCallPart{ID: "1", Name: "slow", Args: json.RawMessage(`{}`)}},
+		provider.FinishPart{Reason: provider.FinishToolCalls},
+	}}}
+	var onFinishFired bool
+	var onErrErr error
+	var onAbortFired bool
+	s, err := StreamText(t.Context(), GenerateTextOpts{
+		Model:    m,
+		Prompt:   "hi",
+		Tools:    []Tool{newSlowTool(50 * time.Millisecond)},
+		MaxSteps: 1,
+		Timeout:  &Timeout{Total: 10 * time.Millisecond},
+		OnFinish: func(*GenerateTextResult) { onFinishFired = true },
+		OnError:  func(e error) { onErrErr = e },
+		OnAbort:  func() { onAbortFired = true },
+	})
+	if err != nil {
+		t.Fatalf("StreamText start: %v", err)
+	}
+	for range s.Parts() {
+	}
+
+	var te *TimeoutError
+	if !errors.As(s.Err(), &te) || te.Dimension != "total" {
+		t.Fatalf("s.Err() = %v (%T); want *TimeoutError{Dimension: total}", s.Err(), s.Err())
+	}
+	if onFinishFired {
+		t.Fatal("OnFinish fired; want it suppressed — a Total breach discovered after terminal tool execution must not report success")
+	}
+	if !errors.As(onErrErr, &te) || te.Dimension != "total" {
+		t.Fatalf("OnError err = %v; want *TimeoutError{Dimension: total}", onErrErr)
+	}
+	if onAbortFired {
+		t.Fatal("OnAbort fired; want OnError only — this is OUR bound, not a user abort")
+	}
+}
+
+// TestStreamTextUserCtxCancelDuringTerminalToolExecutionFiresOnAbort is the
+// StreamText control for the fix above: a genuine user ctx cancellation
+// occurring during the same terminal-tool-execution window must fire
+// OnAbort, not OnError/*TimeoutError — preserving the existing
+// ctx-cancel-vs-our-bound distinction at this new check point too.
+func TestStreamTextUserCtxCancelDuringTerminalToolExecutionFiresOnAbort(t *testing.T) {
+	m := &aitest.MockModel{Streams: [][]provider.StreamPart{{
+		provider.ToolCallEnd{Call: provider.ToolCallPart{ID: "1", Name: "slow", Args: json.RawMessage(`{}`)}},
+		provider.FinishPart{Reason: provider.FinishToolCalls},
+	}}}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
+	defer cancel()
+
+	var onFinishFired bool
+	var onErrErr error
+	var onAbortFired bool
+	s, err := StreamText(ctx, GenerateTextOpts{
+		Model:    m,
+		Prompt:   "hi",
+		Tools:    []Tool{newSlowTool(50 * time.Millisecond)},
+		MaxSteps: 1,
+		OnFinish: func(*GenerateTextResult) { onFinishFired = true },
+		OnError:  func(e error) { onErrErr = e },
+		OnAbort:  func() { onAbortFired = true },
+	})
+	if err != nil {
+		t.Fatalf("StreamText start: %v", err)
+	}
+	for range s.Parts() {
+	}
+
+	if !onAbortFired {
+		t.Fatal("OnAbort did not fire; want it for the caller's own ctx deadline")
+	}
+	var te *TimeoutError
+	if errors.As(onErrErr, &te) {
+		t.Fatalf("OnError fired with %v; want no *TimeoutError for a user-ctx-caused abort", onErrErr)
+	}
+	if onFinishFired {
+		t.Fatal("OnFinish fired; want it suppressed on the abort path")
 	}
 }
