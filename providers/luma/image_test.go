@@ -190,6 +190,66 @@ func TestGenerateImages_FailedState(t *testing.T) {
 	}
 }
 
+func TestGenerateImages_EmptyCreateIDError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/dream-machine/v1/generations/image", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":""}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
+	m := p.ImageModel("photon-1")
+
+	_, err := m.GenerateImages(context.Background(), provider.ImageCall{Prompt: "a cat"})
+	if err == nil {
+		t.Fatal("expected error for empty generation id")
+	}
+	if !strings.Contains(err.Error(), "no generation id") {
+		t.Errorf("error = %q, want it to mention the missing generation id", err.Error())
+	}
+}
+
+func TestGenerateImages_PollNon2xxError(t *testing.T) {
+	var pollHit int32
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/dream-machine/v1/generations/image", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"gen-1"}`))
+	})
+	mux.HandleFunc("/dream-machine/v1/generations/gen-1", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&pollHit, 1)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"detail":"internal error"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
+	m := p.ImageModel("photon-1")
+
+	_, err := m.GenerateImages(context.Background(), provider.ImageCall{Prompt: "a cat"})
+	if err == nil {
+		t.Fatal("expected error for non-2xx poll response")
+	}
+	var apiErr *ai.APICallError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("error is not *ai.APICallError: %v (%T)", err, err)
+	}
+	if apiErr.StatusCode != http.StatusInternalServerError {
+		t.Errorf("StatusCode = %d, want 500", apiErr.StatusCode)
+	}
+	// The poll loop must exit on the first non-2xx response rather than
+	// retrying indefinitely.
+	if got := atomic.LoadInt32(&pollHit); got != 1 {
+		t.Errorf("poll hit count = %d, want 1 (loop should exit on first error)", got)
+	}
+}
+
 func TestGenerateImages_ContextCancellationMidPoll(t *testing.T) {
 	pollHit := make(chan struct{}, 1)
 

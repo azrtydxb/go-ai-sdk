@@ -52,6 +52,13 @@ header.
   wait — `predictionResponse.Status != "succeeded"` returns an error that
   includes `predictionResponse.Error` when present (which itself may be a
   JSON string or an arbitrary JSON value, handled by `errorText`).
+- **`Prefer: wait` has a ~60s ceiling.** Replicate holds the HTTP connection
+  open for at most about 60 seconds while waiting synchronously; a model
+  that's still running when the window elapses legitimately returns a
+  `"processing"` status rather than `"succeeded"`, which this SDK surfaces
+  as the non-`"succeeded"` error above rather than as a failure — slow
+  models can hit this even on a correct call, so treat it as "still
+  running," not "broken."
 - **Error body shapes.** Replicate's error responses use either
   `{"detail":"..."}` (e.g. auth errors) or an RFC-7807-style problem object
   with `"title"`/`"detail"`; `errorMessage` in

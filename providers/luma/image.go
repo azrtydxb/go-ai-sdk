@@ -129,6 +129,10 @@ func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall
 func (m *imageModel) poll(ctx context.Context, id string) (*generationResponse, []byte, error) {
 	reqURL := m.provider.baseURL + "/dream-machine/v1/generations/" + id
 
+	// Poll immediately on entry (a generation may already be complete by
+	// the time we ask), then sleep p.provider.poll() between each
+	// subsequent attempt — the sleep only runs after a non-terminal
+	// response, never before the first poll.
 	for {
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 		if err != nil {
