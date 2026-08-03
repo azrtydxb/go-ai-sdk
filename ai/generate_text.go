@@ -87,6 +87,12 @@ type GenerateTextResult struct {
 	// whose Result is the call's own args JSON as a string), so the
 	// returned transcript is always well-formed for a round-trip resend —
 	// no provider's wire format is left with an unanswered tool call.
+	//
+	// A suspended run (PendingApprovals non-empty) has no Output — decoding
+	// is skipped entirely for it, even if Output was set, since the
+	// suspended step's Text has nothing to do with the output schema (the
+	// batch never executed). Output is decoded on the RESUMED run that
+	// actually completes.
 	Output any
 	// PendingApprovals is non-empty when the tool loop suspended because
 	// some call(s) in a batch needed approval (see ApprovalRequirer) and no
@@ -103,6 +109,10 @@ type GenerateTextResult struct {
 	// tool-call message) is itself still pending, the run suspends before
 	// any model call: Steps is empty, Messages is unchanged, and
 	// FinishReason is tool-calls.
+	//
+	// A suspended run has no Output (see that field's doc), even when
+	// GenerateTextOpts.Output was set — decoding is deferred to the resumed
+	// run that completes.
 	PendingApprovals []ApprovalRequest
 }
 
@@ -335,8 +345,16 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 
 	last := steps[len(steps)-1]
 
+	// Output decoding is skipped entirely when the run suspended (see
+	// GenerateTextResult.PendingApprovals): the suspended step's Text has
+	// nothing to do with the output schema (the batch never executed, let
+	// alone produced a final structured-output response), so decoding it
+	// would either fail — turning a non-error suspension into a
+	// *NoObjectGeneratedError — or spuriously "succeed" on unrelated text.
+	// result.Output stays nil; it is decoded on the resumed run that
+	// actually completes.
 	var decoded any
-	if opts.Output != nil {
+	if opts.Output != nil && len(pendingApprovals) == 0 {
 		raw := stripFences(last.Text)
 		val, derr := opts.Output.decode(raw)
 		if derr != nil {

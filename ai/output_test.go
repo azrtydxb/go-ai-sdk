@@ -457,6 +457,85 @@ func TestOutputChoiceEmptyChoicesIsError(t *testing.T) {
 	}
 }
 
+// TestOutputSuspendedRunSkipsDecode pins finding 1: when the tool loop
+// suspends on an approval (PendingApprovals non-empty), Output decoding must
+// not run — the suspended step's Text is empty (or unrelated to the output
+// schema), and decoding it would either fail (NoObjectGeneratedError,
+// destroying the suspension) or, worse, silently "succeed" on garbage. A
+// suspended run has no Output; it is decoded on the resumed run that
+// actually completes.
+func TestOutputSuspendedRunSkipsDecode(t *testing.T) {
+	var executed bool
+	tool := RequireApproval(approvalWeatherTool(&executed))
+	m := &aitest.MockModel{
+		Caps: provider.Capabilities{NativeJSON: true},
+		Responses: []*provider.Response{
+			toolCallResponse("get_weather", "c1", `{"city":"Ghent"}`),
+		},
+	}
+	var onErrorCalled bool
+	res, err := GenerateText(t.Context(), GenerateTextOpts{
+		Model:    m,
+		Prompt:   "book, checking weather first",
+		Tools:    []Tool{tool},
+		MaxSteps: 3,
+		Output:   OutputObject[outBook](),
+		OnError:  func(error) { onErrorCalled = true },
+	})
+	if err != nil {
+		t.Fatalf("err = %v, want nil (suspension is not an error)", err)
+	}
+	if onErrorCalled {
+		t.Fatal("OnError must not fire for a suspension")
+	}
+	if executed {
+		t.Fatal("tool must not execute while pending")
+	}
+	if res.Output != nil {
+		t.Fatalf("Output = %+v, want nil on a suspended run", res.Output)
+	}
+	if len(res.PendingApprovals) != 1 || res.PendingApprovals[0].Call.ID != "c1" {
+		t.Fatalf("PendingApprovals = %+v", res.PendingApprovals)
+	}
+	last := res.Messages[len(res.Messages)-1]
+	if last.Role != provider.RoleAssistant {
+		t.Fatalf("last message role = %v, want assistant (round-trippable)", last.Role)
+	}
+
+	// Resume: approve the call, model then returns the structured output,
+	// which must decode normally on the completed (non-suspended) run.
+	m2 := &aitest.MockModel{
+		Caps: provider.Capabilities{NativeJSON: true},
+		Responses: []*provider.Response{
+			{Content: []provider.ContentPart{provider.TextPart{Text: `{"title":"Dune","pages":412}`}}, FinishReason: provider.FinishStop},
+		},
+	}
+	resumed, err := GenerateText(t.Context(), GenerateTextOpts{
+		Model:     m2,
+		Messages:  res.Messages,
+		Tools:     []Tool{tool},
+		MaxSteps:  3,
+		Output:    OutputObject[outBook](),
+		Approvals: []ApprovalDecision{{ToolCallID: "c1", Approved: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !executed {
+		t.Fatal("tool should execute on resume")
+	}
+	book, err := OutputAs[outBook](resumed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if book.Title != "Dune" || book.Pages != 412 {
+		t.Fatalf("book = %+v", book)
+	}
+	if len(resumed.PendingApprovals) != 0 {
+		t.Fatalf("PendingApprovals = %+v, want none on completed resume", resumed.PendingApprovals)
+	}
+}
+
 func TestStreamTextWithOutputIsError(t *testing.T) {
 	m := &aitest.MockModel{}
 	_, err := StreamText(t.Context(), GenerateTextOpts{Model: m, Prompt: "x", Output: OutputObject[outBook]()})
