@@ -35,6 +35,13 @@ const maxErrorBodyBytes = 1024
 // maxRedirects caps the number of redirect hops Fetch will follow.
 const maxRedirects = 10
 
+// lookupIPAddr resolves host to its IP addresses. It's a package variable
+// (rather than a direct net.DefaultResolver.LookupIPAddr call) purely so
+// tests can substitute a fake resolver to simulate a DNS-rebind attack,
+// where a hostname resolves to a safe IP on one lookup and a different,
+// blocked IP on the next.
+var lookupIPAddr = net.DefaultResolver.LookupIPAddr
+
 // Fetch GETs url using client (or http.DefaultClient if client is nil),
 // returning the raw response body and a MediaType taken from the
 // response's Content-Type header (parameters such as "; charset=..."
@@ -43,15 +50,25 @@ const maxRedirects = 10
 // themselves on top of the returned MediaType.
 //
 // Fetch protects against a malicious or compromised server-chosen url in
-// two ways:
+// three ways:
 //
-//   - SSRF: only http/https schemes are allowed, and the target host (and
-//     every redirect hop's host) is resolved and rejected if any resolved
-//     IP is link-local or a link-local-range metadata address
-//     (169.254.0.0/16, fe80::/10). This is a narrow, near-zero-false-positive
-//     default: generic private ranges (10/8, 192.168/16, etc.) are NOT
-//     blocked, since self-hosted CDNs on private networks are legitimate.
-//     At most maxRedirects (10) hops are followed.
+//   - SSRF (pre-connect): only http/https schemes are allowed, and the
+//     target host (and every redirect hop's host) is resolved and rejected
+//     if any resolved IP is blocked -- see isBlockedAddr for the exact
+//     policy. At most maxRedirects (10) hops are followed, and the
+//     caller's own CheckRedirect (if any) is still honored once the SSRF
+//     check passes.
+//   - SSRF (DNS-rebind, dial-time): a pre-connect-only check and the
+//     eventual TCP dial are, by default, two independent DNS lookups -- an
+//     attacker controlling DNS for the target host can answer the first
+//     with a safe IP and the second with a blocked one (e.g. cloud
+//     metadata), bypassing a pre-connect check entirely. When the client's
+//     Transport is an *http.Transport (or nil), Fetch installs a
+//     DialContext (via PinnedTransport) that re-resolves and re-checks at
+//     actual dial time and dials that specific vetted IP literal, closing
+//     the gap. See PinnedTransport's doc for the one case (a custom,
+//     non-*http.Transport RoundTripper) where this protection isn't
+//     available.
 //   - Memory DoS: the response body is read with a hard cap of maxBytes
 //     (MaxBytes if maxBytes <= 0); a body that would exceed the cap fails
 //     with an error rather than being read into memory in full.
@@ -81,19 +98,27 @@ func fetch(ctx context.Context, client *http.Client, rawURL string, maxBytes int
 		return nil, "", err
 	}
 
-	// A per-call copy of the caller's client, sharing its Transport (so
-	// callers' proxy/TLS/connection-pool configuration is respected) but
-	// never mutating it: CheckRedirect re-validates scheme + link-local on
-	// every hop, and caps the hop count.
+	// A per-call copy of the caller's client, sharing (a dial-pinned
+	// wrapper around) its Transport -- so callers' proxy/TLS/
+	// connection-pool configuration is respected -- but never mutating the
+	// caller's client. CheckRedirect re-validates scheme + link-local on
+	// every hop, caps the hop count, and still honors the caller's own
+	// CheckRedirect (if set) once the SSRF check passes.
 	safeClient := &http.Client{
-		Transport: client.Transport,
+		Transport: PinnedTransport(client.Transport),
 		Jar:       client.Jar,
 		Timeout:   client.Timeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= maxRedirects {
 				return fmt.Errorf("stopped after %d redirects", maxRedirects)
 			}
-			return ValidateURL(req.Context(), req.URL.String())
+			if err := ValidateURL(req.Context(), req.URL.String()); err != nil {
+				return err
+			}
+			if client.CheckRedirect != nil {
+				return client.CheckRedirect(req, via)
+			}
+			return nil
 		},
 	}
 
@@ -128,9 +153,16 @@ func fetch(ctx context.Context, client *http.Client, rawURL string, maxBytes int
 }
 
 // ValidateURL rejects any URL that isn't http(s), or whose host resolves
-// (directly, if it's a literal IP, or via DNS otherwise) to a link-local or
-// metadata address. It's called both before the initial request and, via
-// CheckRedirect, on every subsequent redirect hop.
+// (directly, if it's a literal IP, or via DNS otherwise) to a blocked
+// address per isBlockedAddr. Fetch calls it both before the initial
+// request and, via CheckRedirect, on every subsequent redirect hop.
+//
+// This is a pre-connect check only: on its own it does not defend against
+// DNS-rebind (see PinnedTransport for that). Callers that build their own
+// guarded requests outside of Fetch (e.g. a credentialed poll to a
+// server-chosen URL) can call ValidateURL directly for the same
+// pre-connect protection, and should pair it with PinnedTransport for the
+// same dial-time protection Fetch itself gets.
 func ValidateURL(ctx context.Context, rawURL string) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -147,12 +179,12 @@ func ValidateURL(ctx context.Context, rawURL string) error {
 
 	if addr, err := netip.ParseAddr(host); err == nil {
 		if isBlockedAddr(addr) {
-			return fmt.Errorf("host %s is a link-local/metadata address", host)
+			return fmt.Errorf("host %s is a blocked address", host)
 		}
 		return nil
 	}
 
-	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	ips, err := lookupIPAddr(ctx, host)
 	if err != nil {
 		return fmt.Errorf("resolve host %s: %w", host, err)
 	}
@@ -162,21 +194,133 @@ func ValidateURL(ctx context.Context, rawURL string) error {
 			continue
 		}
 		if isBlockedAddr(addr.Unmap()) {
-			return fmt.Errorf("host %s resolves to link-local/metadata address %s", host, addr)
+			return fmt.Errorf("host %s resolves to blocked address %s", host, addr)
 		}
 	}
 	return nil
 }
 
+// imdsV6Addr is AWS's IPv6 IMDS (instance metadata service) address.
+// Unlike its IPv4 counterpart (169.254.169.254, already covered by the
+// link-local-unicast check below), it's a ULA (fd00::/8) address, so it
+// needs an explicit check.
+var imdsV6Addr = netip.MustParseAddr("fd00:ec2::254")
+
 // isBlockedAddr reports whether addr is in the near-zero-false-positive
-// SSRF blocklist: link-local unicast (169.254.0.0/16, fe80::/10) and
-// link-local multicast. Generic private ranges (10/8, 172.16/12,
-// 192.168/16) are deliberately NOT blocked — self-hosted CDNs on private
-// networks are a legitimate deployment, and the crown-jewel target (cloud
-// metadata services at 169.254.169.254) is fully covered by the
-// link-local check alone.
+// SSRF blocklist:
+//
+//   - link-local unicast/multicast (169.254.0.0/16, fe80::/10 and their
+//     multicast equivalents) -- covers the AWS/GCP/Azure IPv4 metadata
+//     endpoint at 169.254.169.254.
+//   - fd00:ec2::254 -- AWS's IPv6 IMDS address, which (being a ULA, not
+//     link-local) the check above doesn't otherwise catch.
+//   - the unspecified address (0.0.0.0 / ::) -- not a meaningful fetch
+//     target, and its resolve/bind/connect behavior is platform-dependent.
+//
+// Deliberately NOT blocked:
+//
+//   - loopback (127.0.0.0/8, ::1) -- blocking it would break every
+//     httptest-based fixture in this codebase (httptest binds to
+//     loopback), and it isn't the SSRF target this package defends
+//     against.
+//   - generic private ranges (10/8, 172.16/12, 192.168/16) -- self-hosted
+//     CDNs on private networks are a legitimate deployment; this remains a
+//     narrow, crown-jewel-only (cloud metadata) blocklist, not a general
+//     private-network firewall.
 func isBlockedAddr(addr netip.Addr) bool {
-	return addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast()
+	return addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() ||
+		addr.IsUnspecified() || addr == imdsV6Addr
+}
+
+// dialContextFunc matches the signature of (*net.Dialer).DialContext and
+// http.Transport.DialContext.
+type dialContextFunc func(ctx context.Context, network, addr string) (net.Conn, error)
+
+// PinnedTransport returns an http.RoundTripper that defends against
+// DNS-rebind SSRF: base's own DialContext (if any, or a fresh net.Dialer
+// otherwise) is wrapped so that, at the moment of the actual TCP dial, the
+// target host is re-resolved, every resolved IP is checked against
+// isBlockedAddr, and the dial proceeds against one specific vetted IP
+// literal -- guaranteeing the IP that was checked is the IP that gets
+// connected to, unlike a pre-connect-only check (ValidateURL) which can be
+// defeated by a resolver that answers differently between the validation
+// lookup and the transport's own (later, independent) lookup.
+//
+// If base is an *http.Transport, the returned transport is base.Clone()
+// with DialContext wrapped as above. If base is nil, a clone of
+// http.DefaultTransport is used (matching what an *http.Client with a nil
+// Transport does internally). If base is some other, custom
+// http.RoundTripper, dial-time pinning isn't possible without knowledge of
+// how it dials -- base is returned unchanged, and callers get only
+// ValidateURL's pre-connect protection (not rebind-safe) for that
+// transport. PinnedTransport never mutates base.
+func PinnedTransport(base http.RoundTripper) http.RoundTripper {
+	var t *http.Transport
+	switch bt := base.(type) {
+	case *http.Transport:
+		t = bt.Clone()
+	case nil:
+		t = http.DefaultTransport.(*http.Transport).Clone()
+	default:
+		return base
+	}
+
+	innerDial := t.DialContext
+	if innerDial == nil {
+		innerDial = (&net.Dialer{}).DialContext
+	}
+	t.DialContext = pinnedDialContext(innerDial)
+	return t
+}
+
+// pinnedDialContext wraps dial so that, for every connection it's asked to
+// make, it re-resolves the target host, rejects the dial outright if any
+// resolved IP is blocked, and then dials one specific vetted IP literal
+// (rather than handing the original hostname to dial, which would trigger
+// a second, independent, unchecked resolution).
+func pinnedDialContext(dial dialContextFunc) dialContextFunc {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, fmt.Errorf("dial %s: %w", addr, err)
+		}
+
+		if literal, err := netip.ParseAddr(host); err == nil {
+			if isBlockedAddr(literal) {
+				return nil, fmt.Errorf("dial %s: %s is a blocked address", addr, literal)
+			}
+			return dial(ctx, network, addr)
+		}
+
+		ips, err := lookupIPAddr(ctx, host)
+		if err != nil {
+			return nil, fmt.Errorf("dial %s: resolve host %s: %w", addr, host, err)
+		}
+		if len(ips) == 0 {
+			return nil, fmt.Errorf("dial %s: host %s has no resolved addresses", addr, host)
+		}
+
+		var vetted netip.Addr
+		found := false
+		for _, ip := range ips {
+			resolved, ok := netip.AddrFromSlice(ip.IP)
+			if !ok {
+				continue
+			}
+			resolved = resolved.Unmap()
+			if isBlockedAddr(resolved) {
+				return nil, fmt.Errorf("dial %s: host %s resolves to blocked address %s", addr, host, resolved)
+			}
+			if !found {
+				vetted, found = resolved, true
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("dial %s: host %s has no usable resolved addresses", addr, host)
+		}
+
+		return dial(ctx, network, net.JoinHostPort(vetted.String(), port))
+	}
 }
 
 // SameOrigin reports whether base and candidate share the same scheme and
@@ -194,6 +338,64 @@ func SameOrigin(base, candidate string) bool {
 		return false
 	}
 	return b.Scheme == c.Scheme && b.Host == c.Host
+}
+
+// SameRegistrableDomain reports whether base and candidate are both
+// http(s), share the same scheme, and share, heuristically, the same
+// registrable domain: either an exact hostname match, or -- when hostnames
+// differ -- their final two dot-separated labels are equal (e.g.
+// "api.us1.bfl.ai" and "api.bfl.ai" both end in "bfl.ai"). Ports are
+// ignored (unlike SameOrigin).
+//
+// This is a stdlib-only heuristic (no public-suffix-list dependency, e.g.
+// golang.org/x/net/publicsuffix): it does NOT correctly handle multi-label
+// public suffixes like "co.uk" or "github.io", where the true registrable
+// domain is three labels, not two -- for those TLDs this heuristic would
+// incorrectly treat e.g. "evil.co.uk" and "safe.co.uk" as sharing a
+// domain. It's meant narrowly, for gating credentials to a small, known
+// set of first-party provider hosts (e.g. BFL's regional API hosts, all
+// under the two-label "bfl.ai"), not as a general-purpose SSRF/CSRF origin
+// check. SameOrigin (exact host match) remains the right default for
+// anything more general, or for hosts under a TLD where the two-label
+// heuristic doesn't hold.
+func SameRegistrableDomain(base, candidate string) bool {
+	b, err := url.Parse(base)
+	if err != nil {
+		return false
+	}
+	c, err := url.Parse(candidate)
+	if err != nil {
+		return false
+	}
+	if b.Scheme != c.Scheme {
+		return false
+	}
+	if b.Scheme != "http" && b.Scheme != "https" {
+		return false
+	}
+
+	bHost, cHost := b.Hostname(), c.Hostname()
+	if bHost == "" || cHost == "" {
+		return false
+	}
+	if bHost == cHost {
+		return true
+	}
+
+	bDomain, ok1 := lastTwoLabels(bHost)
+	cDomain, ok2 := lastTwoLabels(cHost)
+	return ok1 && ok2 && bDomain == cDomain
+}
+
+// lastTwoLabels returns the final two dot-separated labels of host (e.g.
+// "api.us1.bfl.ai" -> "bfl.ai"), and false if host has fewer than two
+// labels.
+func lastTwoLabels(host string) (string, bool) {
+	labels := strings.Split(host, ".")
+	if len(labels) < 2 {
+		return "", false
+	}
+	return strings.Join(labels[len(labels)-2:], "."), true
 }
 
 // parseMediaType strips any parameters (e.g. "; charset=binary") from a

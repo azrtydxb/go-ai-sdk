@@ -150,9 +150,9 @@ func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall
 
 	images := make([]provider.GeneratedImage, 0, len(urls))
 	for _, u := range urls {
-		data, mediaType, err := fetchimage.Fetch(ctx, m.provider.client(), u)
+		data, mediaType, err := fetchimage.Fetch(ctx, m.provider.client(), u, "replicate")
 		if err != nil {
-			return nil, fmt.Errorf("replicate: fetch image: %w", err)
+			return nil, err
 		}
 		images = append(images, provider.GeneratedImage{Data: data, MediaType: mediaType})
 	}

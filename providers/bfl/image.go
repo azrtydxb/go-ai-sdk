@@ -122,9 +122,9 @@ func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall
 		return nil, fmt.Errorf("bfl: ready generation contained no sample url: %s", rawBody)
 	}
 
-	data, mediaType, err := fetchimage.Fetch(ctx, m.provider.client(), poll.Result.Sample)
+	data, mediaType, err := fetchimage.Fetch(ctx, m.provider.client(), poll.Result.Sample, "bfl")
 	if err != nil {
-		return nil, fmt.Errorf("bfl: fetch sample image: %w", err)
+		return nil, err
 	}
 
 	return &provider.ImageResponse{
@@ -147,16 +147,25 @@ const maxPollBodyBytes = 1 << 20 // 1MB
 //
 // pollingURL is chosen by the server's create-call response, not by the
 // caller -- so before ever attaching the x-key credential to a request,
-// poll requires pollingURL to be same-origin with the configured base URL
-// (fetchmedia.SameOrigin), and validates it against SSRF targets
+// poll requires pollingURL to share the configured base URL's registrable
+// domain (fetchmedia.SameRegistrableDomain; BFL returns region-specific
+// polling hosts like api.us1.bfl.ai/api.eu1.bfl.ai alongside the
+// api.bfl.ai base, so an exact host match would reject every real
+// generation -- see SameRegistrableDomain's doc for the heuristic and its
+// limitations), and validates it against SSRF targets
 // (fetchmedia.ValidateURL: link-local/metadata addresses, including cloud
 // metadata at 169.254.169.254). A mismatch or rejected URL fails closed
-// before any request -- with credentials -- is ever sent to it. Redirects
-// are refused outright: the poll response body is also capped
-// (maxPollBodyBytes) as a memory-DoS backstop.
+// before any request -- with credentials -- is ever sent to it.
+//
+// Redirects are refused outright. The Transport is wrapped with
+// fetchmedia.PinnedTransport so the SSRF check also holds at actual
+// dial time, not just at this pre-connect validation (see PinnedTransport
+// for why a pre-connect-only check is vulnerable to DNS-rebind). The poll
+// response body is also capped (maxPollBodyBytes) as a memory-DoS
+// backstop.
 func (m *imageModel) poll(ctx context.Context, pollingURL string) (*pollResponse, []byte, error) {
-	if !fetchmedia.SameOrigin(m.provider.baseURL, pollingURL) {
-		return nil, nil, fmt.Errorf("bfl: polling_url %q is not same-origin as the configured base URL %q; refusing to send the API key to it", pollingURL, m.provider.baseURL)
+	if !fetchmedia.SameRegistrableDomain(m.provider.baseURL, pollingURL) {
+		return nil, nil, fmt.Errorf("bfl: polling_url %q is not on the same registrable domain as the configured base URL %q; refusing to send the API key to it", pollingURL, m.provider.baseURL)
 	}
 	if err := fetchmedia.ValidateURL(ctx, pollingURL); err != nil {
 		return nil, nil, fmt.Errorf("bfl: polling_url %q rejected: %w", pollingURL, err)
@@ -164,7 +173,7 @@ func (m *imageModel) poll(ctx context.Context, pollingURL string) (*pollResponse
 
 	base := m.provider.client()
 	pollClient := &http.Client{
-		Transport: base.Transport,
+		Transport: fetchmedia.PinnedTransport(base.Transport),
 		Jar:       base.Jar,
 		Timeout:   base.Timeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {

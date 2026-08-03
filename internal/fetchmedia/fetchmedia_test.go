@@ -3,9 +3,12 @@ package fetchmedia
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -88,8 +91,8 @@ func TestFetchRejectsLiteralMetadataIP(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for literal 169.254.169.254")
 	}
-	if !strings.Contains(err.Error(), "link-local") {
-		t.Errorf("error = %v, want it to mention link-local", err)
+	if !strings.Contains(err.Error(), "blocked") {
+		t.Errorf("error = %v, want it to mention the address is blocked", err)
 	}
 	if rt.calls != 0 {
 		t.Errorf("RoundTrip called %d times, want 0 (must reject before making a request)", rt.calls)
@@ -122,8 +125,8 @@ func TestFetchAllowsPrivateRangeLiteralIP(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a connection error (nothing listening), not success")
 	}
-	if strings.Contains(err.Error(), "link-local") {
-		t.Errorf("error = %v, private-range IP should not be rejected as link-local", err)
+	if strings.Contains(err.Error(), "blocked") {
+		t.Errorf("error = %v, private-range IP should not be rejected as blocked", err)
 	}
 }
 
@@ -137,8 +140,8 @@ func TestFetchRedirectToLinkLocalRejected(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error following redirect to link-local address")
 	}
-	if !strings.Contains(err.Error(), "link-local") {
-		t.Errorf("error = %v, want it to mention link-local", err)
+	if !strings.Contains(err.Error(), "blocked") {
+		t.Errorf("error = %v, want it to mention the address is blocked", err)
 	}
 }
 
@@ -171,6 +174,162 @@ func TestFetchBodyAtCapAllowed(t *testing.T) {
 	}
 	if string(data) != "01234" {
 		t.Errorf("data = %q", data)
+	}
+}
+
+// TestFetchDialTimeRebindRejected covers the DNS-rebind TOCTOU
+// vulnerability: ValidateURL's pre-connect lookup and the actual dial are,
+// without pinning, two independent DNS resolutions. An attacker
+// controlling DNS for the target host can answer the first with a safe IP
+// and the second (at dial time) with a blocked one, bypassing a
+// pre-connect-only check. Fetch must reject the dial regardless, because
+// PinnedTransport re-resolves and re-checks at the moment of the actual
+// TCP dial.
+func TestFetchDialTimeRebindRejected(t *testing.T) {
+	orig := lookupIPAddr
+	defer func() { lookupIPAddr = orig }()
+
+	var calls int32
+	lookupIPAddr = func(ctx context.Context, network string) ([]net.IPAddr, error) {
+		n := atomic.AddInt32(&calls, 1)
+		if n == 1 {
+			// ValidateURL's pre-connect lookup: a safe, public IP.
+			return []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}}, nil
+		}
+		// Every subsequent lookup (the dial-time re-check): rebound to the
+		// cloud metadata address.
+		return []net.IPAddr{{IP: net.ParseIP("169.254.169.254")}}, nil
+	}
+
+	_, _, err := Fetch(context.Background(), nil, "http://rebind.fetchmedia.test/", "test", 0)
+	if err == nil {
+		t.Fatal("expected error: dial-time re-check should reject the rebound address")
+	}
+	if !strings.Contains(err.Error(), "blocked") {
+		t.Errorf("error = %v, want it to mention the blocked address", err)
+	}
+	if got := atomic.LoadInt32(&calls); got < 2 {
+		t.Errorf("lookupIPAddr called %d times, want >=2 (pre-connect + dial-time)", got)
+	}
+}
+
+// TestFetchHonorsRebindProtectionAcrossRedirects is the same rebind
+// scenario, but the blocked IP only shows up starting on the second host
+// (reached via a redirect) -- confirming dial-time pinning applies to
+// every hop, not just the first request.
+func TestFetchHonorsRebindProtectionAcrossRedirects(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "http://rebind-hop.fetchmedia.test/next", http.StatusFound)
+	}))
+	defer srv.Close()
+
+	orig := lookupIPAddr
+	defer func() { lookupIPAddr = orig }()
+	var calls int32
+	lookupIPAddr = func(ctx context.Context, host string) ([]net.IPAddr, error) {
+		n := atomic.AddInt32(&calls, 1)
+		if n == 1 {
+			// CheckRedirect's ValidateURL call for the redirect target: sees
+			// a safe IP.
+			return []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}}, nil
+		}
+		// The redirect target's actual dial: rebound to a blocked address.
+		return []net.IPAddr{{IP: net.ParseIP("169.254.169.254")}}, nil
+	}
+
+	_, _, err := Fetch(context.Background(), nil, srv.URL, "test", 0)
+	if err == nil {
+		t.Fatal("expected error: redirect hop's dial-time re-check should reject the rebound address")
+	}
+	if got := atomic.LoadInt32(&calls); got < 2 {
+		t.Errorf("lookupIPAddr called %d times, want >=2 (redirect validation + dial-time)", got)
+	}
+}
+
+// TestFetchChainsCallerCheckRedirect ensures a caller-supplied
+// CheckRedirect is still consulted (and can still fail the request) after
+// Fetch's own SSRF policy check passes, rather than being silently
+// dropped.
+func TestFetchChainsCallerCheckRedirect(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("should not be reached"))
+	}))
+	defer target.Close()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer srv.Close()
+
+	var callerCheckRedirectCalled bool
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			callerCheckRedirectCalled = true
+			return errors.New("caller policy: no redirects allowed")
+		},
+	}
+
+	_, _, err := Fetch(context.Background(), client, srv.URL, "test", 0)
+	if err == nil {
+		t.Fatal("expected error from caller's CheckRedirect")
+	}
+	if !callerCheckRedirectCalled {
+		t.Error("caller's CheckRedirect was never called -- it must be chained, not dropped")
+	}
+	if !strings.Contains(err.Error(), "no redirects allowed") {
+		t.Errorf("error = %v, want it to surface the caller's CheckRedirect error", err)
+	}
+}
+
+func TestIsBlockedAddrPolicy(t *testing.T) {
+	cases := []struct {
+		addr string
+		want bool
+		note string
+	}{
+		{"169.254.169.254", true, "IPv4 link-local metadata"},
+		{"169.254.1.1", true, "IPv4 link-local"},
+		{"fe80::1", true, "IPv6 link-local"},
+		{"fd00:ec2::254", true, "AWS IMDSv6"},
+		{"0.0.0.0", true, "IPv4 unspecified"},
+		{"::", true, "IPv6 unspecified"},
+		{"127.0.0.1", false, "loopback must stay allowed (httptest uses it)"},
+		{"::1", false, "IPv6 loopback must stay allowed"},
+		{"10.0.0.1", false, "generic private range"},
+		{"192.168.1.1", false, "generic private range"},
+		{"8.8.8.8", false, "public address"},
+	}
+	for _, c := range cases {
+		addr := netip.MustParseAddr(c.addr)
+		got := isBlockedAddr(addr)
+		if got != c.want {
+			t.Errorf("isBlockedAddr(%s) = %v, want %v (%s)", c.addr, got, c.want, c.note)
+		}
+	}
+}
+
+func TestSameRegistrableDomain(t *testing.T) {
+	cases := []struct {
+		base, candidate string
+		want            bool
+	}{
+		{"https://api.bfl.ai", "https://api.us1.bfl.ai/poll", true},
+		{"https://api.bfl.ai", "https://api.eu1.bfl.ai/poll", true},
+		{"https://api.bfl.ai", "https://api.bfl.ai/v1/x", true},
+		{"https://api.bfl.ai", "https://attacker.evil.tld/poll", false},
+		{"https://api.bfl.ai", "http://api.bfl.ai/poll", false},     // scheme differs
+		{"https://api.bfl.ai", "ftp://api.bfl.ai/poll", false},      // not http(s)
+		{"https://api.bfl.ai", "https://evilbfl.ai/poll", false},    // different registrable domain
+		{"https://api.bfl.ai:8443", "https://api.us1.bfl.ai", true}, // ports ignored
+		{"https://api.bfl.ai", "not a url", false},
+		{"not a url", "https://api.bfl.ai", false},
+	}
+	for _, c := range cases {
+		got := SameRegistrableDomain(c.base, c.candidate)
+		if got != c.want {
+			t.Errorf("SameRegistrableDomain(%q, %q) = %v, want %v", c.base, c.candidate, got, c.want)
+		}
 	}
 }
 

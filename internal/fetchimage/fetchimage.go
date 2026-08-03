@@ -26,8 +26,15 @@ import (
 // http/https, no link-local/metadata targets, including through redirects)
 // and unbounded memory use (a hard byte cap on the response body), since
 // url is chosen by the remote provider's API response, not by the caller.
-func Fetch(ctx context.Context, client *http.Client, url string) ([]byte, string, error) {
-	body, contentType, err := fetchmedia.Fetch(ctx, client, url, "fetchimage", 0)
+//
+// errPrefix is passed straight through to fetchmedia.Fetch and prefixes
+// any returned error exactly once (see its doc); pass the calling
+// provider's own name (e.g. "bfl", "luma") rather than hardcoding
+// "fetchimage" here, so callers get a clean, single-prefixed error instead
+// of one that leaks this package's internal name (and instead of a caller
+// that then has to wrap it again itself).
+func Fetch(ctx context.Context, client *http.Client, url, errPrefix string) ([]byte, string, error) {
+	body, contentType, err := fetchmedia.Fetch(ctx, client, url, errPrefix, 0)
 	if err != nil {
 		return nil, "", err
 	}

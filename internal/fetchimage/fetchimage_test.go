@@ -19,7 +19,7 @@ func TestFetchUsesContentTypeWhenImage(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	data, mediaType, err := Fetch(context.Background(), nil, srv.URL)
+	data, mediaType, err := Fetch(context.Background(), nil, srv.URL, "test")
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -39,7 +39,7 @@ func TestFetchStripsContentTypeParameters(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, mediaType, err := Fetch(context.Background(), nil, srv.URL)
+	_, mediaType, err := Fetch(context.Background(), nil, srv.URL, "test")
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestFetchSniffsWhenContentTypeNotImage(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	data, mediaType, err := Fetch(context.Background(), nil, srv.URL)
+	data, mediaType, err := Fetch(context.Background(), nil, srv.URL, "test")
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestFetchNon2xxError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, _, err := Fetch(context.Background(), nil, srv.URL)
+	_, _, err := Fetch(context.Background(), nil, srv.URL, "test")
 	if err == nil {
 		t.Fatal("expected error for non-2xx status")
 	}
@@ -109,7 +109,7 @@ func TestFetchNon2xxErrorIsRetryableFor5xx(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, _, err := Fetch(context.Background(), nil, srv.URL)
+	_, _, err := Fetch(context.Background(), nil, srv.URL, "test")
 	if err == nil {
 		t.Fatal("expected error for non-2xx status")
 	}
@@ -134,7 +134,7 @@ func TestFetchNon2xxErrorTruncatesBody(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, _, err := Fetch(context.Background(), nil, srv.URL)
+	_, _, err := Fetch(context.Background(), nil, srv.URL, "test")
 	if err == nil {
 		t.Fatal("expected error for non-2xx status")
 	}
@@ -155,7 +155,7 @@ func TestFetchUsesDefaultClientWhenNil(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, _, err := Fetch(context.Background(), nil, srv.URL)
+	_, _, err := Fetch(context.Background(), nil, srv.URL, "test")
 	if err != nil {
 		t.Fatalf("Fetch with nil client: %v", err)
 	}
@@ -171,14 +171,14 @@ func TestFetchContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, _, err := Fetch(ctx, nil, srv.URL)
+	_, _, err := Fetch(ctx, nil, srv.URL, "test")
 	if err == nil {
 		t.Fatal("expected error for cancelled context")
 	}
 }
 
 func TestFetchInvalidURL(t *testing.T) {
-	_, _, err := Fetch(context.Background(), nil, "://not-a-url")
+	_, _, err := Fetch(context.Background(), nil, "://not-a-url", "test")
 	if err == nil {
 		t.Fatal("expected error for invalid URL")
 	}

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -334,53 +335,99 @@ func TestGenerateImages_ProviderOptionsMergeTopLevel(t *testing.T) {
 	}
 }
 
-// TestGenerateImages_ForeignOriginPollingURLRejected covers the credential-leak
-// vulnerability this task fixes: BFL's create call returns an absolute
-// polling_url that the model then GETs with the x-key API key attached. If a
-// malicious or MITM'd response pointed polling_url at a different host, the
-// old code would happily send the API key there. The fix requires
-// same-origin before ever attaching x-key.
-func TestGenerateImages_ForeignOriginPollingURLRejected(t *testing.T) {
-	var foreignGotKey string
-	var foreignHit int32
-	foreign := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&foreignHit, 1)
-		foreignGotKey = r.Header.Get("x-key")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1","status":"Ready","result":{"sample":"http://example.invalid/sample"}}`))
-	}))
-	defer foreign.Close()
+// rewriteHostRoundTripper is a custom (non-*http.Transport) RoundTripper
+// used by tests that need pollingURL to carry a hostname distinct from any
+// real, dialable server (e.g. "api.us1.bfl.ai" or "attacker.evil.tld"):
+// httptest servers only ever bind to loopback, so two of them can't be
+// used to represent two genuinely different hostnames the way two real
+// provider hosts would differ. RoundTrip records whether/with-what-key it
+// was invoked, then (if a target is configured) rewrites the request onto
+// the real loopback test server before actually sending it.
+type rewriteHostRoundTripper struct {
+	target *url.URL
+	hits   int32
+	gotKey string
+}
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1","polling_url":"` + foreign.URL + `/poll"}`))
-	}))
-	defer srv.Close()
+func (rt *rewriteHostRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	atomic.AddInt32(&rt.hits, 1)
+	rt.gotKey = req.Header.Get("x-key")
+	if rt.target == nil {
+		return nil, errors.New("rewriteHostRoundTripper: no target configured for this request")
+	}
+	rewritten := req.Clone(req.Context())
+	rewritten.URL.Scheme = rt.target.Scheme
+	rewritten.URL.Host = rt.target.Host
+	rewritten.Host = rt.target.Host
+	return http.DefaultTransport.RoundTrip(rewritten)
+}
 
-	p := New(WithAPIKey("secret-key"), WithBaseURL(srv.URL))
-	m := p.ImageModel("flux-pro-1.1")
+// TestGenerateImages_ForeignRegistrableDomainPollingURLRejected covers the
+// credential-leak vulnerability this task fixes: BFL's create call returns
+// an absolute polling_url that the model then GETs with the x-key API key
+// attached. If a malicious or MITM'd response pointed polling_url at an
+// unrelated domain, the old code would happily send the API key there. The
+// fix requires the polling_url to share the configured base URL's
+// registrable domain before ever attaching x-key.
+func TestGenerateImages_ForeignRegistrableDomainPollingURLRejected(t *testing.T) {
+	rt := &rewriteHostRoundTripper{} // no target: must never be dialed
 
-	_, err := m.GenerateImages(context.Background(), provider.ImageCall{Prompt: "a cat"})
+	p := New(WithAPIKey("secret-key"), WithBaseURL("https://api.bfl.ai"), WithHTTPClient(&http.Client{Transport: rt}))
+	m := p.ImageModel("flux-pro-1.1").(*imageModel)
+
+	_, _, err := m.poll(context.Background(), "https://attacker.evil.tld/poll")
 	if err == nil {
-		t.Fatal("expected error for foreign-origin polling_url")
+		t.Fatal("expected error for foreign-registrable-domain polling_url")
 	}
-	if !strings.Contains(err.Error(), "same-origin") {
-		t.Errorf("error = %q, want it to mention same-origin", err.Error())
+	if !strings.Contains(err.Error(), "registrable domain") {
+		t.Errorf("error = %q, want it to mention registrable domain", err.Error())
 	}
-	if atomic.LoadInt32(&foreignHit) != 0 {
-		t.Errorf("foreign host was hit %d times, want 0 (must reject before requesting)", foreignHit)
+	if atomic.LoadInt32(&rt.hits) != 0 {
+		t.Errorf("foreign host was hit %d times, want 0 (must reject before requesting)", rt.hits)
 	}
-	if foreignGotKey != "" {
-		t.Errorf("x-key %q reached the foreign host, want it never attached", foreignGotKey)
+	if rt.gotKey != "" {
+		t.Errorf("x-key %q reached the foreign host, want it never attached", rt.gotKey)
+	}
+}
+
+// TestGenerateImages_RegionalPollingURLSameRegistrableDomainWorks is the
+// availability-side fix: BFL returns region-specific polling hosts (e.g.
+// api.us1.bfl.ai, api.eu1.bfl.ai) alongside the api.bfl.ai base URL. An
+// exact-host same-origin check would reject every real generation; the
+// registrable-domain check must allow it (and still send the API key).
+func TestGenerateImages_RegionalPollingURLSameRegistrableDomainWorks(t *testing.T) {
+	regionSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"gen-1","status":"Ready","result":{"sample":"https://api.us1.bfl.ai/sample"}}`))
+	}))
+	defer regionSrv.Close()
+
+	target, err := url.Parse(regionSrv.URL)
+	if err != nil {
+		t.Fatalf("parse regionSrv.URL: %v", err)
+	}
+	rt := &rewriteHostRoundTripper{target: target}
+
+	p := New(WithAPIKey("secret-key"), WithBaseURL("https://api.bfl.ai"), WithHTTPClient(&http.Client{Transport: rt}))
+	m := p.ImageModel("flux-pro-1.1").(*imageModel)
+
+	poll, _, err := m.poll(context.Background(), "https://api.us1.bfl.ai/poll")
+	if err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+	if poll.Status != "Ready" {
+		t.Errorf("Status = %q, want Ready", poll.Status)
+	}
+	if rt.gotKey != "secret-key" {
+		t.Errorf("x-key = %q, want secret-key", rt.gotKey)
 	}
 }
 
 // TestGenerateImages_SameOriginPollingURLWorks is the positive counterpart to
-// the foreign-origin rejection test: a polling_url on the same origin as the
-// configured base URL (BFL's normal, legitimate response shape) must
-// continue to poll successfully with the API key attached.
+// the foreign-domain rejection test: a polling_url on the exact same origin
+// as the configured base URL (BFL's simplest legitimate response shape)
+// must continue to poll successfully with the API key attached.
 func TestGenerateImages_SameOriginPollingURLWorks(t *testing.T) {
 	sampleBytes := []byte("sample-bytes")
 	var gotPollKey string

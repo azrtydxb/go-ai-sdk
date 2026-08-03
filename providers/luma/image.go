@@ -111,9 +111,9 @@ func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall
 		return nil, fmt.Errorf("luma: completed generation contained no image asset: %s", rawBody)
 	}
 
-	data, mediaType, err := fetchimage.Fetch(ctx, m.provider.client(), gen.Assets.Image)
+	data, mediaType, err := fetchimage.Fetch(ctx, m.provider.client(), gen.Assets.Image, "luma")
 	if err != nil {
-		return nil, fmt.Errorf("luma: fetch image: %w", err)
+		return nil, err
 	}
 
 	return &provider.ImageResponse{

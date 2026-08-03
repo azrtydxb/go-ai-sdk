@@ -161,9 +161,9 @@ func resolveImage(ctx context.Context, p *Provider, img imageWire) ([]byte, stri
 		return data, mediaType, nil
 	}
 
-	data, fetchedMediaType, err := fetchimage.Fetch(ctx, p.client(), img.URL)
+	data, fetchedMediaType, err := fetchimage.Fetch(ctx, p.client(), img.URL, "fal")
 	if err != nil {
-		return nil, "", fmt.Errorf("fal: fetch image: %w", err)
+		return nil, "", err
 	}
 	mediaType := fetchedMediaType
 	if img.ContentType != "" {
