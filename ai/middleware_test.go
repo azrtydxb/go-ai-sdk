@@ -491,6 +491,148 @@ func TestDefaultSettingsMiddleware_FillsZeroFields(t *testing.T) {
 	}
 }
 
+// TestDefaultSettingsMiddleware_FillsNewScalarFields covers the
+// TopK/PresencePenalty/FrequencyPenalty/Seed nil-pointer fills added
+// alongside Temperature/TopP/MaxTokens.
+func TestDefaultSettingsMiddleware_FillsNewScalarFields(t *testing.T) {
+	mock := &aitest.MockModel{Responses: []*provider.Response{{}}}
+	defTopK := 40
+	defPresence := 0.3
+	defFrequency := 0.4
+	defSeed := int64(123)
+	defaults := provider.Call{
+		TopK:             &defTopK,
+		PresencePenalty:  &defPresence,
+		FrequencyPenalty: &defFrequency,
+		Seed:             &defSeed,
+	}
+	wrapped := DefaultSettingsMiddleware(mock, defaults)
+
+	_, err := wrapped.Generate(context.Background(), provider.Call{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := mock.Calls[0]
+	if got.TopK == nil || *got.TopK != defTopK {
+		t.Errorf("TopK = %v, want %v", got.TopK, defTopK)
+	}
+	if got.PresencePenalty == nil || *got.PresencePenalty != defPresence {
+		t.Errorf("PresencePenalty = %v, want %v", got.PresencePenalty, defPresence)
+	}
+	if got.FrequencyPenalty == nil || *got.FrequencyPenalty != defFrequency {
+		t.Errorf("FrequencyPenalty = %v, want %v", got.FrequencyPenalty, defFrequency)
+	}
+	if got.Seed == nil || *got.Seed != defSeed {
+		t.Errorf("Seed = %v, want %v", got.Seed, defSeed)
+	}
+}
+
+// TestDefaultSettingsMiddleware_PerCallScalarFieldsWin covers that a
+// per-call TopK/PresencePenalty/FrequencyPenalty/Seed (already set, non-nil)
+// is preserved rather than overwritten by the matching default.
+func TestDefaultSettingsMiddleware_PerCallScalarFieldsWin(t *testing.T) {
+	mock := &aitest.MockModel{Responses: []*provider.Response{{}}}
+	defTopK := 40
+	defPresence := 0.3
+	defFrequency := 0.4
+	defSeed := int64(123)
+	defaults := provider.Call{
+		TopK:             &defTopK,
+		PresencePenalty:  &defPresence,
+		FrequencyPenalty: &defFrequency,
+		Seed:             &defSeed,
+	}
+	wrapped := DefaultSettingsMiddleware(mock, defaults)
+
+	callTopK := 5
+	callPresence := 0.9
+	callFrequency := 0.8
+	callSeed := int64(999)
+	call := provider.Call{
+		TopK:             &callTopK,
+		PresencePenalty:  &callPresence,
+		FrequencyPenalty: &callFrequency,
+		Seed:             &callSeed,
+	}
+	_, err := wrapped.Generate(context.Background(), call)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := mock.Calls[0]
+	if got.TopK == nil || *got.TopK != callTopK {
+		t.Errorf("TopK = %v, want %v (per-call should win)", got.TopK, callTopK)
+	}
+	if got.PresencePenalty == nil || *got.PresencePenalty != callPresence {
+		t.Errorf("PresencePenalty = %v, want %v (per-call should win)", got.PresencePenalty, callPresence)
+	}
+	if got.FrequencyPenalty == nil || *got.FrequencyPenalty != callFrequency {
+		t.Errorf("FrequencyPenalty = %v, want %v (per-call should win)", got.FrequencyPenalty, callFrequency)
+	}
+	if got.Seed == nil || *got.Seed != callSeed {
+		t.Errorf("Seed = %v, want %v (per-call should win)", got.Seed, callSeed)
+	}
+}
+
+// TestDefaultSettingsMiddleware_HeadersMerge covers Headers' per-key merge
+// semantics: defaults provide missing keys, per-call keys win on conflicts.
+func TestDefaultSettingsMiddleware_HeadersMerge(t *testing.T) {
+	mock := &aitest.MockModel{Responses: []*provider.Response{{}}}
+	defaults := provider.Call{
+		Headers: map[string]string{
+			"x-default-only": "def",
+			"x-conflict":     "from-default",
+		},
+	}
+	wrapped := DefaultSettingsMiddleware(mock, defaults)
+
+	call := provider.Call{
+		Headers: map[string]string{
+			"x-call-only": "call",
+			"x-conflict":  "from-call",
+		},
+	}
+	_, err := wrapped.Generate(context.Background(), call)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := mock.Calls[0].Headers
+	want := map[string]string{
+		"x-default-only": "def",
+		"x-call-only":    "call",
+		"x-conflict":     "from-call",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Headers = %#v, want %#v", got, want)
+	}
+
+	// The caller's input maps must not have been mutated or aliased.
+	if defaults.Headers["x-conflict"] != "from-default" {
+		t.Error("defaults.Headers mutated by applyDefaults")
+	}
+	if call.Headers["x-conflict"] != "from-call" {
+		t.Error("call.Headers mutated by applyDefaults")
+	}
+}
+
+// TestDefaultSettingsMiddleware_HeadersDefaultsOnly covers the case where
+// only defaults carry Headers: the per-call Headers map (nil) is filled in
+// wholesale from defaults.
+func TestDefaultSettingsMiddleware_HeadersDefaultsOnly(t *testing.T) {
+	mock := &aitest.MockModel{Responses: []*provider.Response{{}}}
+	defaults := provider.Call{Headers: map[string]string{"x-default-only": "def"}}
+	wrapped := DefaultSettingsMiddleware(mock, defaults)
+
+	_, err := wrapped.Generate(context.Background(), provider.Call{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := mock.Calls[0].Headers
+	want := map[string]string{"x-default-only": "def"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Headers = %#v, want %#v", got, want)
+	}
+}
+
 func TestDefaultSettingsMiddleware_PerCallWins(t *testing.T) {
 	mock := &aitest.MockModel{Responses: []*provider.Response{{}}}
 	defTemp := 0.7

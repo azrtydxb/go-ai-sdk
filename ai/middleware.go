@@ -405,12 +405,16 @@ func (s *simulatedStreamResponse) Close() error { return nil }
 
 // DefaultSettingsMiddleware wraps model so that every call's zero-valued
 // fields are filled in from defaults before being sent to the underlying
-// model: Temperature/TopP/MaxTokens (nil pointers), StopSequences (empty
-// slice), and ProviderOptions (merged per provider-name namespace, with
-// per-call entries winning over the matching default entries). All other
-// Call fields (Messages, Tools, ToolChoice, ResponseFormat) are passed
-// through unmodified — per-call values always win because only
-// zero-valued fields are ever replaced.
+// model: Temperature/TopP/MaxTokens/TopK/PresencePenalty/FrequencyPenalty/
+// Seed (nil pointers), StopSequences (empty slice), Headers (merged per
+// header key, with per-call keys winning over the matching default key —
+// same semantics as ProviderOptions below, applied one level shallower
+// since Headers has no namespace level), and ProviderOptions (merged per
+// provider-name namespace, with per-call entries winning over the matching
+// default entries). All other Call fields (Messages, Tools, ToolChoice,
+// ResponseFormat) are passed through unmodified — per-call values always
+// win because only zero-valued fields are ever replaced/merged in the
+// caller's favor.
 func DefaultSettingsMiddleware(model provider.LanguageModel, defaults provider.Call) provider.LanguageModel {
 	return &defaultSettingsModel{model: model, defaults: defaults}
 }
@@ -442,11 +446,61 @@ func (m *defaultSettingsModel) applyDefaults(call provider.Call) provider.Call {
 	if call.MaxTokens == nil {
 		call.MaxTokens = m.defaults.MaxTokens
 	}
+	if call.TopK == nil {
+		call.TopK = m.defaults.TopK
+	}
+	if call.PresencePenalty == nil {
+		call.PresencePenalty = m.defaults.PresencePenalty
+	}
+	if call.FrequencyPenalty == nil {
+		call.FrequencyPenalty = m.defaults.FrequencyPenalty
+	}
+	if call.Seed == nil {
+		call.Seed = m.defaults.Seed
+	}
 	if len(call.StopSequences) == 0 {
 		call.StopSequences = m.defaults.StopSequences
 	}
+	call.Headers = mergeHeaders(m.defaults.Headers, call.Headers)
 	call.ProviderOptions = mergeProviderOptions(m.defaults.ProviderOptions, call.ProviderOptions)
 	return call
+}
+
+// mergeHeaders merges per-call headers over defaults, per header key:
+// per-call entries win over the matching default key; keys present only in
+// defaults are carried through unchanged. Key matching is exact (not
+// case-insensitive) — Call.Headers keys are compared case-insensitively only
+// where they're consumed against a provider's fixed auth-header name, not
+// against each other here. The returned map is always a fresh copy — the
+// caller's defaults and override maps are never aliased, so mutating the
+// result afterward cannot affect either input.
+func mergeHeaders(defaults, override map[string]string) map[string]string {
+	if len(defaults) == 0 {
+		return copyHeadersMap(override)
+	}
+	if len(override) == 0 {
+		return copyHeadersMap(defaults)
+	}
+	merged := make(map[string]string, len(defaults)+len(override))
+	for k, v := range defaults {
+		merged[k] = v
+	}
+	for k, v := range override {
+		merged[k] = v
+	}
+	return merged
+}
+
+// copyHeadersMap returns a copy of m (nil stays nil).
+func copyHeadersMap(m map[string]string) map[string]string {
+	if m == nil {
+		return nil
+	}
+	cp := make(map[string]string, len(m))
+	for k, v := range m {
+		cp[k] = v
+	}
+	return cp
 }
 
 // mergeProviderOptions shallow-merges per-call provider options over

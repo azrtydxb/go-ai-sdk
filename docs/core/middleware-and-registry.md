@@ -59,13 +59,17 @@ func DefaultSettingsMiddleware(model provider.LanguageModel, defaults provider.C
 ```
 
 Fills in a call's zero-valued fields from `defaults` before it reaches
-`model`: `Temperature`/`TopP`/`MaxTokens` (nil pointers), `StopSequences`
-(empty slice), and `ProviderOptions` (merged per provider-name namespace,
-with per-call entries winning over the matching default entries within a
-namespace — see [Provider options](provider-options.md) for the namespace
-convention). Every other `Call` field (`Messages`, `Tools`, `ToolChoice`,
-`ResponseFormat`) passes through unmodified. Per-call values always win —
-only zero-valued fields are ever replaced.
+`model`: `Temperature`/`TopP`/`MaxTokens`/`TopK`/`PresencePenalty`/
+`FrequencyPenalty`/`Seed` (nil pointers), `StopSequences` (empty slice),
+`Headers` (merged per header key, with per-call keys winning over the
+matching default key), and `ProviderOptions` (merged per provider-name
+namespace, with per-call entries winning over the matching default entries
+within a namespace — see [Provider options](provider-options.md) for the
+namespace convention). Every other `Call` field (`Messages`, `Tools`,
+`ToolChoice`, `ResponseFormat`) passes through unmodified. Per-call values
+always win — zero-valued/unset fields are replaced outright, while
+`Headers` and `ProviderOptions` are merged key-by-key/namespace-by-namespace
+with the per-call side winning on conflicts.
 
 ### ExtractJSONMiddleware
 
@@ -75,10 +79,7 @@ func ExtractJSONMiddleware(model provider.LanguageModel) provider.LanguageModel
 
 Strips markdown code fences from a model's text output — a common way
 models wrap JSON they were asked to produce "raw" (e.g.
-` ```json\n{...}\n``` `). It reuses the same fence-stripping rule as
-`GenerateObject`'s non-native-JSON decoding path: a single leading fence
-line (` ``` ` or ` ```json `, on its own line) and a single trailing fence
-line are removed; content that isn't fenced passes through unchanged.
+` ```json\n{...}\n``` `).
 
 ```go
 model := ai.ExtractJSONMiddleware(openai.New().Model("gpt-4o"))
@@ -90,10 +91,42 @@ result, err := ai.GenerateText(ctx, ai.GenerateTextOpts{
 // result.Text has any ```json fence markers already stripped.
 ```
 
-`Generate` strips fences from each `TextPart` of the response as a whole.
-`Stream` strips them incrementally, buffering only the undecided prefix of a
-candidate fence line (at most 2 bytes) so scanning stays fully incremental —
-a fence marker split across two deltas is still recognized correctly.
+`Generate` reuses `GenerateObject`'s non-native-JSON decoding rule exactly
+(`stripFences`): the response text is trimmed, and a leading ` ``` ` (or
+` ```json `) plus a trailing ` ``` ` are removed together — only when
+**both** are present at their respective ends of the trimmed text. Text
+that isn't fenced at both ends passes through unchanged, including text
+with fence lines embedded in the middle of otherwise-unfenced prose.
+
+`Stream` strips fences incrementally, mirroring that same leading/trailing
+rule as closely as streaming allows:
+
+- An opening fence line is stripped only when it is the **first non-empty
+  line of the stream** — decided (and emitted) immediately, no buffering
+  needed.
+- A closing fence line is stripped only when it **terminates the
+  stream** — nothing but whitespace follows it before the stream ends.
+  Since streaming can't know "nothing follows" until the stream actually
+  ends, a candidate closing-fence line (plus any trailing whitespace) is
+  buffered rather than emitted immediately; if non-whitespace content
+  later arrives, the buffered candidate is flushed verbatim as ordinary
+  text (it wasn't terminal after all).
+- Any other ` ``` `-prefixed line — neither the first non-empty line nor
+  ultimately terminal — passes through unchanged, same as prose-embedded
+  fences under `Generate`'s rule.
+
+At most one candidate closing-fence line (plus whatever whitespace follows
+it, until resolved) is ever buffered; a fence marker split across two
+deltas (e.g. two backticks then "`json\n") is still recognized correctly,
+since the relevant undecided prefix carries over between feeds.
+
+**Divergence from `Generate`'s rule:** `Generate` requires *both* a leading
+and a trailing fence before stripping either — a leading fence alone is
+left untouched, since the text might not actually be fenced. `Stream`
+cannot wait indefinitely to find out whether a closing fence will ever
+arrive, so it strips a resolved opening fence unconditionally; a stream
+that's truncated before any closing fence appears ends up with its opening
+fence stripped and nothing left to strip for the (nonexistent) close.
 
 **Fence-scanner caveat:** the scanner only recognizes a fence by its first
 three bytes (` ``` `) at the start of a line. Text that legitimately starts
