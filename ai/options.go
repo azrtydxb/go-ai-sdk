@@ -29,8 +29,8 @@ type GenerateTextOpts struct {
 	// one response, only the first matching call is decoded and answered.
 	Output Output
 	// SchemaDescription describes the expected output schema; used as the
-	// injected output tool's Description in the tool-mode fallback and passed
-	// as ResponseFormat description where providers support one.
+	// injected output tool's Description in the tool-mode fallback. It has
+	// no effect in native-JSON mode (ResponseFormat carries no description).
 	SchemaDescription string
 	MaxSteps          int  // default 1; if 0 and StopWhen is set, defaults to 16
 	MaxRetries        *int // default 2
