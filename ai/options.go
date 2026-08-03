@@ -35,11 +35,16 @@ type GenerateTextOpts struct {
 	Headers map[string]string
 
 	// StopWhen, when set, decides after each completed step whether to stop
-	// the tool loop (return true = stop). It is evaluated only when that
-	// step requested tool calls — a step with no tool calls always ends the
-	// loop naturally. MaxSteps still applies as a hard cap regardless of
-	// StopWhen: if MaxSteps is 0 (unset) and StopWhen is non-nil, the hard
-	// cap defaults to 16 instead of the usual default of 1.
+	// the tool loop (return true = stop). It is evaluated after EVERY step,
+	// whether or not that step requested tool calls — this is what makes
+	// LoopFinished (which reports true on a no-tool-call step) meaningful to
+	// compose with other conditions inside a custom StopWhen. That said, a
+	// step with no tool calls always ends the loop naturally regardless of
+	// what StopWhen returns for it — StopWhen cannot make the loop continue
+	// past a step the model didn't request further tool calls in. MaxSteps
+	// still applies as a hard cap regardless of StopWhen: if MaxSteps is 0
+	// (unset) and StopWhen is non-nil, the hard cap defaults to 16 instead
+	// of the usual default of 1.
 	StopWhen func(steps []Step) bool
 	// PrepareStep, when set, is called before each model call with the
 	// zero-based step index and the StepPlan about to be used: Call is the
@@ -113,6 +118,28 @@ type GenerateTextOpts struct {
 	// OnError there.
 	OnError func(err error)
 
+	// OnAbort, when set, is consulted only by StreamText (GenerateText has
+	// no notion of an abandoned or mid-flight iteration, so it never calls
+	// OnAbort). It fires exactly once per TextStream, before the stream's
+	// internal Close, in either of two cases:
+	//
+	//   - the consumer abandons TextStream.Parts() early — stops ranging
+	//     over it (e.g. via break) before the tool loop would otherwise have
+	//     ended naturally or with an error;
+	//   - the context passed to StreamText is canceled (or its deadline
+	//     exceeded) while a step's stream is in flight, surfacing as that
+	//     step's stream.Err().
+	//
+	// OnAbort never fires on natural completion (StopWhen/MaxSteps/no more
+	// tool calls) — that case is OnFinish's — nor does it fire together with
+	// OnError for the same event: a ctx-cancellation mid-stream fires
+	// OnAbort only, while any other mid-stream error (a real provider
+	// failure, not caused by ctx) fires OnError only. Abandoning iteration
+	// early is likewise never accompanied by an error — Err() reports nil
+	// in that case, same as before this field existed — so only OnAbort
+	// fires for it.
+	OnAbort func()
+
 	// ProviderOptions carries provider-specific escape-hatch parameters. It
 	// is threaded through to provider.Call.ProviderOptions unchanged — see
 	// that field's doc for the keying and merge semantics.
@@ -146,6 +173,51 @@ type GenerateTextOpts struct {
 func StepCountIs(n int) func([]Step) bool {
 	return func(steps []Step) bool {
 		return len(steps) >= n
+	}
+}
+
+// HasToolCall returns a StopWhen function that stops the tool loop when the
+// LAST completed step called any of the named tools. With no names given,
+// it stops when the last step called any tool at all (regardless of name).
+// An empty steps slice (impossible in normal use, since StopWhen is only
+// ever consulted after at least one step has completed) reports false.
+func HasToolCall(names ...string) func([]Step) bool {
+	return func(steps []Step) bool {
+		if len(steps) == 0 {
+			return false
+		}
+		last := steps[len(steps)-1].ToolCalls
+		if len(names) == 0 {
+			return len(last) > 0
+		}
+		want := make(map[string]bool, len(names))
+		for _, n := range names {
+			want[n] = true
+		}
+		for _, tc := range last {
+			if want[tc.Name] {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+// LoopFinished returns a StopWhen function that stops the tool loop when the
+// LAST completed step made no tool calls — the same condition that already
+// ends the loop naturally (see StopWhen's doc comment: a no-tool-call step
+// always ends the loop, independent of what any StopWhen function returns).
+// It is provided mainly for composing with other conditions inside a custom
+// StopWhen closure (e.g. "stop at 10 steps OR when the loop would finish
+// naturally, whichever comes first" — though for that particular example
+// the natural-end behavior already makes the LoopFinished half redundant;
+// it earns its keep in less trivial compositions).
+func LoopFinished() func([]Step) bool {
+	return func(steps []Step) bool {
+		if len(steps) == 0 {
+			return false
+		}
+		return len(steps[len(steps)-1].ToolCalls) == 0
 	}
 }
 

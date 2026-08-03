@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/azrtydxb/go-ai-sdk/ai"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -284,7 +285,7 @@ func convertMessages(msgs []provider.Message) ([]wireMessage, error) {
 				if !ok {
 					return nil, fmt.Errorf("mistral: unsupported content part %T in tool message", part)
 				}
-				resultJSON, err := json.Marshal(trp.Result)
+				resultJSON, err := json.Marshal(toolResultForWire(trp.Result))
 				if err != nil {
 					return nil, fmt.Errorf("mistral: marshal tool result: %w", err)
 				}
@@ -306,6 +307,26 @@ func convertMessages(msgs []provider.Message) ([]wireMessage, error) {
 		}
 	}
 	return out, nil
+}
+
+// toolResultForWire projects an ai.ToolResultContent (or
+// *ai.ToolResultContent) tool result down to its Text field, since
+// Mistral's "tool" message content has no image slot; every other value
+// passes through unchanged for the normal json.Marshal path above. Images
+// attached via ai.ToolResultContent are silently dropped for this
+// provider — see ai.ToolResultContent's doc comment.
+func toolResultForWire(result any) any {
+	switch v := result.(type) {
+	case ai.ToolResultContent:
+		return v.Text
+	case *ai.ToolResultContent:
+		if v == nil {
+			return nil
+		}
+		return v.Text
+	default:
+		return result
+	}
 }
 
 func textContent(parts []provider.ContentPart) string {

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/azrtydxb/go-ai-sdk/ai"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 	"github.com/azrtydxb/go-ai-sdk/provider/providertest"
 )
@@ -567,6 +568,59 @@ func TestRequestShapeToolResultOneMessagePerPart(t *testing.T) {
 	}
 	if req.Messages[2].Role != "tool" || req.Messages[2].ToolCallID != "call_2" || req.Messages[2].Name != "get_time" {
 		t.Errorf("Messages[2] = %+v, want tool/call_2/get_time", req.Messages[2])
+	}
+}
+
+// TestRequestShapeToolResultMultiModalProjectsToText verifies that a Tool
+// result of type ai.ToolResultContent is projected down to its Text field
+// for the "tool" message content — Mistral has no image slot in a tool
+// result, so Images is silently dropped.
+func TestRequestShapeToolResultMultiModalProjectsToText(t *testing.T) {
+	srv, fs := newFixtureServer(t)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("mistral-test")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			provider.UserText("simple"),
+			{
+				Role: provider.RoleTool,
+				Content: []provider.ContentPart{
+					provider.ToolResultPart{
+						ToolCallID: "call_1",
+						Name:       "chart",
+						Result: ai.ToolResultContent{
+							Text: "here's a chart",
+							Images: []provider.GeneratedImage{
+								{Data: []byte("fakepngbytes"), MediaType: "image/png"},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	req := fs.request()
+	if len(req.Messages) != 2 {
+		t.Fatalf("Messages = %d, want 2", len(req.Messages))
+	}
+	// Content is double-JSON-encoded (matching the existing convention for
+	// other Result values in this converter: json.Marshal(result), then
+	// json.Marshal(that string)), so unmarshal twice to get the projected
+	// text.
+	var once string
+	if err := json.Unmarshal(req.Messages[1].Content, &once); err != nil {
+		t.Fatal(err)
+	}
+	var text string
+	if err := json.Unmarshal([]byte(once), &text); err != nil {
+		t.Fatal(err)
+	}
+	if text != "here's a chart" {
+		t.Errorf("projected tool result text = %q, want %q", text, "here's a chart")
 	}
 }
 

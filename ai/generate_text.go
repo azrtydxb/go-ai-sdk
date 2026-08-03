@@ -176,13 +176,21 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 			opts.OnStepFinish(step)
 		}
 
+		// StopWhen is consulted after every step (even one with no tool
+		// calls) — see GenerateTextOpts.StopWhen. Evaluating it here,
+		// unconditionally, doesn't change when the loop actually stops for
+		// a no-tool-call step (that's already handled below), but it does
+		// mean a StopWhen closure with side effects (or one composed with
+		// LoopFinished) observes every step, not just tool-call ones.
+		stopByCondition := opts.StopWhen != nil && opts.StopWhen(steps)
+
 		if !hasToolCalls {
 			break
 		}
 		if len(steps) >= maxSteps {
 			break
 		}
-		if opts.StopWhen != nil && opts.StopWhen(steps) {
+		if stopByCondition {
 			break
 		}
 	}
@@ -325,5 +333,13 @@ func buildStep(resp *provider.Response) Step {
 // one-line hook for middleware that decorates a provider.LanguageModel
 // (e.g. logging, caching, retries) before it is passed to GenerateText.
 func WrapModel(m provider.LanguageModel, wrap func(provider.LanguageModel) provider.LanguageModel) provider.LanguageModel {
+	return wrap(m)
+}
+
+// WrapImageModel applies wrap to m, returning the wrapped model. It is the
+// provider.ImageModel counterpart to WrapModel — a one-line naming hook for
+// middleware that decorates a provider.ImageModel before it is passed to
+// GenerateImage.
+func WrapImageModel(m provider.ImageModel, wrap func(provider.ImageModel) provider.ImageModel) provider.ImageModel {
 	return wrap(m)
 }

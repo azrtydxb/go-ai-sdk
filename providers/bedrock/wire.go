@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/azrtydxb/go-ai-sdk/ai"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -87,8 +88,9 @@ type wireToolResult struct {
 }
 
 type wireToolResultContent struct {
-	JSON json.RawMessage `json:"json,omitempty"`
-	Text string          `json:"text,omitempty"`
+	JSON  json.RawMessage `json:"json,omitempty"`
+	Text  string          `json:"text,omitempty"`
+	Image *wireImage      `json:"image,omitempty"`
 }
 
 type wireToolConfig struct {
@@ -362,16 +364,11 @@ func convertMessages(msgs []provider.Message) ([]wireMessage, error) {
 					return nil, fmt.Errorf("bedrock: unsupported content part %T in tool message", part)
 				}
 				tr := &wireToolResult{ToolUseID: trp.ToolCallID}
-				switch v := trp.Result.(type) {
-				case string:
-					tr.Content = []wireToolResultContent{{Text: v}}
-				default:
-					b, err := json.Marshal(trp.Result)
-					if err != nil {
-						return nil, fmt.Errorf("bedrock: marshal tool result: %w", err)
-					}
-					tr.Content = []wireToolResultContent{{JSON: b}}
+				trContent, err := toolResultContent(trp.Result)
+				if err != nil {
+					return nil, fmt.Errorf("bedrock: marshal tool result: %w", err)
 				}
+				tr.Content = trContent
 				// Unlike Mistral/OpenAI-style tool messages, Bedrock's
 				// toolResult block has a dedicated error slot: status
 				// "error" (vs. the default "success").
@@ -387,6 +384,50 @@ func convertMessages(msgs []provider.Message) ([]wireMessage, error) {
 		}
 	}
 	return out, nil
+}
+
+// toolResultContent converts a ToolResultPart.Result into a Converse
+// toolResult block's "content" array. The common case (any value other than
+// ai.ToolResultContent) becomes a single {"text":...} entry for a plain
+// string result, or a single {"json":...} entry otherwise — unchanged from
+// before multi-modal tool results existed. When Execute returned an
+// ai.ToolResultContent (or *ai.ToolResultContent), Converse's toolResult
+// content array supports images natively (unlike most other providers'
+// tool-result wire formats), so it is serialized as one {"text":...} entry
+// (only if Text is non-empty) followed by one {"image":...} entry per entry
+// in Images.
+func toolResultContent(result any) ([]wireToolResultContent, error) {
+	switch v := result.(type) {
+	case ai.ToolResultContent:
+		return toolResultContentBlocks(v), nil
+	case *ai.ToolResultContent:
+		if v == nil {
+			return []wireToolResultContent{{Text: ""}}, nil
+		}
+		return toolResultContentBlocks(*v), nil
+	case string:
+		return []wireToolResultContent{{Text: v}}, nil
+	default:
+		b, err := json.Marshal(result)
+		if err != nil {
+			return nil, err
+		}
+		return []wireToolResultContent{{JSON: b}}, nil
+	}
+}
+
+func toolResultContentBlocks(v ai.ToolResultContent) []wireToolResultContent {
+	var out []wireToolResultContent
+	if v.Text != "" {
+		out = append(out, wireToolResultContent{Text: v.Text})
+	}
+	for _, img := range v.Images {
+		out = append(out, wireToolResultContent{Image: &wireImage{
+			Format: imageFormat(img.MediaType),
+			Source: wireImageSource{Bytes: base64.StdEncoding.EncodeToString(img.Data)},
+		}})
+	}
+	return out
 }
 
 // assistantBlocks converts an assistant message's content parts into wire

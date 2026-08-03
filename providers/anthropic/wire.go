@@ -7,6 +7,7 @@ import (
 	"mime"
 	"strings"
 
+	"github.com/azrtydxb/go-ai-sdk/ai"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -45,8 +46,14 @@ type wireContentBlock struct {
 	Title string `json:"title,omitempty"`
 
 	// tool_result
+	//
+	// Content is `any` (not string) because a tool_result's "content" wire
+	// field takes either a plain string (the common case — a JSON-encoded
+	// tool result) or an array of content blocks (used when the Tool
+	// returned an ai.ToolResultContent, which may carry images alongside
+	// text) — see toolResultBlocks/toolResultContent.
 	ToolUseID string `json:"tool_use_id,omitempty"`
-	Content   string `json:"content,omitempty"`
+	Content   any    `json:"content,omitempty"`
 	IsError   *bool  `json:"is_error,omitempty"`
 
 	// thinking
@@ -410,7 +417,7 @@ func toolResultBlocks(parts []provider.ContentPart) ([]wireContentBlock, error) 
 		if !ok {
 			return nil, fmt.Errorf("anthropic: unsupported content part %T in tool message", part)
 		}
-		resultJSON, err := json.Marshal(trp.Result)
+		content, err := toolResultContent(trp.Result)
 		if err != nil {
 			return nil, fmt.Errorf("anthropic: marshal tool result: %w", err)
 		}
@@ -418,11 +425,60 @@ func toolResultBlocks(parts []provider.ContentPart) ([]wireContentBlock, error) 
 		out = append(out, wireContentBlock{
 			Type:      "tool_result",
 			ToolUseID: trp.ToolCallID,
-			Content:   string(resultJSON),
+			Content:   content,
 			IsError:   &isErr,
 		})
 	}
 	return out, nil
+}
+
+// toolResultContent converts a ToolResultPart.Result into the value that
+// goes on the wire as a tool_result block's "content": for the common case
+// (any value other than ai.ToolResultContent), that's the JSON-marshaled
+// result as a string, same as before multi-modal tool results existed. When
+// Execute returned an ai.ToolResultContent (or *ai.ToolResultContent),
+// content becomes a []wireContentBlock instead — one {"type":"text"} block
+// (only if Text is non-empty) followed by one {"type":"image"} block per
+// entry in Images — since the Messages API accepts either a string or a
+// content-block array in this position.
+func toolResultContent(result any) (any, error) {
+	switch v := result.(type) {
+	case ai.ToolResultContent:
+		return toolResultContentBlocks(v), nil
+	case *ai.ToolResultContent:
+		if v == nil {
+			return "", nil
+		}
+		return toolResultContentBlocks(*v), nil
+	default:
+		resultJSON, err := json.Marshal(result)
+		if err != nil {
+			return nil, err
+		}
+		return string(resultJSON), nil
+	}
+}
+
+func toolResultContentBlocks(v ai.ToolResultContent) []wireContentBlock {
+	var blocks []wireContentBlock
+	if v.Text != "" {
+		blocks = append(blocks, wireContentBlock{Type: "text", Text: v.Text})
+	}
+	for _, img := range v.Images {
+		mediaType := img.MediaType
+		if mediaType == "" {
+			mediaType = "application/octet-stream"
+		}
+		blocks = append(blocks, wireContentBlock{
+			Type: "image",
+			Source: &wireImageSource{
+				Type:      "base64",
+				MediaType: mediaType,
+				Data:      base64.StdEncoding.EncodeToString(img.Data),
+			},
+		})
+	}
+	return blocks
 }
 
 func convertTools(tools []provider.ToolDef) []wireTool {

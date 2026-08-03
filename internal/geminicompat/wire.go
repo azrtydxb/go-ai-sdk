@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/azrtydxb/go-ai-sdk/ai"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -382,11 +383,30 @@ func toolResultParts(parts []provider.ContentPart) ([]wirePart, error) {
 		out = append(out, wirePart{FunctionResponse: &wireFunctionResponse{
 			Name: trp.Name,
 			Response: wireFunctionResponseContents{
-				Output: trp.Result,
+				Output: toolResultForWire(trp.Result),
 			},
 		}})
 	}
 	return out, nil
+}
+
+// toolResultForWire projects an ai.ToolResultContent (or
+// *ai.ToolResultContent) tool result down to its Text field, since Gemini's
+// functionResponse has no image slot; every other value passes through
+// unchanged. Images attached via ai.ToolResultContent are silently dropped
+// for this provider — see ai.ToolResultContent's doc comment.
+func toolResultForWire(result any) any {
+	switch v := result.(type) {
+	case ai.ToolResultContent:
+		return v.Text
+	case *ai.ToolResultContent:
+		if v == nil {
+			return nil
+		}
+		return v.Text
+	default:
+		return result
+	}
 }
 
 func convertTools(tools []provider.ToolDef) []wireFunctionDeclaration {

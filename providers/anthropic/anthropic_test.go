@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/azrtydxb/go-ai-sdk/ai"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 	"github.com/azrtydxb/go-ai-sdk/provider/providertest"
 )
@@ -510,6 +511,102 @@ func TestRequestShapeToolResultBlock(t *testing.T) {
 	json.Unmarshal(lastMsg["content"], &blocks)
 	if _, ok := blocks[0]["is_error"]; !ok {
 		t.Errorf("raw tool_result block missing is_error key: %s", blocks[0])
+	}
+}
+
+// TestRequestShapeToolResultMultiModal verifies that a Tool result of type
+// ai.ToolResultContent is serialized as a tool_result content ARRAY — a
+// text block followed by an image block per Images entry — rather than the
+// usual JSON-string content.
+func TestRequestShapeToolResultMultiModal(t *testing.T) {
+	srv, fs := newFixtureServer(t)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			provider.UserText("simple"),
+			{
+				Role: provider.RoleTool,
+				Content: []provider.ContentPart{provider.ToolResultPart{
+					ToolCallID: "toolu_1",
+					Result: ai.ToolResultContent{
+						Text: "here's a chart",
+						Images: []provider.GeneratedImage{
+							{Data: []byte("fakepngbytes"), MediaType: "image/png"},
+						},
+					},
+				}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(fs.rawBody(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	var msgs []json.RawMessage
+	json.Unmarshal(raw["messages"], &msgs)
+	var lastMsg map[string]json.RawMessage
+	json.Unmarshal(msgs[len(msgs)-1], &lastMsg)
+	var blocks []map[string]json.RawMessage
+	if err := json.Unmarshal(lastMsg["content"], &blocks); err != nil {
+		t.Fatal(err)
+	}
+	var toolResultBlock map[string]json.RawMessage
+	for _, b := range blocks {
+		var typ string
+		json.Unmarshal(b["type"], &typ)
+		if typ == "tool_result" {
+			toolResultBlock = b
+			break
+		}
+	}
+	if toolResultBlock == nil {
+		t.Fatalf("no tool_result block found: %s", fs.rawBody())
+	}
+
+	var contentBlocks []map[string]json.RawMessage
+	if err := json.Unmarshal(toolResultBlock["content"], &contentBlocks); err != nil {
+		t.Fatalf("tool_result.content is not an array (want text+image blocks): %s", toolResultBlock["content"])
+	}
+	if len(contentBlocks) != 2 {
+		t.Fatalf("tool_result.content = %d blocks, want 2 (text, image)", len(contentBlocks))
+	}
+
+	var textType, imageType string
+	json.Unmarshal(contentBlocks[0]["type"], &textType)
+	json.Unmarshal(contentBlocks[1]["type"], &imageType)
+	if textType != "text" {
+		t.Errorf("contentBlocks[0].type = %q, want text", textType)
+	}
+	if imageType != "image" {
+		t.Errorf("contentBlocks[1].type = %q, want image", imageType)
+	}
+
+	var text string
+	json.Unmarshal(contentBlocks[0]["text"], &text)
+	if text != "here's a chart" {
+		t.Errorf("contentBlocks[0].text = %q", text)
+	}
+
+	var source map[string]json.RawMessage
+	json.Unmarshal(contentBlocks[1]["source"], &source)
+	var srcType, mediaType, data string
+	json.Unmarshal(source["type"], &srcType)
+	json.Unmarshal(source["media_type"], &mediaType)
+	json.Unmarshal(source["data"], &data)
+	if srcType != "base64" {
+		t.Errorf("source.type = %q, want base64", srcType)
+	}
+	if mediaType != "image/png" {
+		t.Errorf("source.media_type = %q, want image/png", mediaType)
+	}
+	wantData := base64.StdEncoding.EncodeToString([]byte("fakepngbytes"))
+	if data != wantData {
+		t.Errorf("source.data = %q, want %q", data, wantData)
 	}
 }
 

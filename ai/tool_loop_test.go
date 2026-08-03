@@ -511,3 +511,146 @@ func TestRepairToolCallSingleShotCapOnBadArgs(t *testing.T) {
 		t.Fatal("expected recorded tool error after second (unrepaired) failure")
 	}
 }
+
+// ---------------------------------------------------------------------
+// HasToolCall / LoopFinished / StopWhen-every-step
+// ---------------------------------------------------------------------
+
+func TestHasToolCallAnyName(t *testing.T) {
+	f := HasToolCall()
+	if f(nil) {
+		t.Fatal("empty steps should be false")
+	}
+	if f([]Step{{}}) {
+		t.Fatal("step with no tool calls should be false")
+	}
+	if !f([]Step{{ToolCalls: []ToolCallRecord{{Name: "x"}}}}) {
+		t.Fatal("step with any tool call should be true")
+	}
+}
+
+func TestHasToolCallNamedOnlyLastStep(t *testing.T) {
+	f := HasToolCall("get_weather")
+	steps := []Step{
+		{ToolCalls: []ToolCallRecord{{Name: "get_weather"}}}, // earlier step: irrelevant
+		{ToolCalls: []ToolCallRecord{{Name: "other"}}},       // last step: not the named tool
+	}
+	if f(steps) {
+		t.Fatal("should only consult the LAST step")
+	}
+	steps[len(steps)-1] = Step{ToolCalls: []ToolCallRecord{{Name: "other"}, {Name: "get_weather"}}}
+	if !f(steps) {
+		t.Fatal("last step calling the named tool (among others) should be true")
+	}
+}
+
+func TestLoopFinished(t *testing.T) {
+	f := LoopFinished()
+	if f(nil) {
+		t.Fatal("empty steps should be false")
+	}
+	if f([]Step{{ToolCalls: []ToolCallRecord{{Name: "t"}}}}) {
+		t.Fatal("last step with tool calls should be false")
+	}
+	if !f([]Step{{ToolCalls: []ToolCallRecord{{Name: "t"}}}, {}}) {
+		t.Fatal("last step with no tool calls should be true")
+	}
+}
+
+// TestGenerateTextStopWhenConsultedOnEveryStep verifies the StopWhen
+// consultation-rule change: StopWhen is now called after EVERY step,
+// including one with no tool calls (which previously ended the loop before
+// StopWhen was ever consulted for it). The natural end (no tool calls)
+// still stops the loop unconditionally either way, so this is observed via
+// a side-effecting StopWhen closure rather than a difference in Steps
+// count.
+func TestGenerateTextStopWhenConsultedOnEveryStep(t *testing.T) {
+	m := &aitest.MockModel{Responses: []*provider.Response{
+		toolCallResponse("t", "c1", `{"city":"a"}`),
+		{Content: []provider.ContentPart{provider.TextPart{Text: "done"}},
+			FinishReason: provider.FinishStop},
+	}}
+	tool := NewTool("t", "", func(_ context.Context, a weatherArgs) (any, error) { return "r", nil })
+	var calls int
+	res, err := GenerateText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "x", Tools: []Tool{tool}, MaxSteps: 5,
+		StopWhen: func(steps []Step) bool {
+			calls++
+			return false
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Steps) != 2 {
+		t.Fatalf("steps = %d, want 2", len(res.Steps))
+	}
+	if calls != 2 {
+		t.Fatalf("StopWhen calls = %d, want 2 (consulted on every step, incl. the final no-tool-call step)", calls)
+	}
+}
+
+func TestStreamTextStopWhenConsultedOnEveryStep(t *testing.T) {
+	m := &aitest.MockModel{Streams: [][]provider.StreamPart{
+		{
+			provider.ToolCallEnd{Call: provider.ToolCallPart{ID: "c1", Name: "t", Args: []byte(`{"city":"a"}`)}},
+			provider.FinishPart{Reason: provider.FinishToolCalls},
+		},
+		{
+			provider.TextDelta{Text: "done"},
+			provider.FinishPart{Reason: provider.FinishStop},
+		},
+	}}
+	tool := NewTool("t", "", func(_ context.Context, a weatherArgs) (any, error) { return "r", nil })
+	var calls int
+	s, err := StreamText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "x", Tools: []Tool{tool}, MaxSteps: 5,
+		StopWhen: func(steps []Step) bool {
+			calls++
+			return false
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+	}
+	if s.Err() != nil {
+		t.Fatal(s.Err())
+	}
+	if len(s.Steps()) != 2 {
+		t.Fatalf("steps = %d, want 2", len(s.Steps()))
+	}
+	if calls != 2 {
+		t.Fatalf("StopWhen calls = %d, want 2 (consulted on every step, incl. the final no-tool-call step)", calls)
+	}
+}
+
+// TestGenerateTextLoopFinishedComposedWithStepCount verifies a realistic
+// composition: stop at 10 steps OR when the loop would finish naturally,
+// whichever comes first. Since the model here never stops calling tools on
+// its own, only the step-count half fires — but LoopFinished must still be
+// consulted (and return false) on every one of those steps without panicking
+// or otherwise interfering.
+func TestGenerateTextLoopFinishedComposedWithStepCount(t *testing.T) {
+	responses := make([]*provider.Response, 5)
+	for i := range responses {
+		responses[i] = toolCallResponse("t", "c", `{"city":"x"}`)
+	}
+	m := &aitest.MockModel{Responses: responses}
+	tool := NewTool("t", "", func(_ context.Context, a weatherArgs) (any, error) { return "r", nil })
+	stepCount := StepCountIs(3)
+	loopFinished := LoopFinished()
+	res, err := GenerateText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "x", Tools: []Tool{tool}, MaxSteps: 10,
+		StopWhen: func(steps []Step) bool {
+			return stepCount(steps) || loopFinished(steps)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Steps) != 3 {
+		t.Fatalf("steps = %d, want 3", len(res.Steps))
+	}
+}

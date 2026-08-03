@@ -24,9 +24,10 @@ type TextStream struct {
 
 	activeTools map[string]bool // nil means all of opts.Tools are active
 
-	started bool
-	closed  bool
-	err     error
+	started    bool
+	closed     bool
+	err        error
+	abortFired bool // OnAbort has fired for this stream; fires at most once
 
 	steps         []Step
 	totalUsage    provider.Usage
@@ -185,6 +186,7 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 			}
 
 			if abandoned {
+				s.fireAbort()
 				_ = stream.Close()
 				s.current = nil
 				return
@@ -192,9 +194,17 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 
 			if err := stream.Err(); err != nil {
 				s.err = err
+				ctxCanceled := s.ctx.Err() != nil
+				if ctxCanceled {
+					// A ctx cancellation surfacing as the stream's error
+					// fires OnAbort, not OnError — see
+					// GenerateTextOpts.OnAbort's doc comment for why the two
+					// are mutually exclusive for this event.
+					s.fireAbort()
+				}
 				_ = stream.Close()
 				s.current = nil
-				if s.opts.OnError != nil {
+				if !ctxCanceled && s.opts.OnError != nil {
 					s.opts.OnError(err)
 				}
 				return
@@ -314,6 +324,13 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 				s.opts.OnStepFinish(step)
 			}
 
+			// StopWhen is consulted after every step — see
+			// GenerateTextOpts.StopWhen — even though, as in GenerateText,
+			// that doesn't change when the loop actually stops for a
+			// no-tool-call step (already handled by the hasToolCalls check
+			// below).
+			stopByCondition := s.opts.StopWhen != nil && s.opts.StopWhen(s.steps)
+
 			if !hasToolCalls {
 				s.current = nil
 				s.finish()
@@ -324,7 +341,7 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 				s.finish()
 				return
 			}
-			if s.opts.StopWhen != nil && s.opts.StopWhen(s.steps) {
+			if stopByCondition {
 				s.current = nil
 				s.finish()
 				return
@@ -370,6 +387,18 @@ func assistantContent(respContent []provider.ContentPart) []provider.ContentPart
 		return nil
 	}
 	return append([]provider.ContentPart(nil), respContent...)
+}
+
+// fireAbort invokes opts.OnAbort, if set, the first time it is called for
+// this stream; subsequent calls are no-ops. See GenerateTextOpts.OnAbort.
+func (s *TextStream) fireAbort() {
+	if s.abortFired {
+		return
+	}
+	s.abortFired = true
+	if s.opts.OnAbort != nil {
+		s.opts.OnAbort()
+	}
 }
 
 // finish invokes opts.OnFinish, if set, with a *GenerateTextResult built

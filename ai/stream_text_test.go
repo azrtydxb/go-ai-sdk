@@ -1263,3 +1263,130 @@ func TestStreamTextRepairToolCallSingleShotCap(t *testing.T) {
 		t.Fatalf("repairCalls = %d, want 1 (no re-invocation on second failure)", repairCalls)
 	}
 }
+
+// ---------------------------------------------------------------------
+// OnAbort
+// ---------------------------------------------------------------------
+
+// TestStreamTextOnAbortFiresOnEarlyBreak verifies OnAbort fires exactly once
+// when the consumer abandons Parts() early (breaks before natural end), and
+// that OnError/OnFinish do NOT fire for that same event.
+func TestStreamTextOnAbortFiresOnEarlyBreak(t *testing.T) {
+	m := &aitest.MockModel{Streams: [][]provider.StreamPart{{
+		provider.TextDelta{Text: "a"}, provider.TextDelta{Text: "b"},
+		provider.FinishPart{Reason: provider.FinishStop},
+	}}}
+	var aborted, errored, finished int
+	s, err := StreamText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "x",
+		OnAbort:  func() { aborted++ },
+		OnError:  func(error) { errored++ },
+		OnFinish: func(*GenerateTextResult) { finished++ },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+		break
+	}
+	if aborted != 1 {
+		t.Fatalf("OnAbort calls = %d, want 1", aborted)
+	}
+	if errored != 0 {
+		t.Fatalf("OnError calls = %d, want 0", errored)
+	}
+	if finished != 0 {
+		t.Fatalf("OnFinish calls = %d, want 0", finished)
+	}
+}
+
+// TestStreamTextOnAbortNotFiredOnNaturalCompletion verifies OnAbort does not
+// fire when Parts() is iterated to its natural end.
+func TestStreamTextOnAbortNotFiredOnNaturalCompletion(t *testing.T) {
+	m := &aitest.MockModel{Streams: [][]provider.StreamPart{{
+		provider.TextDelta{Text: "a"},
+		provider.FinishPart{Reason: provider.FinishStop},
+	}}}
+	var aborted, finished int
+	s, err := StreamText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "x",
+		OnAbort:  func() { aborted++ },
+		OnFinish: func(*GenerateTextResult) { finished++ },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+	}
+	if aborted != 0 {
+		t.Fatalf("OnAbort calls = %d, want 0 (natural completion)", aborted)
+	}
+	if finished != 1 {
+		t.Fatalf("OnFinish calls = %d, want 1", finished)
+	}
+}
+
+// TestStreamTextOnAbortFiresOnCtxCancelMidStream verifies that when the
+// context passed to StreamText is canceled while a step's stream is in
+// flight, that cancellation fires OnAbort (not OnError) exactly once, and
+// that Err() still reports the underlying error.
+func TestStreamTextOnAbortFiresOnCtxCancelMidStream(t *testing.T) {
+	inner := &aitest.MockModel{Streams: [][]provider.StreamPart{{
+		provider.TextDelta{Text: "a"},
+	}}}
+	ctx, cancel := context.WithCancel(t.Context())
+	errModel := &errStreamModel{inner: inner, err: context.Canceled}
+
+	var aborted, errored int
+	s, err := StreamText(ctx, GenerateTextOpts{
+		Model: errModel, Prompt: "x",
+		OnAbort: func() { aborted++ },
+		OnError: func(error) { errored++ },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel() // cancel before draining, so ctx.Err() is non-nil by the time stream.Err() is consulted
+	for range s.Parts() {
+	}
+	if !errors.Is(s.Err(), context.Canceled) {
+		t.Fatalf("Err() = %v, want context.Canceled", s.Err())
+	}
+	if aborted != 1 {
+		t.Fatalf("OnAbort calls = %d, want 1", aborted)
+	}
+	if errored != 0 {
+		t.Fatalf("OnError calls = %d, want 0 (ctx-cancel fires OnAbort only)", errored)
+	}
+}
+
+// TestStreamTextOnAbortNotFiredOnOrdinaryMidStreamError verifies a genuine
+// (non-ctx-cancel) mid-stream error fires OnError only, not OnAbort.
+func TestStreamTextOnAbortNotFiredOnOrdinaryMidStreamError(t *testing.T) {
+	wantErr := errors.New("boom mid-stream")
+	inner := &aitest.MockModel{Streams: [][]provider.StreamPart{{
+		provider.TextDelta{Text: "a"},
+	}}}
+	errModel := &errStreamModel{inner: inner, err: wantErr}
+
+	var aborted, errored int
+	s, err := StreamText(t.Context(), GenerateTextOpts{
+		Model: errModel, Prompt: "x",
+		OnAbort: func() { aborted++ },
+		OnError: func(error) { errored++ },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+	}
+	if !errors.Is(s.Err(), wantErr) {
+		t.Fatalf("Err() = %v, want %v", s.Err(), wantErr)
+	}
+	if aborted != 0 {
+		t.Fatalf("OnAbort calls = %d, want 0 (ordinary error fires OnError only)", aborted)
+	}
+	if errored != 1 {
+		t.Fatalf("OnError calls = %d, want 1", errored)
+	}
+}

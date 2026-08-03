@@ -745,6 +745,68 @@ func TestRequestShape_ToolResultErrorStatus(t *testing.T) {
 	}
 }
 
+// TestRequestShape_ToolResultMultiModal verifies that a Tool result of type
+// ai.ToolResultContent is serialized natively into Converse's toolResult
+// content array: a {"text":...} entry followed by one {"image":...} entry
+// per Images entry, using the same image-format detection as user-message
+// ImageParts.
+func TestRequestShape_ToolResultMultiModal(t *testing.T) {
+	model, fs := newTestModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			provider.UserText("simple"),
+			{Role: provider.RoleAssistant, Content: []provider.ContentPart{
+				provider.ToolCallPart{ID: "tu_1", Name: "chart", Args: json.RawMessage(`{}`)},
+			}},
+			{Role: provider.RoleTool, Content: []provider.ContentPart{
+				provider.ToolResultPart{
+					ToolCallID: "tu_1",
+					Name:       "chart",
+					Result: ai.ToolResultContent{
+						Text: "here's a chart",
+						Images: []provider.GeneratedImage{
+							{Data: []byte("fakepngbytes"), MediaType: "image/png"},
+						},
+					},
+				},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	req, _, _ := fs.snapshot()
+
+	var found *wireToolResult
+	for _, m := range req.Messages {
+		for _, c := range m.Content {
+			if c.ToolResult != nil {
+				found = c.ToolResult
+			}
+		}
+	}
+	if found == nil {
+		t.Fatal("no toolResult content block found in request")
+	}
+	if len(found.Content) != 2 {
+		t.Fatalf("toolResult.Content = %d entries, want 2 (text, image)", len(found.Content))
+	}
+	if found.Content[0].Text != "here's a chart" {
+		t.Errorf("toolResult.Content[0].Text = %q", found.Content[0].Text)
+	}
+	if found.Content[1].Image == nil {
+		t.Fatal("toolResult.Content[1].Image = nil, want populated")
+	}
+	if found.Content[1].Image.Format != "png" {
+		t.Errorf("toolResult.Content[1].Image.Format = %q, want png", found.Content[1].Image.Format)
+	}
+	wantBytes := base64.StdEncoding.EncodeToString([]byte("fakepngbytes"))
+	if found.Content[1].Image.Source.Bytes != wantBytes {
+		t.Errorf("toolResult.Content[1].Image.Source.Bytes = %q, want %q", found.Content[1].Image.Source.Bytes, wantBytes)
+	}
+}
+
 // TestRequestShapeUserMessageFilePartPDF verifies a PDF FilePart becomes a
 // Converse "document" content block with format "pdf", Name derived from
 // Filename (sans extension), and the base64 bytes carried the same way an

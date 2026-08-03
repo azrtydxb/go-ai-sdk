@@ -17,6 +17,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/azrtydxb/go-ai-sdk/ai"
 	"github.com/azrtydxb/go-ai-sdk/internal/geminicompat/compattest"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -309,6 +310,49 @@ func TestRequestShapeToolResultFunctionResponse(t *testing.T) {
 	}
 	if m["temp"] != float64(42) {
 		t.Errorf("output.temp = %v, want 42", m["temp"])
+	}
+}
+
+// TestRequestShapeToolResultMultiModalProjectsToText verifies that a Tool
+// result of type ai.ToolResultContent is projected down to its Text field
+// for the functionResponse Output — Gemini's functionResponse has no image
+// slot in a tool result, so Images is silently dropped.
+func TestRequestShapeToolResultMultiModalProjectsToText(t *testing.T) {
+	model, srv := newTestLanguageModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			provider.UserText("simple"),
+			{
+				Role: provider.RoleTool,
+				Content: []provider.ContentPart{provider.ToolResultPart{
+					ToolCallID: "call_1",
+					Name:       "chart",
+					Result: ai.ToolResultContent{
+						Text: "here's a chart",
+						Images: []provider.GeneratedImage{
+							{Data: []byte("fakepngbytes"), MediaType: "image/png"},
+						},
+					},
+				}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	req := lastRequest(t, srv)
+	fr := req.Contents[1].Parts[0].FunctionResponse
+	if fr == nil {
+		t.Fatal("no functionResponse part found")
+	}
+	text, ok := fr.Response.Output.(string)
+	if !ok {
+		t.Fatalf("FunctionResponse.Response.Output = %#v, want plain string (text-only projection)", fr.Response.Output)
+	}
+	if text != "here's a chart" {
+		t.Errorf("projected tool result text = %q, want %q", text, "here's a chart")
 	}
 }
 

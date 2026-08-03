@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/azrtydxb/go-ai-sdk/ai"
 	"github.com/azrtydxb/go-ai-sdk/internal/openaicompat/compattest"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -54,6 +55,70 @@ func TestRequestShapeToolMessageFilePartErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "FilePart") {
 		t.Errorf("error = %q, want it to mention FilePart", err.Error())
+	}
+}
+
+// TestRequestShapeToolResultMultiModalProjectsToText verifies that a Tool
+// result of type ai.ToolResultContent is projected down to its Text field
+// for the "tool" message content — OpenAI's wire format has no image slot
+// in a tool result, so Images is silently dropped.
+func TestRequestShapeToolResultMultiModalProjectsToText(t *testing.T) {
+	model, srv := newTestLanguageModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			provider.UserText("simple"),
+			{Role: provider.RoleAssistant, Content: []provider.ContentPart{
+				provider.ToolCallPart{ID: "c1", Name: "chart", Args: json.RawMessage(`{}`)},
+			}},
+			{Role: provider.RoleTool, Content: []provider.ContentPart{
+				provider.ToolResultPart{
+					ToolCallID: "c1",
+					Name:       "chart",
+					Result: ai.ToolResultContent{
+						Text: "here's a chart",
+						Images: []provider.GeneratedImage{
+							{Data: []byte("fakepngbytes"), MediaType: "image/png"},
+						},
+					},
+				},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(lastRawBody(srv), &raw); err != nil {
+		t.Fatal(err)
+	}
+	var msgs []map[string]json.RawMessage
+	if err := json.Unmarshal(raw["messages"], &msgs); err != nil {
+		t.Fatal(err)
+	}
+	toolMsg := msgs[len(msgs)-1]
+	var role string
+	json.Unmarshal(toolMsg["role"], &role)
+	if role != "tool" {
+		t.Fatalf("last message role = %q, want tool", role)
+	}
+	var content string
+	if err := json.Unmarshal(toolMsg["content"], &content); err != nil {
+		t.Fatalf("tool message content is not a plain string (want text-only projection): %s", toolMsg["content"])
+	}
+	// content is itself a JSON-encoded string (matching the existing
+	// double-encoding convention for other Result values in this
+	// converter), so unmarshal once more to get the projected text.
+	var innerText string
+	if err := json.Unmarshal([]byte(content), &innerText); err != nil {
+		t.Fatal(err)
+	}
+	if innerText != "here's a chart" {
+		t.Errorf("projected tool result text = %q, want %q", innerText, "here's a chart")
+	}
+	if strings.Contains(string(lastRawBody(srv)), "fakepngbytes") {
+		t.Error("raw request body contains image bytes; Images should be dropped for this provider")
 	}
 }
 

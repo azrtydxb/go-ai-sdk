@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/azrtydxb/go-ai-sdk/ai"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 	"github.com/azrtydxb/go-ai-sdk/provider/providertest"
 )
@@ -485,6 +486,54 @@ func TestRequestShapeToolResultOneMessagePerPart(t *testing.T) {
 	}
 	if req.Messages[2].Role != "tool" || req.Messages[2].ToolCallID != "call_2" {
 		t.Errorf("Messages[2] = %+v, want role tool, tool_call_id call_2", req.Messages[2])
+	}
+}
+
+// TestRequestShapeToolResultMultiModalProjectsToText verifies that a Tool
+// result of type ai.ToolResultContent is projected down to its Text field
+// for the "tool" message content — Cohere v2 has no image slot in a tool
+// result, so Images is silently dropped.
+func TestRequestShapeToolResultMultiModalProjectsToText(t *testing.T) {
+	srv, fs := newFixtureServer(t)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("cohere-test")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{
+			provider.UserText("simple"),
+			{
+				Role: provider.RoleTool,
+				Content: []provider.ContentPart{
+					provider.ToolResultPart{
+						ToolCallID: "call_1",
+						Name:       "chart",
+						Result: ai.ToolResultContent{
+							Text: "here's a chart",
+							Images: []provider.GeneratedImage{
+								{Data: []byte("fakepngbytes"), MediaType: "image/png"},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	req := fs.request()
+	if len(req.Messages) != 2 {
+		t.Fatalf("Messages = %d, want 2", len(req.Messages))
+	}
+	// Content is a JSON-marshaled string (matching the existing
+	// double-encoding convention for other Result values in this
+	// converter), so unmarshal once more to get the projected text.
+	var text string
+	if err := json.Unmarshal([]byte(req.Messages[1].Content), &text); err != nil {
+		t.Fatal(err)
+	}
+	if text != "here's a chart" {
+		t.Errorf("projected tool result text = %q, want %q", text, "here's a chart")
 	}
 }
 
