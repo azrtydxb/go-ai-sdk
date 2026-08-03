@@ -161,10 +161,11 @@ for media specifically, in [Media](core/media.md).
   `Code`/`Message`); anything else (closed transport, context timeout,
   malformed wire JSON) is returned unwrapped. See
   [MCP: error handling](mcp.md#error-handling).
-- Remember the v1 client is tools-only (no resources, prompts, sampling,
-  or roots) and text-content-only for tool results — see
-  [MCP: limitations](mcp.md#limitations-v1) before assuming a missing
-  feature is a bug.
+- Remember the client still has no sampling or roots support, is
+  text-content-only for tool results, and cannot receive server-initiated
+  requests (elicitation included) over the HTTP transport — see
+  [MCP: limitations](mcp.md#limitations) before assuming a missing feature
+  is a bug.
 
 ## Source of truth
 

@@ -3,13 +3,15 @@
 An idiomatic Go port of the [Vercel AI SDK](https://sdk.vercel.ai): a single,
 provider-agnostic API for generating text, streaming text, generating
 structured objects, calling tools, computing embeddings, and generating
-images/speech/transcriptions across **25 providers** — OpenAI, Anthropic,
+images/speech/transcriptions across **39 providers** — OpenAI, Anthropic,
 Google (Gemini), Groq, xAI, DeepSeek, Together, Fireworks, Cerebras,
-Perplexity, Mistral, Cohere, Azure OpenAI, Vertex AI, Amazon Bedrock,
-ElevenLabs, fal, Replicate, Luma, Deepgram, LMNT, Hume, AssemblyAI, Gladia,
-and Rev.ai — with the same concepts and naming as the TypeScript original,
-expressed in native Go (`context.Context`, `iter.Seq`, generics, typed
-errors) rather than mirrored line-for-line.
+Perplexity, Moonshot, Qwen, MiniMax, DeepInfra, Hugging Face, Baseten,
+LM Studio, NVIDIA NIM, Vercel AI Gateway, Mistral, Cohere, Voyage,
+Mixedbread, Azure OpenAI, Vertex AI, Amazon Bedrock, ElevenLabs, fal,
+Replicate, Luma, Deepgram, LMNT, Hume, AssemblyAI, Gladia, Rev.ai, Cartesia,
+Prodia, and Black Forest Labs — with the same concepts and naming as the
+TypeScript original, expressed in native Go (`context.Context`, `iter.Seq`,
+generics, typed errors) rather than mirrored line-for-line.
 
 **Status: v0.1.** The public API has full parity with the AI SDK 5 core;
 AI SDK 6 parity is in progress (see the migration guide's
@@ -139,7 +141,7 @@ in [`examples/`](examples/), each compiled by CI.
 - **Embeddings** — `ai.Embed`/`ai.EmbedMany` with automatic batching and
   `ai.CosineSimilarity`. See [Embeddings](docs/core/embeddings.md).
 - **Reranking** — `ai.Rerank` ranks documents by relevance to a query via
-  `provider.RerankingModel` (Cohere this wave). See
+  `provider.RerankingModel` (Cohere, Voyage, Mixedbread). See
   [Embeddings § Reranking](docs/core/embeddings.md#reranking).
 - **Media** — image generation, video generation, speech synthesis,
   transcription (including live streaming transcription), and audio
@@ -180,9 +182,12 @@ in [`examples/`](examples/), each compiled by CI.
 - **Telemetry** — a minimal, dependency-free span-reporting seam
   (`ai.Telemetry`) you bridge to OpenTelemetry or anything else — no OTel
   dependency shipped. See [Telemetry](docs/core/telemetry.md).
-- **MCP (Model Context Protocol)** — a tools-only MCP client (stdio and
-  Streamable HTTP transports) that adapts a server's tools straight into
-  `ai.Tool`. See [MCP](docs/mcp.md).
+- **MCP (Model Context Protocol)** — an MCP client (stdio and Streamable
+  HTTP transports) that adapts a server's tools straight into `ai.Tool`,
+  plus resources, resource templates, prompts, argument completions, and
+  server-initiated elicitation (stdio only — Streamable HTTP has no
+  server→client channel to receive it on), and token-provider auth with
+  transient retry on the HTTP transport. See [MCP](docs/mcp.md).
 
 ## Documentation
 
@@ -209,58 +214,80 @@ in [`examples/`](examples/), each compiled by CI.
 
 <!-- Summarizes docs/providers/README.md's canonical capability matrix. Update all three together (README.md, docs/providers/README.md, docs/core/media.md). -->
 
-All supported providers, by capability:
+All 39 supported providers, by capability (✅ = supported · — = not exposed
+by this package · ⚠ = supported with a caveat, see that provider's page in
+[`docs/providers/`](docs/providers/)):
 
-| Capability | OpenAI | Anthropic | Google | Groq | xAI | DeepSeek³ | Together | Fireworks | Cerebras | Perplexity¹ | Mistral² | Cohere | Azure | Vertex AI | Bedrock |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `GenerateText` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `StreamText` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Tool calling | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `GenerateObject` / `StreamObject` | ✅ native | ✅ tool-mode | ✅ native | ✅ native | ✅ native | ✅ native | ✅ native | ✅ native | ✅ native | ✅ native | ✅ native | ✅ native | ✅ native | ✅ native | ✅ tool-mode⁴ |
-| `Embed` / `EmbedMany` | ✅ | — | ✅ | — | — | — | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `Rerank`⁵ | — | — | — | — | — | — | — | — | — | — | — | ✅ | — | — | — |
+| Provider | Chat & streaming | Tool calling | Structured output | Embeddings | Reranking | Images | Video | Speech (TTS) | Transcription (STT) |
+|---|---|---|---|---|---|---|---|---|---|
+| [OpenAI](docs/providers/openai.md) | ✅ | ✅ | ✅ native | ✅ | — | ✅ | — | ✅ | ✅ ⚠ live |
+| [Azure OpenAI](docs/providers/azure.md) | ✅ | ✅ | ✅ native | ✅ | — | — | — | — | — |
+| [Groq](docs/providers/groq.md) | ✅ | ✅ | ✅ native | — | — | — | — | — | ✅ |
+| [xAI](docs/providers/xai.md) | ✅ | ✅ | ✅ native | — | — | ✅ ⚠ | — | — | — |
+| [DeepSeek](docs/providers/deepseek.md) | ✅ | ✅ | ⚠ `json_object`-only | — | — | — | — | — | — |
+| [Cerebras](docs/providers/cerebras.md) | ✅ | ✅ | ✅ native | — | — | — | — | — | — |
+| [Together](docs/providers/together.md) | ✅ | ✅ | ✅ native | ✅ | — | — | — | — | — |
+| [Fireworks](docs/providers/fireworks.md) | ✅ | ✅ | ✅ native | ✅ | — | — | — | — | — |
+| [Perplexity](docs/providers/perplexity.md) | ✅ | ⚠ no live tools | ✅ native | — | — | — | — | — | — |
+| [Moonshot](docs/providers/moonshot.md) | ✅ | ✅ | ✅ native | — | — | — | — | — | — |
+| [Qwen](docs/providers/qwen.md) | ✅ | ✅ | ✅ native | ✅ | — | — | — | — | — |
+| [MiniMax](docs/providers/minimax.md) | ✅ | ✅ | ✅ native | — | — | — | — | — | — |
+| [DeepInfra](docs/providers/deepinfra.md) | ✅ | ✅ | ✅ native | ✅ | — | — | — | — | — |
+| [Hugging Face](docs/providers/huggingface.md) | ✅ | ✅ | ⚠ tool-mode | — | — | — | — | — | — |
+| [Baseten](docs/providers/baseten.md) | ✅ | ✅ | ✅ native | ✅ | — | — | — | — | — |
+| [LM Studio](docs/providers/lmstudio.md) | ✅ | ✅ | ✅ native | ✅ | — | — | — | — | — |
+| [NVIDIA NIM](docs/providers/nvidia.md) | ✅ | ✅ | ✅ native | ✅ | — | — | — | — | — |
+| [Vercel AI Gateway](docs/providers/gateway.md) | ✅ | ✅ | ⚠ tool-mode | ✅ | — | — | — | — | — |
+| [Mistral](docs/providers/mistral.md) | ✅ | ✅ | ⚠ schema dropped | ✅ | — | — | — | — | — |
+| [Cohere](docs/providers/cohere.md) | ✅ | ✅ | ✅ native | ✅ | ✅ | — | — | — | — |
+| [Voyage](docs/providers/voyage.md) | — | — | — | ✅ | ✅ | — | — | — | — |
+| [Mixedbread](docs/providers/mixedbread.md) | — | — | — | — | ✅ | — | — | — | — |
+| [ElevenLabs](docs/providers/elevenlabs.md) | — | — | — | — | — | — | — | ✅ | ✅ |
+| [Anthropic](docs/providers/anthropic.md) | ✅ | ✅ | ⚠ tool-mode | — | — | — | — | — | — |
+| [Google](docs/providers/google.md) | ✅ | ✅ | ✅ native | ✅ | — | ✅ | — | — | — |
+| [Vertex AI](docs/providers/vertex.md) | ✅ | ✅ | ✅ native | ✅ | — | ✅ | — | — | — |
+| [Amazon Bedrock](docs/providers/bedrock.md) | ✅ | ✅ | ⚠ tool-mode | ✅ | — | — | — | — | — |
+| [fal](docs/providers/fal.md) | — | — | — | — | — | ✅ | ✅ | — | — |
+| [Replicate](docs/providers/replicate.md) | — | — | — | — | — | ✅ | ✅ | — | — |
+| [Luma](docs/providers/luma.md) | — | — | — | — | — | ✅ | ✅ | — | — |
+| [Deepgram](docs/providers/deepgram.md) | — | — | — | — | — | — | — | — | ✅ ⚠ live |
+| [LMNT](docs/providers/lmnt.md) | — | — | — | — | — | — | — | ✅ | — |
+| [Hume](docs/providers/hume.md) | — | — | — | — | — | — | — | ✅ | — |
+| [AssemblyAI](docs/providers/assemblyai.md) | — | — | — | — | — | — | — | — | ✅ |
+| [Gladia](docs/providers/gladia.md) | — | — | — | — | — | — | — | — | ✅ |
+| [Rev.ai](docs/providers/revai.md) | — | — | — | — | — | — | — | — | ✅ |
+| [Cartesia](docs/providers/cartesia.md) | — | — | — | — | — | — | — | ✅ | — |
+| [Prodia](docs/providers/prodia.md) | — | — | — | — | — | ✅ | — | — | — |
+| [Black Forest Labs](docs/providers/bfl.md) | — | — | — | — | — | ✅ | — | — | — |
 
-**Structured output notes:**
-- "Native" means the provider supports schema-constrained JSON output directly via native JSON mode.
-- "Tool-mode" (Anthropic, Bedrock) uses an automatically injected, forced tool call — the same `GenerateObject[T]` call works identically either way.
-- ¹ Perplexity: no tool-calling support in the live API; `Tools` in a `Call` are serialized but may be rejected or ignored.
-- ² Mistral: `GenerateObject` uses `json_object` mode only; schema is not sent on the wire but enforced by the core-side decode step.
-- ³ DeepSeek: `GenerateObject` uses `json_object` mode only (DeepSeek rejects `json_schema`); schema is not sent on the wire but enforced by the core-side decode step.
-- ⁴ Bedrock: the Converse API has no schema-constrained JSON response mode (`Capabilities().NativeJSON` is `false`); `GenerateObject` falls back to a forced tool call, same as Anthropic.
-- ⁵ `Rerank`: Cohere-only this wave (`ai.Rerank`, `provider.RerankingModel`); Voyage and Mixedbread are planned alongside their providers in a later wave. See [Embeddings § Reranking](docs/core/embeddings.md#reranking).
+"Native" structured output means schema-constrained JSON directly via
+native JSON mode; "tool-mode" (Anthropic, Bedrock, Hugging Face, Vercel AI
+Gateway) uses an automatically injected, forced tool call instead — the
+same `GenerateObject[T]` call works identically either way. `Rerank` is
+`ai.Rerank`/`provider.RerankingModel` — see
+[Embeddings § Reranking](docs/core/embeddings.md#reranking). `StreamTranscribe`
+(Deepgram, OpenAI, live/bidirectional) and `Translate` (OpenAI-only) are
+not `ai.Registry`/capability-matrix columns above — see
+[Media](docs/core/media.md) for both, plus `RealtimeSession` (OpenAI-only)
+and `FileStore` (OpenAI, Anthropic), also outside the registry.
 
-Supported providers for media capabilities:
-
-| Capability | OpenAI | Google | Vertex AI | xAI | ElevenLabs | Groq | fal | Replicate | Luma | Deepgram | LMNT | Hume | AssemblyAI | Gladia | Rev.ai |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `GenerateImage` | ✅ gpt-image-1 | ✅ imagen-3.0-generate-002 | ✅ imagen-3.0-generate-002 | ✅ grok-2-image | — | — | ✅ fal-ai/flux/schnell | ✅ black-forest-labs/flux-schnell | ✅ photon-1 | — | — | — | — | — | — |
-| `GenerateVideo` | — | — | — | — | — | — | ✅ fal-ai/kling-video/v1/standard/text-to-video | ✅ minimax/video-01 | ✅ ray-2 | — | — | — | — | — | — |
-| `GenerateSpeech` | ✅ gpt-4o-mini-tts | — | — | — | ✅ eleven_multilingual_v2 | — | — | — | — | — | ✅ blizzard | ✅ (model ID has no wire effect) | — | — | — |
-| `Transcribe` | ✅ whisper-1 | — | — | — | ✅ scribe_v1 | ✅ whisper-large-v3-turbo | — | — | — | ✅ nova-3 | — | — | ✅ universal | ✅ (model ID unused) | ✅ (model ID unused) |
-| `StreamTranscribe`⁶ | ✅ gpt-4o-transcribe (Realtime API) | — | — | — | — | — | — | — | — | ✅ nova-3 (live) | — | — | — | — | — |
-| `Translate`⁶ | ✅ whisper-1 | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
-
-⁶ `StreamTranscribe` and `Translate` are not `ai.Registry` capabilities
-(construct the provider-specific model directly) — included here for
-completeness, not as part of the `ai.Registry`-backed capability matrix
-above. See [Media](docs/core/media.md).
-
-**Note:** This closes out the Vercel-supported transcription roster (fal,
-Replicate, Luma, Deepgram, LMNT, Hume, AssemblyAI, Gladia, Rev.ai). A
-handful of AI SDK 6 providers remain unimplemented — planned per the
-[v6 parity roadmap](docs/superpowers/plans/2026-08-03-v6-parity-roadmap.md);
-see [Provider coverage](#provider-coverage) below.
+This is the full capability matrix from
+[`docs/providers/README.md`](docs/providers/README.md#capability-matrix),
+which also carries the exact wording of every ⚠ caveat above and links to
+each provider's own page for the full detail.
 
 ### Provider coverage
 
 | Providers | Notes |
 |---|---|
 | OpenAI, Anthropic, Google (Gemini) | Three distinct wire formats prove the abstraction |
-| Groq, xAI, DeepSeek, Together, Fireworks, Cerebras, Perplexity | Thin presets over the OpenAI-compatible base |
-| Mistral, Cohere | Own APIs, full provider implementations |
+| Groq, xAI, DeepSeek, Together, Fireworks, Cerebras, Perplexity, Moonshot, Qwen, MiniMax, DeepInfra, Hugging Face, Baseten, LM Studio, NVIDIA NIM, Vercel AI Gateway | Thin presets over the OpenAI-compatible base |
+| Mistral, Cohere, Voyage, Mixedbread | Own APIs, full provider implementations (Voyage: embeddings + reranking; Mixedbread: reranking only) |
 | Azure OpenAI, Vertex AI, Amazon Bedrock | Platform auth: Azure (API-key preset over the OpenAI-compatible base), Vertex AI (Google service-account/ADC auth), Bedrock (AWS SigV4 request signing) |
-| ElevenLabs, fal, Replicate, Luma, Deepgram, LMNT, Hume, AssemblyAI, Gladia, Rev.ai; image/speech/transcription for OpenAI, Google/Vertex, xAI, Groq | Media-only or media-layered providers, all behind the same `ImageModel`/`SpeechModel`/`TranscriptionModel` interfaces |
-| Planned, not yet implemented: Moonshot, Qwen, MiniMax, DeepInfra, Hugging Face, Baseten, LM Studio, NVIDIA NIM, Voyage, Mixedbread, Cartesia, Prodia, Black Forest Labs, AI Gateway | See the [v6 parity roadmap](docs/superpowers/plans/2026-08-03-v6-parity-roadmap.md) (waves 13+) — the provider interface already accommodates them as follow-ups |
+| ElevenLabs, fal, Replicate, Luma, Deepgram, LMNT, Hume, AssemblyAI, Gladia, Rev.ai, Cartesia, Prodia, Black Forest Labs; image/speech/transcription for OpenAI, Google/Vertex, xAI, Groq | Media-only or media-layered providers, all behind the same `ImageModel`/`SpeechModel`/`TranscriptionModel` interfaces |
+
+A handful of AI SDK 6 providers remain unimplemented — planned per the
+[v6 parity roadmap](docs/superpowers/plans/2026-08-03-v6-parity-roadmap.md).
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the full release history, and the
 [design spec](docs/superpowers/specs/2026-08-02-go-ai-sdk-design.md) for

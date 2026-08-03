@@ -22,7 +22,7 @@ page.
 parity (ai-sdk.dev, snapshot 2026-08-03) is in progress, tracked wave by
 wave in the
 [v6 parity roadmap](superpowers/plans/2026-08-03-v6-parity-roadmap.md). This
-table is the feature-by-feature status as of the current wave (12):
+table is the feature-by-feature status as of the current wave (13):
 
 | AI SDK 6 feature | Status |
 |---|---|
@@ -35,7 +35,7 @@ table is the feature-by-feature status as of the current wave (12):
 | AssemblyAI, Gladia, Rev.ai transcription providers | **Shipped** — see [Provider overview](providers/README.md) and each provider's page. |
 | `stopWhen` consultation on every step | **Shipped, and now Vercel-consistent** — `StopWhen` is consulted after every completed step (not only ones that requested tool calls); this matches Vercel's documented behavior and removes what would otherwise have been a divergence. See [Generating text § The multi-step tool loop](core/generating-text.md#the-multi-step-tool-loop). |
 | Output modes on `generateText` (`text`/`object`/`array`/`choice`/`json`, `Experimental_Output`) | **Shipped for `GenerateText`** — `GenerateTextOpts.Output` (`ai.OutputObject[T]`/`ai.OutputArray[T]`/`ai.OutputChoice`/`ai.OutputJSON`), extracted via `ai.OutputAs[T]`; see [Generating text § Output modes](core/generating-text.md#output-modes). **Not shipped for `StreamText`**: Vercel's `Experimental_Output` also streams partial output incrementally as a stream mode; `go-ai-sdk`'s `StreamText` returns the typed `ai.ErrOutputWithStreamText` immediately if `Output` is set — partial-output streaming is deferred to a later wave. |
-| Reranking (`rerank`, `RerankingModel`, Cohere/Voyage/Mixedbread) | **Shipped for Cohere** — `ai.Rerank`, `provider.RerankingModel`, `Registry.RerankingModel`; see [Embeddings § Reranking](core/embeddings.md#reranking). Voyage and Mixedbread are planned alongside their providers in wave 13 (the roadmap lists them here too, but wave 13 governs since those provider packages don't exist yet). |
+| Reranking (`rerank`, `RerankingModel`, Cohere/Voyage/Mixedbread) | **Shipped** — `ai.Rerank`, `provider.RerankingModel`, `Registry.RerankingModel`; Cohere, Voyage, and Mixedbread all implement `provider.RerankingModel` as of wave 13. See [Embeddings § Reranking](core/embeddings.md#reranking), [Voyage](providers/voyage.md#reranking), and [Mixedbread](providers/mixedbread.md#reranking). |
 | Unified `reasoning` option (effort/budget, per-provider mapping) | **Shipped** — `GenerateTextOpts.Reasoning`/`provider.ReasoningConfig{Effort, BudgetTokens}`, mapped to `reasoning_effort` (openaicompat), a resolved token budget via `provider.EffortBudgetTokens` (Anthropic, Google/Vertex AI, Bedrock), or ignored (Cohere, Mistral); see [Reasoning § Requesting reasoning](core/reasoning.md#requesting-reasoning-generatetextoptsreasoning). Unlike the roadmap's original framing, `ProviderOptions` still merges last and wins over `Reasoning` on a wire-key collision — the repo-wide `ProviderOptions` precedence convention was not special-cased for this option; see [Provider options § Reasoning is no exception](core/provider-options.md#reasoning-is-no-exception). |
 | Full lifecycle-callback event set (call-start/end, tool-execution start/end, embed/rerank events) | **Shipped** — `GenerateTextOpts.OnModelCallStart`/`OnModelCallEnd`, `OnToolExecutionStart`/`OnToolExecutionEnd` (see [Generating text § Lifecycle callbacks](core/generating-text.md#lifecycle-callbacks-model-call-and-tool-execution)); `EmbedOpts`/`EmbedManyOpts.OnEmbedStart`/`OnEmbedEnd` (see [Embeddings § Embed](core/embeddings.md#embed)); `RerankOpts.OnRerankStart`/`OnRerankEnd` (see [Embeddings § Reranking](core/embeddings.md#reranking)). Every End-callback's error is the SAME error the caller's function returns (retry exhaustion already translated to `*ai.RetryError`). |
 | RuntimeContext / application context passed into tool execution | **Shipped** — `GenerateTextOpts.RuntimeContext` (an `ai.RuntimeContext` map), read inside a tool's `Execute` (and inside `ApprovalRequirer.ApprovalRequired`/`ApproveToolCall`) via `ai.RuntimeContextFrom(ctx)`. Installed once per run, before the tool loop begins, so every step and resumed batch sees the same value. See [Tools § RuntimeContext](core/tools.md#runtimecontext). |
@@ -47,8 +47,8 @@ table is the feature-by-feature status as of the current wave (12):
 | Streaming audio translation (`StreamTranslate`) | **Not shipped.** None of the providers targeted so far expose a live/streaming audio-translation API (as distinct from streaming *transcription*, which is shipped — see above); `ai.Translate` (below) covers the REST translation use case instead. |
 | Audio translation (`translate` / a translation model) | **Shipped as `ai.Translate` (REST), not `StreamTranslate`.** `ai.Translate`/`provider.TranslationModel`, OpenAI only (`internal/openaicompat.NewTranslationModel`, multipart `POST /audio/translations`, always English output regardless of source language). Not wired into `ai.Registry`. See [Media § Translate](core/media.md#translate). |
 | File/skill upload (`uploadFile`, `uploadSkill`) | **Shipped.** `ai.UploadFile`/`ai.DeleteFile`/`provider.FileStore` (OpenAI, Anthropic — both with `files-api-2025-04-14`-equivalent beta gating on Anthropic's side), referenced from a prompt via the new `provider.FilePart.FileID`/`.URL` variants. `uploadSkill` is **Anthropic-only**: `(*anthropic.Provider).UploadSkill`/`.DeleteSkill`, a provider-specific capability with no generic interface (`anthropic-beta: skills-2025-10-02`). Neither is wired into `ai.Registry`. See [Media § Files & skills](core/media.md#files--skills). |
-| MCP extensions (resources, prompts, sampling, roots, elicitation, token-provider auth) | Planned — wave 13; today's client is tools-only, see [MCP is tools-only](#mcp-is-tools-only). |
-| Provider fleet (Moonshot, Qwen, MiniMax, DeepInfra, Hugging Face, Baseten, LM Studio, NVIDIA NIM, Voyage, Mixedbread, Cartesia, Prodia, Black Forest Labs, AI Gateway) | Planned — wave 13. |
+| MCP extensions (resources, prompts, completions, elicitation, token-provider auth) | **Shipped** — `Client.ListResources`/`ListResourceTemplates`/`ReadResource`, `ListPrompts`/`GetPrompt`, `Complete`, `SetElicitationHandler`/`ElicitationHandler` (server-initiated request dispatch), `NewStreamableHTTPTransportWithOptions` with `WithTokenProvider`/`WithAuthHeader`/`WithHTTPRetry`. **Caveat: elicitation over the HTTP transport is unsupported** — the Streamable HTTP transport has no server→client channel to receive a server-initiated request on, so `elicitation/create` can only reach the client over stdio today; see [MCP § Elicitation](mcp.md#elicitation) and [§ Limitations](mcp.md#limitations). Sampling and roots remain unimplemented. See [MCP § MCP scope](#mcp-scope) below. |
+| Provider fleet (Moonshot, Qwen, MiniMax, DeepInfra, Hugging Face, Baseten, LM Studio, NVIDIA NIM, Voyage, Mixedbread, Cartesia, Prodia, Black Forest Labs, AI Gateway) | **Shipped** — 14 new provider packages, bringing the total to 39. See [Provider overview](providers/README.md). |
 | OpenTelemetry bridge | Planned — wave 14, as a separate nested Go module (`contrib/otel/`) so the root module stays zero-dependency; `ai.Telemetry` is the seam it will plug into today. |
 | UI framework hooks (`useChat`/`useCompletion`/`useObject`, RSC streaming), MCP Apps rendering, DevTools/Terminal UI, WebRTC realtime transport | **Out of scope**, permanently — see [Features NOT ported](#features-not-ported) and the roadmap's standing scope rulings. |
 
@@ -94,7 +94,7 @@ package `github.com/azrtydxb/go-ai-sdk/ai`, imported as `ai`.
 | `temperature` / `topP` / `stopSequences` | `Temperature` / `TopP` / `StopSequences` (all pointers where TS allows omission) | |
 | `providerOptions` | `ProviderOptions map[string]any` | **Values are raw wire keys, not translated option names** — the single biggest divergence; see below. |
 | `experimental_telemetry` (OTel-based) | `ai.TelemetryMiddleware(model, telemetryImpl)` + `ai.Telemetry` interface | Not OpenTelemetry — see [Telemetry is an interface, not OTel](#telemetry-is-an-interface-not-otel). |
-| MCP tools (`experimental_createMCPClient`) | `mcp.NewClient(transport)` + `mcp.Tools(ctx, client)` | Tools-only — see [MCP is tools-only](#mcp-is-tools-only). |
+| MCP tools (`experimental_createMCPClient`) | `mcp.NewClient(transport)` + `mcp.Tools(ctx, client)` | Also covers resources, prompts, completions, and elicitation — see [MCP scope](#mcp-scope). |
 | `useChat` / `useCompletion` / `useObject` (React hooks) | *(not ported)* | UI-framework layer — see [Features NOT ported](#features-not-ported). |
 | React Server Components streaming (`streamUI`, `createStreamableUI`) | *(not ported)* | Same reason. |
 
@@ -225,12 +225,15 @@ at its source page.
    [Telemetry is an interface, not OTel](#telemetry-is-an-interface-not-otel)
    below.
 
-4. **MCP support is tools-only.** Vercel's `experimental_createMCPClient`
-   is documented as supporting tools today with broader MCP surface
-   evolving. `go-ai-sdk`'s `mcp` package is explicitly scoped to
-   `initialize`, `tools/list`, and `tools/call` — no resources, prompts,
-   sampling, roots, or server-initiated requests. See
-   [MCP is tools-only](#mcp-is-tools-only) below and [MCP](mcp.md).
+4. **MCP has no sampling/roots, and elicitation only works over stdio.**
+   Vercel's `experimental_createMCPClient` is documented as supporting tools
+   today with broader MCP surface evolving. `go-ai-sdk`'s `mcp` package
+   covers tools, resources, resource templates, prompts, completions, and
+   elicitation — but still has no `sampling/createMessage` or `roots/list`
+   support, and elicitation (the one server-initiated request type
+   implemented) can only reach the client over the stdio transport, since
+   Streamable HTTP has no server→client channel to receive one on. See
+   [MCP scope](#mcp-scope) below and [MCP](mcp.md).
 
 5. **`OnError` excludes argument-validation errors.** Vercel's `onError`
    callback documentation doesn't carve out an exception for
@@ -266,13 +269,22 @@ Bridge it to OpenTelemetry yourself: start a span in `OnSpanStart`, end it
 in `OnSpanEnd`. A full sketch (including the stream-lifecycle span-ending
 rules) is in [Telemetry § OTel bridge sketch](core/telemetry.md#otel-bridge-sketch).
 
-### MCP is tools-only
+### MCP scope
 
 `mcp.Tools(ctx, client)` adapts an MCP server's tools into `[]ai.Tool` for
-`GenerateTextOpts.Tools`. There is no equivalent of resources, prompts,
-sampling, or roots, and neither transport (stdio, Streamable HTTP)
-supports the server initiating requests back to the client. Full scope
-and known transport deviations are in [MCP § Limitations](mcp.md#limitations-v1).
+`GenerateTextOpts.Tools` — the original, still-primary way to consume an
+MCP server. Beyond tools, the client also implements resources and resource
+templates (`ListResources`/`ListResourceTemplates`/`ReadResource`), prompts
+(`ListPrompts`/`GetPrompt`), argument completions (`Complete`), and
+server-initiated elicitation (`SetElicitationHandler`); each of the
+capability-gated methods returns a `*mcp.CapabilityError` rather than
+sending a request if the server didn't advertise the matching capability.
+There is still no equivalent of sampling or roots. Elicitation — the one
+server-initiated request type implemented — only works over the stdio
+transport: Streamable HTTP has no standalone server→client channel to
+receive one on, so a server sending `elicitation/create` to an
+HTTP-connected client gets no response. Full scope and known transport
+deviations are in [MCP § Limitations](mcp.md#limitations).
 
 ## Features NOT ported
 

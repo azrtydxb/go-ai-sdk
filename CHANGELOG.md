@@ -8,7 +8,7 @@ once it reaches 1.0.
 
 ## [Unreleased]
 
-Waves 9, 10, 11, and 12 of the [AI SDK 6 parity roadmap](docs/superpowers/plans/2026-08-03-v6-parity-roadmap.md).
+Waves 9, 10, 11, 12, and 13 of the [AI SDK 6 parity roadmap](docs/superpowers/plans/2026-08-03-v6-parity-roadmap.md).
 Wave 9: v5 leftovers plus quick AI SDK 6 wins. Wave 10: output modes on
 `GenerateText`, reranking, a unified reasoning option, and the full
 lifecycle-callback event set. Wave 11: tool-execution approvals with a
@@ -16,12 +16,125 @@ resumable pending-approval flow, `RuntimeContext`, an `agent.Agent`
 package, and Code Mode (`codemode.Tool`/`Sandbox`). Wave 12: video
 generation, a stdlib-only WebSocket client, streaming transcription,
 audio translation, a minimal OpenAI realtime voice session, and
-file/skill upload. Full parity with the AI SDK 5 core is maintained; AI
-SDK 6 parity is in progress — see
+file/skill upload. Wave 13: MCP resources/prompts/completions/elicitation
+and token-provider auth with transient retry on the HTTP transport, plus
+14 new providers (Moonshot, Qwen, MiniMax, DeepInfra, Hugging Face,
+Baseten, LM Studio, NVIDIA NIM, Voyage, Mixedbread, Cartesia, Prodia,
+Black Forest Labs, Vercel AI Gateway), bringing the provider total to 39.
+Full parity with the AI SDK 5 core is maintained; AI SDK 6 parity is in
+progress — see
 [Migrating from the Vercel AI SDK § AI SDK 6 delta](docs/migrating-from-vercel-ai-sdk.md#ai-sdk-6-delta)
 for the feature-by-feature status.
 
 ### Added
+
+**Wave 13**
+
+- `mcp`: resources, resource templates, and prompts —
+  `Client.ListResources`/`ListResourceTemplates`/`ReadResource`,
+  `ListPrompts`/`GetPrompt`, each gated on the server's advertised
+  `"resources"`/`"prompts"` capability (a `*mcp.CapabilityError` is
+  returned, with no request sent, if the server didn't declare it).
+  `Resource`/`ResourceTemplate`/`ResourceContents`/`Prompt`/
+  `PromptArgument`/`PromptMessage`/`PromptPart` are the new domain types;
+  an embedded resource inside a prompt message decodes through the same
+  `ResourceContents` shape `ReadResource` uses. A prompt message's
+  `content` field is accepted as either a single object or an array,
+  always flattened into `[]PromptPart`; unrecognized content-part types
+  are preserved (not errored), per MCP's forward-compatible convention.
+  `ListTools`'s pagination loop was generalized into a shared `paginate`
+  helper reused by all four new list methods, with no behavior change to
+  `ListTools` itself. See [MCP § Resources and resource templates](docs/mcp.md#resources-and-resource-templates)
+  and [§ Prompts](docs/mcp.md#prompts).
+- `mcp`: argument completions and server-initiated elicitation —
+  `Client.Complete` (`completion/complete`, gated on the `"completions"`
+  capability); `Client.SetElicitationHandler`/`ElicitationHandler`,
+  handling server-initiated `elicitation/create` requests via a new
+  `recvLoop` discrimination (`id`+no `method` → response; `id`+`method` →
+  server-initiated request, dispatched to its own goroutine; no `id` →
+  notification, dropped as before). A `nil` handler auto-declines and
+  omits the `"elicitation"` capability from `Initialize`; a handler error
+  is reported to the server as `Action: "cancel"`. **Elicitation only
+  works over the stdio transport** — Streamable HTTP has no server→client
+  channel to receive a server-initiated request on, so this is a real,
+  documented gap rather than a hypothetical one. See
+  [MCP § Completions](docs/mcp.md#completions) and
+  [§ Elicitation](docs/mcp.md#elicitation).
+- `mcp`: token-provider auth and transient retry on the Streamable HTTP
+  transport — `NewStreamableHTTPTransportWithOptions`, `TokenProvider`/
+  `TokenProviderFunc`, `WithTokenProvider`, `WithAuthHeader`,
+  `WithHTTPRetry(maxRetries)` (capped exponential backoff, `Retry-After`
+  honored, retries only HTTP 429/503 and connection errors, never once
+  response bytes have started being consumed, ctx-aware backoff waits),
+  `WithHTTPClientOpt`. The `TokenProvider` is re-invoked fresh on every
+  request and every retry attempt; the transport does not retry 401s
+  itself. `NewStreamableHTTPTransport` is unchanged (now a thin wrapper).
+  See [MCP § Token-provider auth and retries](docs/mcp.md#token-provider-auth-and-retries-http-transport).
+- Eight new `internal/openaicompat` preset providers: `providers/moonshot`
+  (`MOONSHOT_API_KEY`), `providers/qwen` (`DASHSCOPE_API_KEY`,
+  `max_tokens` field name, embeddings), `providers/minimax`
+  (`MINIMAX_API_KEY`, `max_tokens` field name), `providers/deepinfra`
+  (`DEEPINFRA_API_KEY`, `/v1/openai` base path, embeddings with a 1024
+  batch size), `providers/huggingface` (`HF_TOKEN`, `NativeJSON: false`
+  since the router fans out to heterogeneous backends, `max_tokens` field
+  name), `providers/baseten` (`BASETEN_API_KEY`, embeddings),
+  `providers/lmstudio` (`LMSTUDIO_API_KEY`, local-first: no key required,
+  defaults to `http://localhost:1234/v1`, embeddings), and
+  `providers/nvidia` (`NVIDIA_API_KEY`, embeddings). All eight route their
+  quirks entirely through existing `openaicompat.Config` fields — no new
+  `Config` field was needed. See [Provider overview](docs/providers/README.md).
+- `providers/gateway`: Vercel AI Gateway, also an `openaicompat` preset
+  (`AI_GATEWAY_API_KEY`, `NativeJSON: false` since routing slugs resolve
+  to heterogeneous upstream models, embeddings with a batch size of 1).
+  Routing slugs (e.g. `"openai/gpt-4o"`) pass through verbatim as the wire
+  `model` field, including through `ai.Registry` — `splitID` cuts on the
+  first colon only, so a slug's internal slashes survive
+  `"gateway:openai/gpt-4o"`-style registry lookups intact. OIDC
+  (`VERCEL_OIDC_TOKEN`) is out of scope; only the API-key flow is
+  supported. See [Vercel AI Gateway](docs/providers/gateway.md).
+- `providers/voyage`: `provider.EmbeddingModel` (also
+  `EmbeddingModelWithOptions`, `MaxBatchSize() == 128`) and
+  `provider.RerankingModel` against Voyage AI's embeddings and rerank
+  APIs (`VOYAGE_API_KEY`). Embeddings are placed at their response
+  `index` rather than appended in response order; both embed and rerank
+  report token-based `Usage.TotalTokens`. See
+  [Embeddings § Reranking](docs/core/embeddings.md#reranking) and
+  [Voyage](docs/providers/voyage.md).
+- `providers/mixedbread`: `provider.RerankingModel` against Mixedbread
+  AI's rerank API (`MXBAI_API_KEY`) — `documents` maps to Mixedbread's
+  `input` wire field (not `documents`) and the response's per-result
+  `score` field (not `relevance_score`), both deliberately different
+  field names from Cohere/Voyage's rerank shape; `Usage` is left zero (no
+  token-usage field in the documented response). See
+  [Mixedbread](docs/providers/mixedbread.md).
+- `providers/cartesia`: `provider.SpeechModel` against Cartesia's
+  text-to-speech API (`CARTESIA_API_KEY` + `Cartesia-Version` header);
+  `Voice` is required (a hard error, unlike every other speech provider's
+  substituted default); `OutputFormat` maps to a nested
+  `output_format.container`/`.encoding` object at a fixed 44100 sample
+  rate. See [Cartesia](docs/providers/cartesia.md).
+- `providers/prodia`: `provider.ImageModel` against Prodia's v2
+  synchronous `/job` endpoint (`PRODIA_API_KEY`); the response body IS
+  the generated image bytes (no JSON envelope, so `ImageResponse.Raw` is
+  nil); `ProviderOptions` merge into the nested `config` object, not the
+  top level. See [Prodia](docs/providers/prodia.md).
+- `providers/bfl`: `provider.ImageModel` against Black Forest Labs'
+  asynchronous image API (`BFL_API_KEY`, `x-key` header, not
+  `Authorization`) — a generation is created, then polled at the
+  **absolute** `polling_url` the create response returns (never a path
+  this SDK builds itself) until a `"Ready"`/failure terminal state.
+  See [Black Forest Labs](docs/providers/bfl.md).
+- 14 new [provider pages](docs/providers/) and a wave-13 documentation
+  pass across [MCP](docs/mcp.md), [Provider overview](docs/providers/README.md)
+  (25→39 rows across the capability matrix, construction-at-a-glance
+  table, and provider-page list), [Embeddings § Reranking](docs/core/embeddings.md#reranking),
+  [Media](docs/core/media.md), [Getting started](docs/getting-started.md)
+  (env var table), [`README.md`](README.md), and
+  [Migrating from the Vercel AI SDK](docs/migrating-from-vercel-ai-sdk.md)
+  (MCP scope and provider-fleet rows now **Shipped**; the former
+  "MCP is tools-only" section retitled to
+  [MCP scope](docs/migrating-from-vercel-ai-sdk.md#mcp-scope) to reflect
+  the expanded surface).
 
 **Wave 12**
 

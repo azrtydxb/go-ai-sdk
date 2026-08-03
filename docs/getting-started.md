@@ -98,8 +98,19 @@ provider package:
 | Together AI | `providers/together` | `TOGETHER_AI_API_KEY` | |
 | Fireworks | `providers/fireworks` | `FIREWORKS_API_KEY` | |
 | Perplexity | `providers/perplexity` | `PERPLEXITY_API_KEY` | |
+| Moonshot | `providers/moonshot` | `MOONSHOT_API_KEY` | |
+| Qwen | `providers/qwen` | `DASHSCOPE_API_KEY` | |
+| MiniMax | `providers/minimax` | `MINIMAX_API_KEY` | |
+| DeepInfra | `providers/deepinfra` | `DEEPINFRA_API_KEY` | |
+| Hugging Face | `providers/huggingface` | `HF_TOKEN` | |
+| Baseten | `providers/baseten` | `BASETEN_API_KEY` | |
+| LM Studio | `providers/lmstudio` | `LMSTUDIO_API_KEY` | optional — local server needs no authentication |
+| NVIDIA NIM | `providers/nvidia` | `NVIDIA_API_KEY` | |
+| Vercel AI Gateway | `providers/gateway` | `AI_GATEWAY_API_KEY` | |
 | Mistral | `providers/mistral` | `MISTRAL_API_KEY` | |
 | Cohere | `providers/cohere` | `COHERE_API_KEY` | |
+| Voyage | `providers/voyage` | `VOYAGE_API_KEY` | |
+| Mixedbread | `providers/mixedbread` | `MXBAI_API_KEY` | |
 | ElevenLabs | `providers/elevenlabs` | `ELEVENLABS_API_KEY` | |
 | fal | `providers/fal` | `FAL_API_KEY` (falls back to `FAL_KEY`) | |
 | Replicate | `providers/replicate` | `REPLICATE_API_TOKEN` | |
@@ -110,6 +121,9 @@ provider package:
 | AssemblyAI | `providers/assemblyai` | `ASSEMBLYAI_API_KEY` | |
 | Gladia | `providers/gladia` | `GLADIA_API_KEY` | |
 | Rev.ai | `providers/revai` | `REVAI_API_KEY` (falls back to `REV_AI_API_KEY`) | |
+| Cartesia | `providers/cartesia` | `CARTESIA_API_KEY` | |
+| Prodia | `providers/prodia` | `PRODIA_API_KEY` | |
+| Black Forest Labs | `providers/bfl` | `BFL_API_KEY` | |
 
 ## Streaming quickstart
 

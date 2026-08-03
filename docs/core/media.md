@@ -46,6 +46,8 @@ than being silently ignored:
 | fal | `Size` | `AspectRatio` |
 | Replicate | `AspectRatio` | `Size` |
 | Luma | `AspectRatio` | `Size` |
+| Prodia | `Size` | (no `AspectRatio` field; simply unused) |
+| Black Forest Labs | `Size` | (no `AspectRatio` field; simply unused) |
 
 OpenAI and xAI both go through the shared `openaicompat` base and its
 `images/generations` wire format, which has no aspect-ratio parameter; a
@@ -63,16 +65,28 @@ to `image_size`); Replicate and Luma follow the Google/Vertex family
 translated into `{"width":1024,"height":1024}`; any other value (e.g.
 `"square_hd"`) is passed through verbatim as a string.
 
+Prodia and Black Forest Labs are more permissive than the strict
+accept-one/reject-the-other pairs above: both parse `Size` ("WxH") into
+`width`/`height` wire fields and have no dedicated `AspectRatio` wire field
+at all — a non-empty `AspectRatio` is simply **ignored**, not rejected with
+an error, since neither provider's `GenerateImages` even reads that field.
+
 `Seed` is silently ignored by OpenAI/xAI (the images API has no seed
 parameter) and by Luma (Dream Machine has no seed parameter), but is sent
-through by Google/Vertex, fal, and Replicate.
+through by Google/Vertex, fal, and Replicate. Prodia sends `Seed` through
+(`config.seed`, `*int64`); Black Forest Labs has no seed field in this
+integration — reach it via `ProviderOptions["bfl"]` if the target model
+accepts one.
 
 `N` (image count) defaults to 1 for Google/Vertex when left at 0; OpenAI/xAI
 pass `N` through as-is (omitted from the wire request when 0, which the API
 then defaults itself). fal maps `N` to `num_images` the same way; Replicate
 maps it to `num_outputs`. Luma rejects `N > 1` outright (`"luma: multiple
 images per call are not supported"`) since Dream Machine's image endpoint
-produces exactly one image per generation.
+produces exactly one image per generation. Prodia and Black Forest Labs
+have no `N` wire field at all in this integration — `ImageCall.N` is simply
+never read, so every call returns exactly one image regardless of what `N`
+is set to (unlike Luma, which errors rather than silently ignoring it).
 
 ## GenerateVideo
 
@@ -145,11 +159,14 @@ fmt.Println(result.MediaType) // "audio/mpeg"
 | ElevenLabs | voice id `21m00Tcm4TlvDq8ikWAM` ("Rachel") | `"mp3"` → `mp3_44100_128` (`audio/mpeg`) | `"pcm"` maps to `pcm_44100` (`audio/pcm`); `"ulaw"` maps to `ulaw_8000` (`audio/basic`); any other value is passed through verbatim as the `output_format` query parameter, with `MediaType` reported as `application/octet-stream`. `Language` is sent as `language_code`, which ElevenLabs only accepts for turbo/flash v2.5 models — other models may reject it server-side. |
 | LMNT | `"leah"` | `"mp3"` (→ `audio/mpeg`); `"wav"` → `audio/wav`; other → `application/octet-stream` | `Language` and `Speed` pass straight through to the wire request with no rewriting. See [LMNT](../providers/lmnt.md). |
 | Hume | none (an empty `Voice` omits the field rather than substituting a default) | `"mp3"` (→ `audio/mpeg`); `"wav"` → `audio/wav`; `"pcm"` → `audio/pcm`; other → `application/octet-stream` | `Language` is silently ignored — Hume's wire format has no equivalent field. Response audio is base64-encoded JSON, not a raw binary body. See [Hume](../providers/hume.md). |
+| Cartesia | none — `Voice` is **required**, a hard error before any HTTP call | `"mp3"` (→ `audio/mpeg`, encoding `mp3`); `"wav"` → `audio/wav` (encoding `pcm_s16le`); other → `application/octet-stream` (encoding `pcm_f32le`), always at a fixed 44100 sample rate | Unlike every other provider on this page, an empty `Voice` is an error (`"cartesia: Voice is required"`), not a substituted default. `Language` passes straight through with no rewriting. See [Cartesia](../providers/cartesia.md). |
 
 OpenAI, ElevenLabs, and LMNT require a voice; when `Voice` is left empty,
 the SDK substitutes the default above rather than sending an empty value.
 Hume is the exception: an empty `Voice` simply omits the field from the
-wire request, since Hume has no SDK-enforced default.
+wire request, since Hume has no SDK-enforced default. Cartesia is stricter
+still: an empty `Voice` is rejected outright rather than defaulted or
+omitted.
 
 ## Transcribe
 
@@ -512,14 +529,17 @@ requests, never on `/v1/messages`) and the live-testing caveat.
   [`internal/geminicompat/image.go`](../../internal/geminicompat/image.go),
   [`providers/fal/image.go`](../../providers/fal/image.go),
   [`providers/replicate/image.go`](../../providers/replicate/image.go),
-  [`providers/luma/image.go`](../../providers/luma/image.go)
+  [`providers/luma/image.go`](../../providers/luma/image.go),
+  [`providers/prodia/image.go`](../../providers/prodia/image.go),
+  [`providers/bfl/image.go`](../../providers/bfl/image.go)
 - [`providers/luma/video.go`](../../providers/luma/video.go),
   [`providers/fal/video.go`](../../providers/fal/video.go),
   [`providers/replicate/video.go`](../../providers/replicate/video.go)
 - [`internal/openaicompat/speech.go`](../../internal/openaicompat/speech.go),
   [`providers/elevenlabs/speech.go`](../../providers/elevenlabs/speech.go),
   [`providers/lmnt/speech.go`](../../providers/lmnt/speech.go),
-  [`providers/hume/speech.go`](../../providers/hume/speech.go)
+  [`providers/hume/speech.go`](../../providers/hume/speech.go),
+  [`providers/cartesia/speech.go`](../../providers/cartesia/speech.go)
 - [`internal/openaicompat/transcription.go`](../../internal/openaicompat/transcription.go),
   [`providers/deepgram/transcription.go`](../../providers/deepgram/transcription.go),
   [`providers/elevenlabs/transcription.go`](../../providers/elevenlabs/transcription.go),

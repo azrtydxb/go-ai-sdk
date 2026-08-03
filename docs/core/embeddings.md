@@ -95,12 +95,24 @@ as 1, to avoid an infinite loop):
 | Cohere | 96 |
 | Mistral | 32 |
 | Amazon Bedrock | 1 |
+| Qwen | 10 |
+| DeepInfra | 1024 |
+| Baseten | 1 |
+| LM Studio | 1 |
+| NVIDIA NIM | 1 |
+| Vercel AI Gateway | 1 |
+| Voyage | 128 |
 
 Anthropic has no embeddings API and does not implement
 `provider.EmbeddingModel` at all — matching the TS AI SDK's behavior.
 Bedrock's Titan/Cohere embedding models have no batched request shape, so
 its `MaxBatchSize()` is 1: `EmbedMany` still works against it, it just
-issues one call per value.
+issues one call per value. Baseten, LM Studio, NVIDIA NIM, and Vercel AI
+Gateway are conservatively `1` for the same reason: each fronts an
+open-ended catalog of deployed/upstream models with no single documented
+shared batch limit. DeepInfra's `1024` is the largest batch size of any
+provider in this SDK. Mixedbread implements only `provider.RerankingModel`
+— it has no `EmbeddingModel` and so no entry in this table.
 
 ## EmbeddingModelWithOptions
 
@@ -213,18 +225,37 @@ resolved text from `opts.Documents[Index]` (an out-of-range `Index` from the
 provider is defensively skipped rather than causing a panic).
 `RerankResult.Usage` is a `provider.Usage`.
 
-### Cohere
+### Cohere, Voyage, and Mixedbread
 
-Cohere is the only rerank-capable provider this wave (Voyage and Mixedbread
-are planned alongside their providers in a later wave — see
-[Migrating from the Vercel AI SDK](../migrating-from-vercel-ai-sdk.md)).
-`Provider.RerankingModel(id)` constructs one, e.g.
-`cohere.New().RerankingModel("rerank-v3.5")`. Cohere bills reranking in
-"search units," not tokens: `RerankResult.Usage`/`provider.RerankResponse.Usage`
-are left zero, and `provider.RerankResponse.Raw` carries the full response
-body (including Cohere's own billing metadata) for callers that need it.
-See [Cohere § Reranking](../providers/cohere.md#reranking) for the wire
-details.
+Three providers implement `provider.RerankingModel`:
+
+- **Cohere** — `cohere.New().RerankingModel("rerank-v3.5")`. Cohere bills
+  reranking in "search units," not tokens:
+  `RerankResult.Usage`/`provider.RerankResponse.Usage` are left zero, and
+  `provider.RerankResponse.Raw` carries the full response body (including
+  Cohere's own billing metadata) for callers that need it. See
+  [Cohere § Reranking](../providers/cohere.md#reranking) for the wire
+  details.
+- **Voyage** — `voyage.New().RerankingModel("rerank-2")`. Unlike Cohere,
+  Voyage's rerank response reports token usage:
+  `RerankResult.Usage.TotalTokens` comes from the response's
+  `usage.total_tokens` field. `RerankCall.Documents` maps to Voyage's
+  `documents` wire field (same field name as Cohere) and `TopN` maps to
+  `top_k` (a different field name from Cohere's `top_n`, but the same
+  "0 means provider default" contract). See
+  [Voyage § Reranking](../providers/voyage.md#reranking).
+- **Mixedbread** — `mixedbread.New().RerankingModel("mixedbread-ai/mxbai-rerank-large-v1")`.
+  Mixedbread's rerank request field names differ from both Cohere and
+  Voyage: `RerankCall.Documents` maps to Mixedbread's `input` field (not
+  `documents`), and the per-result score field on the wire response is
+  `score` (not `relevance_score`). `Usage` is left zero (no token-usage
+  field in Mixedbread's documented rerank response). See
+  [Mixedbread § Reranking](../providers/mixedbread.md#reranking).
+
+All three preserve the provider's returned result order rather than
+re-sorting client-side, and all three route `ProviderOptions` through the
+same shallow-merge-into-the-marshaled-request convention (keyed
+`"cohere"`/`"voyage"`/`"mixedbread"` respectively).
 
 ### Via the registry
 
@@ -250,6 +281,9 @@ model, err := reg.RerankingModel("cohere:rerank-v3.5")
 - [`provider/rerank.go`](../../provider/rerank.go)
 - [`providers/vertex/embedding.go`](../../providers/vertex/embedding.go)
 - [`providers/cohere/rerank.go`](../../providers/cohere/rerank.go)
+- [`providers/voyage/embedding.go`](../../providers/voyage/embedding.go),
+  [`providers/voyage/rerank.go`](../../providers/voyage/rerank.go)
+- [`providers/mixedbread/rerank.go`](../../providers/mixedbread/rerank.go)
 
 See also: [Generating text](generating-text.md) for the shared retry
 wrapper, [Provider options](provider-options.md) for the general

@@ -28,7 +28,8 @@ exists — the SDK's public API is implemented and documented end-to-end (see
 - [Provider options](core/provider-options.md) — the raw-wire-key escape hatch, `ProviderMetadata`
 - [Errors and retries](core/errors-and-retries.md) — the typed error reference, retry/backoff behavior
 - [Telemetry](core/telemetry.md) — `Telemetry`, `TelemetryMiddleware`, OTel bridging
-- [Model Context Protocol (MCP)](mcp.md) — using MCP servers' tools as `ai.Tool`s
+- [Model Context Protocol (MCP)](mcp.md) — tools, resources, prompts,
+  completions, elicitation, and token-provider auth/retries
 
 ## Providers
 
@@ -46,8 +47,19 @@ exists — the SDK's public API is implemented and documented end-to-end (see
 - [Together AI](providers/together.md)
 - [Fireworks](providers/fireworks.md)
 - [Perplexity](providers/perplexity.md)
+- [Moonshot](providers/moonshot.md)
+- [Qwen](providers/qwen.md)
+- [MiniMax](providers/minimax.md)
+- [DeepInfra](providers/deepinfra.md)
+- [Hugging Face](providers/huggingface.md)
+- [Baseten](providers/baseten.md)
+- [LM Studio](providers/lmstudio.md)
+- [NVIDIA NIM](providers/nvidia.md)
+- [Vercel AI Gateway](providers/gateway.md)
 - [Mistral](providers/mistral.md)
 - [Cohere](providers/cohere.md)
+- [Voyage](providers/voyage.md)
+- [Mixedbread](providers/mixedbread.md)
 - [ElevenLabs](providers/elevenlabs.md)
 - [fal](providers/fal.md)
 - [Replicate](providers/replicate.md)
@@ -58,6 +70,9 @@ exists — the SDK's public API is implemented and documented end-to-end (see
 - [AssemblyAI](providers/assemblyai.md)
 - [Gladia](providers/gladia.md)
 - [Rev.ai](providers/revai.md)
+- [Cartesia](providers/cartesia.md)
+- [Prodia](providers/prodia.md)
+- [Black Forest Labs](providers/bfl.md)
 
 ## Versioning
 
