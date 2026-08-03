@@ -138,6 +138,26 @@ tools mix freely in the same `Tools` slice, and go through the identical
 multi-step loop, `RepairToolCall`, and error taxonomy described in
 [Tools](core/tools.md).
 
+## Error handling
+
+Server-side JSON-RPC errors (from `Initialize`, `ListTools`, or `CallTool`)
+come back as `*mcp.RPCError`, which is `errors.As`-able and carries the
+protocol's `Code`/`Message` fields verbatim. Anything else — a closed
+transport, a context timeout, malformed JSON on the wire — is returned
+as-is, not wrapped in `RPCError`:
+
+```go
+_, err := client.CallTool(ctx, "search", args)
+if err != nil {
+	var rpcErr *mcp.RPCError
+	if errors.As(err, &rpcErr) {
+		fmt.Printf("server error %d: %s\n", rpcErr.Code, rpcErr.Message)
+	} else {
+		fmt.Println("transport error:", err)
+	}
+}
+```
+
 ## Limitations (v1)
 
 - **Tools only.** No resources, prompts, sampling, or roots — just
