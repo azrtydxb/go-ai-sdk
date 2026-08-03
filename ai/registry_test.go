@@ -12,6 +12,7 @@ import (
 	"github.com/azrtydxb/go-ai-sdk/ai"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 	"github.com/azrtydxb/go-ai-sdk/providers/bedrock"
+	"github.com/azrtydxb/go-ai-sdk/providers/cohere"
 	"github.com/azrtydxb/go-ai-sdk/providers/openai"
 )
 
@@ -80,6 +81,19 @@ func TestRegistry_TranscriptionModel(t *testing.T) {
 	}
 }
 
+func TestRegistry_RerankingModel(t *testing.T) {
+	r := ai.NewRegistry()
+	r.Register("cohere", cohere.New())
+
+	m, err := r.RerankingModel("cohere:rerank-v3.5")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m.ModelID() != "rerank-v3.5" {
+		t.Errorf("ModelID() = %q, want %q", m.ModelID(), "rerank-v3.5")
+	}
+}
+
 func TestRegistry_InvalidModelID(t *testing.T) {
 	r := ai.NewRegistry()
 	r.Register("openai", openai.New())
@@ -133,6 +147,11 @@ func TestRegistry_CapabilityNotSupported(t *testing.T) {
 			"transcription",
 			func() error { _, err := r.TranscriptionModel("bedrock:foo"); return err },
 			`ai: provider "bedrock" does not support transcription models`,
+		},
+		{
+			"reranking",
+			func() error { _, err := r.RerankingModel("bedrock:foo"); return err },
+			`ai: provider "bedrock" does not support reranking models`,
 		},
 	}
 	for _, tt := range tests {

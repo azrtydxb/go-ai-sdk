@@ -38,6 +38,12 @@ type TranscriptionModelProvider interface {
 	TranscriptionModel(id string) provider.TranscriptionModel
 }
 
+// RerankingModelProvider is implemented by provider packages that can
+// construct a provider.RerankingModel for a given model ID.
+type RerankingModelProvider interface {
+	RerankingModel(id string) provider.RerankingModel
+}
+
 // Registry maps provider names to provider values (e.g. *openai.Provider,
 // *anthropic.Provider) and resolves "provider:model" IDs into concrete
 // provider.LanguageModel / EmbeddingModel / ImageModel / SpeechModel /
@@ -169,4 +175,21 @@ func (r *Registry) TranscriptionModel(id string) (provider.TranscriptionModel, e
 		return nil, fmt.Errorf("ai: provider %q does not support transcription models", name)
 	}
 	return tp.TranscriptionModel(model), nil
+}
+
+// RerankingModel resolves id ("provider:model") into a provider.RerankingModel.
+func (r *Registry) RerankingModel(id string) (provider.RerankingModel, error) {
+	name, model, err := splitID(id)
+	if err != nil {
+		return nil, err
+	}
+	p, err := r.lookup(name)
+	if err != nil {
+		return nil, err
+	}
+	rp, ok := p.(RerankingModelProvider)
+	if !ok {
+		return nil, fmt.Errorf("ai: provider %q does not support reranking models", name)
+	}
+	return rp.RerankingModel(model), nil
 }

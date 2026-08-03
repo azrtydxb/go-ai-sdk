@@ -71,6 +71,12 @@ func (p *Provider) EmbeddingModel(id string) provider.EmbeddingModel {
 	return &embeddingModel{provider: p, modelID: id}
 }
 
+// RerankingModel returns a provider.RerankingModel for the given Cohere
+// rerank model ID (e.g. "rerank-v3.5").
+func (p *Provider) RerankingModel(id string) provider.RerankingModel {
+	return &rerankingModel{provider: p, modelID: id}
+}
+
 func (p *Provider) client() *http.Client {
 	if p.httpClient != nil {
 		return p.httpClient

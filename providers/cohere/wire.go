@@ -455,3 +455,30 @@ type embeddingMeta struct {
 type embeddingBilledUnits struct {
 	InputTokens float64 `json:"input_tokens"`
 }
+
+// ---- Rerank ----
+
+type rerankRequest struct {
+	Model     string   `json:"model"`
+	Query     string   `json:"query"`
+	Documents []string `json:"documents"`
+	TopN      *int     `json:"top_n,omitempty"`
+}
+
+type rerankResponse struct {
+	Results []rerankResultWire `json:"results"`
+	Meta    rerankMeta         `json:"meta"`
+}
+
+type rerankResultWire struct {
+	Index          int     `json:"index"`
+	RelevanceScore float64 `json:"relevance_score"`
+}
+
+type rerankMeta struct {
+	BilledUnits rerankBilledUnits `json:"billed_units"`
+}
+
+type rerankBilledUnits struct {
+	SearchUnits float64 `json:"search_units"`
+}
