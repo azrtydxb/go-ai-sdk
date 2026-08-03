@@ -271,6 +271,36 @@ func (m *MockTranslationModel) ModelID() string { return "mock" }
 // ProviderName implements provider.TranslationModel.
 func (m *MockTranslationModel) ProviderName() string { return "aitest" }
 
+// MockFileStore is a provider.FileStore test double that returns a scripted
+// response for UploadFile, or fails with UploadErr/DeleteErr if set.
+type MockFileStore struct {
+	UploadResponse *provider.FileInfo
+	UploadErr      error                     // if set, every UploadFile call fails with it
+	DeleteErr      error                     // if set, every DeleteFile call fails with it
+	UploadCalls    []provider.FileUploadCall // records every UploadFile call
+	DeleteCalls    []string                  // records every DeleteFile call's id
+}
+
+// UploadFile implements provider.FileStore. It records the call, then
+// returns UploadErr if set, otherwise UploadResponse.
+func (m *MockFileStore) UploadFile(ctx context.Context, call provider.FileUploadCall) (*provider.FileInfo, error) {
+	m.UploadCalls = append(m.UploadCalls, call)
+	if m.UploadErr != nil {
+		return nil, m.UploadErr
+	}
+	return m.UploadResponse, nil
+}
+
+// DeleteFile implements provider.FileStore. It records the call, then
+// returns DeleteErr if set, otherwise nil.
+func (m *MockFileStore) DeleteFile(ctx context.Context, id string) error {
+	m.DeleteCalls = append(m.DeleteCalls, id)
+	return m.DeleteErr
+}
+
+// ProviderName implements provider.FileStore.
+func (m *MockFileStore) ProviderName() string { return "aitest" }
+
 // MockStreamingTranscriptionModel is a provider.StreamingTranscriptionModel
 // test double that replays a scripted event sequence, or fails every call
 // with Err if set.
