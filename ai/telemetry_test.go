@@ -14,15 +14,17 @@ import (
 // OnSpanStart/OnSpanEnd call, safe for concurrent use per the Telemetry
 // contract.
 type recordingTelemetry struct {
-	mu     sync.Mutex
-	starts []SpanInfo
-	ends   []SpanInfo
+	mu        sync.Mutex
+	starts    []SpanInfo
+	ends      []SpanInfo
+	startCtxs []context.Context
 }
 
-func (r *recordingTelemetry) OnSpanStart(info SpanInfo) {
+func (r *recordingTelemetry) OnSpanStart(ctx context.Context, info SpanInfo) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.starts = append(r.starts, info)
+	r.startCtxs = append(r.startCtxs, ctx)
 }
 
 func (r *recordingTelemetry) OnSpanEnd(info SpanInfo) {
@@ -68,6 +70,12 @@ func TestTelemetryMiddlewareGenerateSpanSuccess(t *testing.T) {
 	}
 
 	end := tel.ends[0]
+	if start.CorrelationID == "" {
+		t.Error("start.CorrelationID is empty")
+	}
+	if end.CorrelationID != start.CorrelationID {
+		t.Errorf("end.CorrelationID = %q, want %q (same as start)", end.CorrelationID, start.CorrelationID)
+	}
 	if end.EndTime.IsZero() {
 		t.Error("end.EndTime is zero")
 	}
@@ -156,6 +164,15 @@ func TestTelemetryMiddlewareStreamSpanEndsAtFinishPart(t *testing.T) {
 		t.Fatalf("ends=%d, want exactly 1 (idempotent end)", len(tel.ends))
 	}
 	end := tel.ends[0]
+	tel.mu.Lock()
+	start := tel.starts[0]
+	tel.mu.Unlock()
+	if start.CorrelationID == "" {
+		t.Error("start.CorrelationID is empty")
+	}
+	if end.CorrelationID != start.CorrelationID {
+		t.Errorf("end.CorrelationID = %q, want %q (same as start)", end.CorrelationID, start.CorrelationID)
+	}
 	if end.Operation != "stream" {
 		t.Errorf("end.Operation = %q, want %q", end.Operation, "stream")
 	}
@@ -279,5 +296,106 @@ func TestTelemetryMiddlewareStreamStartFailure(t *testing.T) {
 	}
 	if !errors.Is(tel.ends[0].Err, wantErr) {
 		t.Errorf("end.Err = %v, want %v", tel.ends[0].Err, wantErr)
+	}
+}
+
+type ctxKeyTest struct{}
+
+// TestTelemetryMiddlewareOnSpanStartReceivesCallCtx verifies OnSpanStart is
+// passed the ctx of the underlying model call (not context.Background() or
+// some other detached ctx), so an OTel bridge can read a parent span out of
+// it. Covers both Generate and Stream, since Stream fires OnSpanStart before
+// wrapping the returned StreamResponse.
+func TestTelemetryMiddlewareOnSpanStartReceivesCallCtx(t *testing.T) {
+	m := &aitest.MockModel{Responses: []*provider.Response{{
+		Content:      []provider.ContentPart{provider.TextPart{Text: "hello"}},
+		FinishReason: provider.FinishStop,
+	}}}
+	tel := &recordingTelemetry{}
+	wrapped := TelemetryMiddleware(m, tel)
+
+	ctx := context.WithValue(context.Background(), ctxKeyTest{}, "generate-value")
+	if _, err := wrapped.Generate(ctx, provider.Call{
+		Messages: []provider.Message{provider.UserText("hi")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(tel.startCtxs) != 1 || tel.startCtxs[0] == nil {
+		t.Fatalf("startCtxs = %v, want 1 non-nil ctx", tel.startCtxs)
+	}
+	if got := tel.startCtxs[0].Value(ctxKeyTest{}); got != "generate-value" {
+		t.Errorf("Generate OnSpanStart ctx value = %v, want %q", got, "generate-value")
+	}
+
+	m2 := &aitest.MockModel{Streams: [][]provider.StreamPart{{
+		provider.FinishPart{Reason: provider.FinishStop},
+	}}}
+	tel2 := &recordingTelemetry{}
+	wrapped2 := TelemetryMiddleware(m2, tel2)
+	sctx := context.WithValue(context.Background(), ctxKeyTest{}, "stream-value")
+	sr, err := wrapped2.Stream(sctx, provider.Call{
+		Messages: []provider.Message{provider.UserText("hi")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range sr.Parts() {
+	}
+	if len(tel2.startCtxs) != 1 || tel2.startCtxs[0] == nil {
+		t.Fatalf("startCtxs = %v, want 1 non-nil ctx", tel2.startCtxs)
+	}
+	if got := tel2.startCtxs[0].Value(ctxKeyTest{}); got != "stream-value" {
+		t.Errorf("Stream OnSpanStart ctx value = %v, want %q", got, "stream-value")
+	}
+}
+
+// TestTelemetryMiddlewareCorrelationIDsDistinctConcurrent verifies that
+// concurrent calls through the same middleware get distinct CorrelationIDs
+// (exercised with -race to catch any data race in the generator).
+func TestTelemetryMiddlewareCorrelationIDsDistinctConcurrent(t *testing.T) {
+	const n = 50
+	tel := &recordingTelemetry{}
+
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// Each goroutine gets its own MockModel: aitest.MockModel isn't
+			// safe for concurrent use itself (it records Calls unsynchronized),
+			// so sharing one across goroutines would race on the test double,
+			// not on the code under test. What we're actually verifying here —
+			// that TelemetryMiddleware's CorrelationID generator produces
+			// distinct ids under concurrent use — only requires a shared
+			// Telemetry, not a shared model.
+			m := &aitest.MockModel{Responses: []*provider.Response{{
+				Content:      []provider.ContentPart{provider.TextPart{Text: "hello"}},
+				FinishReason: provider.FinishStop,
+			}}}
+			wrapped := TelemetryMiddleware(m, tel)
+			_, err := wrapped.Generate(context.Background(), provider.Call{
+				Messages: []provider.Message{provider.UserText("hi")},
+			})
+			if err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	tel.mu.Lock()
+	defer tel.mu.Unlock()
+	if len(tel.starts) != n {
+		t.Fatalf("starts = %d, want %d", len(tel.starts), n)
+	}
+	seen := make(map[string]bool, n)
+	for _, s := range tel.starts {
+		if s.CorrelationID == "" {
+			t.Fatal("empty CorrelationID")
+		}
+		if seen[s.CorrelationID] {
+			t.Fatalf("duplicate CorrelationID %q", s.CorrelationID)
+		}
+		seen[s.CorrelationID] = true
 	}
 }

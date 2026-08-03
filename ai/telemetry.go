@@ -3,6 +3,8 @@ package ai
 import (
 	"context"
 	"iter"
+	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/azrtydxb/go-ai-sdk/provider"
@@ -10,29 +12,49 @@ import (
 
 // SpanInfo describes a single Generate or Stream call observed by
 // TelemetryMiddleware. Passed to Telemetry.OnSpanStart with only
-// Operation/ModelID/ProviderName/StartTime populated (EndTime is the zero
-// time, Usage is the zero value, FinishReason is empty, Err is nil), and to
-// Telemetry.OnSpanEnd fully populated: EndTime always set, and either
-// Usage/FinishReason (on success) or Err (on failure) set — never both.
+// CorrelationID/Operation/ModelID/ProviderName/StartTime populated (EndTime
+// is the zero time, Usage is the zero value, FinishReason is empty, Err is
+// nil), and to Telemetry.OnSpanEnd fully populated: EndTime always set, and
+// either Usage/FinishReason (on success) or Err (on failure) set — never
+// both. CorrelationID is identical on the OnSpanStart and OnSpanEnd (or
+// stream-end) SpanInfo for one call, so a bridge (e.g. to OTel) can pair
+// them up without relying on StartTime, which can collide.
 type SpanInfo struct {
-	Operation    string // "generate" | "stream"
-	ModelID      string
-	ProviderName string
-	StartTime    time.Time
-	EndTime      time.Time      // zero on Start
-	Usage        provider.Usage // zero on Start
-	FinishReason provider.FinishReason
-	Err          error
+	CorrelationID string // stable id shared by the start/end pair for one call
+	Operation     string // "generate" | "stream"
+	ModelID       string
+	ProviderName  string
+	StartTime     time.Time
+	EndTime       time.Time      // zero on Start
+	Usage         provider.Usage // zero on Start
+	FinishReason  provider.FinishReason
+	Err           error
+}
+
+// spanCounter generates CorrelationIDs: a package-level atomic counter,
+// deterministic and free of the collision risk that a time-based id (e.g.
+// StartTime) would have under concurrent or fast-successive calls.
+var spanCounter atomic.Int64
+
+func nextCorrelationID() string {
+	return strconv.FormatInt(spanCounter.Add(1), 10)
 }
 
 // Telemetry receives span events from TelemetryMiddleware. Implementations
 // must be safe for concurrent use, since a middleware-wrapped model may be
 // called concurrently. Adapt to OTel (or any other tracing system) by
 // implementing this interface with a tracer: start a span in OnSpanStart,
-// stash it (e.g. keyed by a pointer identity or via a field on a
-// per-implementation wrapper), and end it in OnSpanEnd.
+// stash it (e.g. keyed by SpanInfo.CorrelationID or via a field on a
+// per-implementation wrapper), and end it in OnSpanEnd, looking it back up
+// by CorrelationID.
+//
+// OnSpanStart receives the ctx of the underlying model call, so an
+// implementation can read a parent span out of ctx (e.g. via OTel's
+// trace.SpanFromContext) and attach the new span as its child. The SDK
+// does not use any ctx OnSpanStart might derive or return; the provider
+// call is a leaf, so the signature is ctx-in only.
 type Telemetry interface {
-	OnSpanStart(info SpanInfo)
+	OnSpanStart(ctx context.Context, info SpanInfo)
 	OnSpanEnd(info SpanInfo)
 }
 
@@ -68,12 +90,13 @@ func (m *telemetryModel) Capabilities() provider.Capabilities { return m.model.C
 
 func (m *telemetryModel) Generate(ctx context.Context, call provider.Call) (*provider.Response, error) {
 	info := SpanInfo{
-		Operation:    "generate",
-		ModelID:      m.model.ModelID(),
-		ProviderName: m.model.ProviderName(),
-		StartTime:    time.Now(),
+		CorrelationID: nextCorrelationID(),
+		Operation:     "generate",
+		ModelID:       m.model.ModelID(),
+		ProviderName:  m.model.ProviderName(),
+		StartTime:     time.Now(),
 	}
-	m.t.OnSpanStart(info)
+	m.t.OnSpanStart(ctx, info)
 
 	resp, err := m.model.Generate(ctx, call)
 	info.EndTime = time.Now()
@@ -90,12 +113,13 @@ func (m *telemetryModel) Generate(ctx context.Context, call provider.Call) (*pro
 
 func (m *telemetryModel) Stream(ctx context.Context, call provider.Call) (provider.StreamResponse, error) {
 	info := SpanInfo{
-		Operation:    "stream",
-		ModelID:      m.model.ModelID(),
-		ProviderName: m.model.ProviderName(),
-		StartTime:    time.Now(),
+		CorrelationID: nextCorrelationID(),
+		Operation:     "stream",
+		ModelID:       m.model.ModelID(),
+		ProviderName:  m.model.ProviderName(),
+		StartTime:     time.Now(),
 	}
-	m.t.OnSpanStart(info)
+	m.t.OnSpanStart(ctx, info)
 
 	inner, err := m.model.Stream(ctx, call)
 	if err != nil {
