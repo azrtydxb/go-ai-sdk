@@ -51,5 +51,12 @@ func (p *Provider) Model(id string) provider.LanguageModel {
 		BaseURL:    p.baseURL,
 		HTTPClient: p.httpClient,
 		NativeJSON: true,
+		// Kimi/Moonshot documents "max_tokens", not OpenAI's current
+		// "max_completion_tokens" — the latter is silently dropped.
+		MaxTokensParam: "max_tokens",
+		// Kimi/Moonshot's response_format only accepts json_object, not
+		// json_schema (DeepSeek precedent); it rejects requests that send
+		// the latter.
+		JSONObjectOnly: true,
 	}, id)
 }

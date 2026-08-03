@@ -51,6 +51,11 @@ func (p *Provider) Model(id string) provider.LanguageModel {
 		APIKey:     p.apiKey,
 		BaseURL:    p.baseURL,
 		HTTPClient: p.httpClient,
+		// Baseten hosts many different underlying models across a
+		// multi-tenant deployment catalog, so NativeJSON is optimistic here
+		// (mirrors huggingface/gateway's rationale for their own JSON-mode
+		// defaults): callers whose model rejects json_schema can drop to
+		// json-object mode via ProviderOptions.
 		NativeJSON: true,
 	}, id)
 }

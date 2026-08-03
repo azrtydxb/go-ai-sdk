@@ -50,6 +50,12 @@ func (p *Provider) Model(id string) provider.LanguageModel {
 		APIKey:     p.apiKey,
 		BaseURL:    p.baseURL,
 		HTTPClient: p.httpClient,
+		// DashScope's OpenAI-compatible mode fronts many different
+		// underlying Qwen model variants across a multi-tenant catalog, so
+		// NativeJSON is optimistic here (mirrors huggingface/gateway's
+		// rationale for their own JSON-mode defaults): callers whose model
+		// rejects json_schema can drop to json-object mode via
+		// ProviderOptions.
 		NativeJSON: true,
 		// DashScope's OpenAI-compatible mode documents "max_tokens", not
 		// OpenAI's current "max_completion_tokens".

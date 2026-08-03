@@ -52,6 +52,9 @@ func (p *Provider) Model(id string) provider.LanguageModel {
 		BaseURL:    p.baseURL,
 		HTTPClient: p.httpClient,
 		NativeJSON: true,
+		// DeepInfra documents "max_tokens", not OpenAI's current
+		// "max_completion_tokens" — the latter is silently dropped.
+		MaxTokensParam: "max_tokens",
 	}, id)
 }
 
