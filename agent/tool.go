@@ -93,6 +93,10 @@ func (t *asToolTool) Strict() bool { return false }
 // InputExamples implements ai.Tool. AsTool carries no example inputs.
 func (t *asToolTool) InputExamples() []json.RawMessage { return nil }
 
+// InputCallbacks implements ai.Tool. AsTool has no per-tool input-streaming
+// lifecycle hooks of its own.
+func (t *asToolTool) InputCallbacks() ai.ToolInputCallbacks { return ai.ToolInputCallbacks{} }
+
 // Execute implements ai.Tool.
 func (t *asToolTool) Execute(ctx context.Context, args json.RawMessage) (any, error) {
 	var a asToolArgs

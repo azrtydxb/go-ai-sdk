@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -681,5 +682,330 @@ func TestRerankOnRerankEndReceivesTranslatedRetryError(t *testing.T) {
 	}
 	if _, ok := endErr.(*RetryError); !ok {
 		t.Fatalf("OnRerankEnd Err type = %T, want *RetryError", endErr)
+	}
+}
+
+// ---------------------------------------------------------------------
+// Per-tool input-streaming lifecycle hooks: ToolInputCallbacks
+// (OnInputStart/OnInputDelta/OnInputAvailable), attached via
+// WithToolInputCallbacks. See ai/tool.go.
+// ---------------------------------------------------------------------
+
+// TestStreamTextToolInputCallbacksFireInOrder verifies that for a tool call
+// whose arguments arrive as 3 ToolCallDelta fragments, OnInputStart fires
+// once (on the first delta), OnInputDelta fires once per delta with text
+// that concatenates to the full assembled args, and OnInputAvailable fires
+// once with the fully assembled args — all before the tool actually
+// executes.
+func TestStreamTextToolInputCallbacksFireInOrder(t *testing.T) {
+	m := &aitest.MockModel{Streams: [][]provider.StreamPart{
+		{
+			provider.ToolCallDelta{ID: "c1", Name: "get_weather", ArgsDelta: `{"city":`},
+			provider.ToolCallDelta{ID: "c1", ArgsDelta: `"Gh`},
+			provider.ToolCallDelta{ID: "c1", ArgsDelta: `ent"}`},
+			provider.ToolCallEnd{Call: provider.ToolCallPart{ID: "c1", Name: "get_weather", Args: []byte(`{"city":"Ghent"}`)}},
+			provider.FinishPart{Reason: provider.FinishToolCalls},
+		},
+		{
+			provider.TextDelta{Text: "sunny"},
+			provider.FinishPart{Reason: provider.FinishStop},
+		},
+	}}
+
+	var starts []string
+	var deltas []string
+	var availableID string
+	var availableInput json.RawMessage
+	var availableCalls int
+	var executed bool
+
+	tool := NewTool("get_weather", "", func(_ context.Context, a weatherArgs) (any, error) {
+		executed = true
+		return "sunny", nil
+	}, WithToolInputCallbacks(ToolInputCallbacks{
+		OnInputStart: func(ctx context.Context, toolCallID string) {
+			if executed {
+				t.Fatal("OnInputStart fired after Execute")
+			}
+			starts = append(starts, toolCallID)
+		},
+		OnInputDelta: func(ctx context.Context, toolCallID, delta string) {
+			if executed {
+				t.Fatal("OnInputDelta fired after Execute")
+			}
+			if toolCallID != "c1" {
+				t.Fatalf("OnInputDelta toolCallID = %q, want c1", toolCallID)
+			}
+			deltas = append(deltas, delta)
+		},
+		OnInputAvailable: func(ctx context.Context, toolCallID string, input json.RawMessage) {
+			if executed {
+				t.Fatal("OnInputAvailable fired after Execute")
+			}
+			availableCalls++
+			availableID = toolCallID
+			availableInput = input
+		},
+	}))
+
+	s, err := StreamText(t.Context(), GenerateTextOpts{Model: m, Prompt: "x", Tools: []Tool{tool}, MaxSteps: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+	}
+	if s.Err() != nil {
+		t.Fatal(s.Err())
+	}
+
+	if len(starts) != 1 || starts[0] != "c1" {
+		t.Fatalf("OnInputStart calls = %v, want exactly one call with c1", starts)
+	}
+	if len(deltas) != 3 {
+		t.Fatalf("OnInputDelta calls = %d, want 3", len(deltas))
+	}
+	if got := deltas[0] + deltas[1] + deltas[2]; got != `{"city":"Ghent"}` {
+		t.Fatalf("concatenated deltas = %q, want %q", got, `{"city":"Ghent"}`)
+	}
+	if availableCalls != 1 {
+		t.Fatalf("OnInputAvailable calls = %d, want 1", availableCalls)
+	}
+	if availableID != "c1" {
+		t.Fatalf("OnInputAvailable toolCallID = %q, want c1", availableID)
+	}
+	if string(availableInput) != `{"city":"Ghent"}` {
+		t.Fatalf("OnInputAvailable input = %s, want %s", availableInput, `{"city":"Ghent"}`)
+	}
+	if !executed {
+		t.Fatal("tool was never executed")
+	}
+}
+
+// TestStreamTextToolInputCallbacksMultipleCallsKeyedByID verifies that two
+// concurrent tool calls within a single step get correctly-keyed
+// OnInputStart/OnInputDelta/OnInputAvailable callbacks: deltas for one
+// toolCallID must never be attributed to the other.
+func TestStreamTextToolInputCallbacksMultipleCallsKeyedByID(t *testing.T) {
+	m := &aitest.MockModel{Streams: [][]provider.StreamPart{
+		{
+			provider.ToolCallDelta{ID: "c1", Name: "get_weather", ArgsDelta: `{"city":"Ghent"}`},
+			provider.ToolCallDelta{ID: "c2", Name: "get_weather", ArgsDelta: `{"city":"Bruges"}`},
+			provider.ToolCallEnd{Call: provider.ToolCallPart{ID: "c1", Name: "get_weather", Args: []byte(`{"city":"Ghent"}`)}},
+			provider.ToolCallEnd{Call: provider.ToolCallPart{ID: "c2", Name: "get_weather", Args: []byte(`{"city":"Bruges"}`)}},
+			provider.FinishPart{Reason: provider.FinishToolCalls},
+		},
+		{
+			provider.TextDelta{Text: "done"},
+			provider.FinishPart{Reason: provider.FinishStop},
+		},
+	}}
+
+	starts := map[string]int{}
+	deltasByID := map[string]string{}
+	availableByID := map[string]string{}
+
+	tool := NewTool("get_weather", "", func(_ context.Context, a weatherArgs) (any, error) {
+		return "sunny-" + a.City, nil
+	}, WithToolInputCallbacks(ToolInputCallbacks{
+		OnInputStart: func(ctx context.Context, toolCallID string) {
+			starts[toolCallID]++
+		},
+		OnInputDelta: func(ctx context.Context, toolCallID, delta string) {
+			deltasByID[toolCallID] += delta
+		},
+		OnInputAvailable: func(ctx context.Context, toolCallID string, input json.RawMessage) {
+			availableByID[toolCallID] = string(input)
+		},
+	}))
+
+	s, err := StreamText(t.Context(), GenerateTextOpts{Model: m, Prompt: "x", Tools: []Tool{tool}, MaxSteps: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+	}
+	if s.Err() != nil {
+		t.Fatal(s.Err())
+	}
+
+	if starts["c1"] != 1 || starts["c2"] != 1 {
+		t.Fatalf("starts = %v, want exactly one each for c1 and c2", starts)
+	}
+	if deltasByID["c1"] != `{"city":"Ghent"}` {
+		t.Fatalf("deltasByID[c1] = %q", deltasByID["c1"])
+	}
+	if deltasByID["c2"] != `{"city":"Bruges"}` {
+		t.Fatalf("deltasByID[c2] = %q", deltasByID["c2"])
+	}
+	if availableByID["c1"] != `{"city":"Ghent"}` {
+		t.Fatalf("availableByID[c1] = %q", availableByID["c1"])
+	}
+	if availableByID["c2"] != `{"city":"Bruges"}` {
+		t.Fatalf("availableByID[c2] = %q", availableByID["c2"])
+	}
+}
+
+// TestGenerateTextOnlyFiresOnInputAvailable verifies that GenerateText
+// (no streaming, so no argument deltas exist) fires only OnInputAvailable,
+// right before Execute — OnInputStart/OnInputDelta never fire.
+func TestGenerateTextOnlyFiresOnInputAvailable(t *testing.T) {
+	m := &aitest.MockModel{Responses: []*provider.Response{
+		toolCallResponse("get_weather", "c1", `{"city":"Ghent"}`),
+		{Content: []provider.ContentPart{provider.TextPart{Text: "done"}}, FinishReason: provider.FinishStop},
+	}}
+
+	var starts, deltas, availables int
+	var availableID string
+	var availableInput json.RawMessage
+	var executed bool
+
+	tool := NewTool("get_weather", "", func(_ context.Context, a weatherArgs) (any, error) {
+		executed = true
+		return "sunny", nil
+	}, WithToolInputCallbacks(ToolInputCallbacks{
+		OnInputStart: func(ctx context.Context, toolCallID string) { starts++ },
+		OnInputDelta: func(ctx context.Context, toolCallID, delta string) { deltas++ },
+		OnInputAvailable: func(ctx context.Context, toolCallID string, input json.RawMessage) {
+			if executed {
+				t.Fatal("OnInputAvailable fired after Execute")
+			}
+			availables++
+			availableID = toolCallID
+			availableInput = input
+		},
+	}))
+
+	_, err := GenerateText(t.Context(), GenerateTextOpts{Model: m, Prompt: "weather?", Tools: []Tool{tool}, MaxSteps: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if starts != 0 {
+		t.Fatalf("OnInputStart calls = %d, want 0 (GenerateText has no deltas)", starts)
+	}
+	if deltas != 0 {
+		t.Fatalf("OnInputDelta calls = %d, want 0 (GenerateText has no deltas)", deltas)
+	}
+	if availables != 1 {
+		t.Fatalf("OnInputAvailable calls = %d, want 1", availables)
+	}
+	if availableID != "c1" {
+		t.Fatalf("OnInputAvailable toolCallID = %q, want c1", availableID)
+	}
+	if string(availableInput) != `{"city":"Ghent"}` {
+		t.Fatalf("OnInputAvailable input = %s, want %s", availableInput, `{"city":"Ghent"}`)
+	}
+	if !executed {
+		t.Fatal("tool was never executed")
+	}
+}
+
+// TestGenerateTextOutputToolModeDoesNotFireInputCallbacks verifies that the
+// Output tool-mode synthetic call (see GenerateTextOpts.Output) completes
+// normally without ever routing through Tool.Execute (and therefore through
+// fireOnInputAvailable) at all: the injected output-schema tool is a
+// provider.ToolDef synthesized internally in buildOutputCall, never an
+// ai.Tool a caller could attach ToolInputCallbacks to, so there is no
+// callback surface for this call to reach in the first place. This pins
+// down that architectural guarantee rather than a callback count.
+func TestGenerateTextOutputToolModeDoesNotFireInputCallbacks(t *testing.T) {
+	type outStruct struct {
+		Answer string `json:"answer"`
+	}
+	m := &aitest.MockModel{Responses: []*provider.Response{
+		toolCallResponse("output", "c1", `{"answer":"42"}`),
+	}}
+
+	res, err := GenerateText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "q",
+		Output: OutputObject[outStruct](),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := OutputAs[outStruct](res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Answer != "42" {
+		t.Fatalf("decoded output = %+v, want Answer=42", got)
+	}
+}
+
+// TestStreamTextToolInputCallbacksNilSafe verifies that a tool with no
+// ToolInputCallbacks configured (the common case) streams normally without
+// panicking.
+func TestStreamTextToolInputCallbacksNilSafe(t *testing.T) {
+	m := &aitest.MockModel{Streams: [][]provider.StreamPart{
+		{
+			provider.ToolCallDelta{ID: "c1", Name: "get_weather", ArgsDelta: `{"city":"Ghent"}`},
+			provider.ToolCallEnd{Call: provider.ToolCallPart{ID: "c1", Name: "get_weather", Args: []byte(`{"city":"Ghent"}`)}},
+			provider.FinishPart{Reason: provider.FinishToolCalls},
+		},
+		{
+			provider.TextDelta{Text: "done"},
+			provider.FinishPart{Reason: provider.FinishStop},
+		},
+	}}
+	tool := NewTool("get_weather", "", func(_ context.Context, a weatherArgs) (any, error) {
+		return "sunny", nil
+	})
+	s, err := StreamText(t.Context(), GenerateTextOpts{Model: m, Prompt: "x", Tools: []Tool{tool}, MaxSteps: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+	}
+	if s.Err() != nil {
+		t.Fatal(s.Err())
+	}
+}
+
+// TestStreamTextToolInputCallbacksRace exercises OnInputStart/OnInputDelta/
+// OnInputAvailable touching shared state (a plain map, guarded only by the
+// fact that everything fires synchronously on the consuming goroutine) under
+// -race, across two tool calls in one step.
+func TestStreamTextToolInputCallbacksRace(t *testing.T) {
+	m := &aitest.MockModel{Streams: [][]provider.StreamPart{
+		{
+			provider.ToolCallDelta{ID: "c1", Name: "get_weather", ArgsDelta: `{"city":`},
+			provider.ToolCallDelta{ID: "c2", Name: "get_weather", ArgsDelta: `{"city":`},
+			provider.ToolCallDelta{ID: "c1", ArgsDelta: `"Ghent"}`},
+			provider.ToolCallDelta{ID: "c2", ArgsDelta: `"Bruges"}`},
+			provider.ToolCallEnd{Call: provider.ToolCallPart{ID: "c1", Name: "get_weather", Args: []byte(`{"city":"Ghent"}`)}},
+			provider.ToolCallEnd{Call: provider.ToolCallPart{ID: "c2", Name: "get_weather", Args: []byte(`{"city":"Bruges"}`)}},
+			provider.FinishPart{Reason: provider.FinishToolCalls},
+		},
+		{
+			provider.TextDelta{Text: "done"},
+			provider.FinishPart{Reason: provider.FinishStop},
+		},
+	}}
+
+	shared := map[string]int{}
+	tool := NewTool("get_weather", "", func(_ context.Context, a weatherArgs) (any, error) {
+		return "sunny-" + a.City, nil
+	}, WithToolInputCallbacks(ToolInputCallbacks{
+		OnInputStart: func(ctx context.Context, toolCallID string) {
+			shared[toolCallID]++
+		},
+		OnInputDelta: func(ctx context.Context, toolCallID, delta string) {
+			shared[toolCallID]++
+		},
+		OnInputAvailable: func(ctx context.Context, toolCallID string, input json.RawMessage) {
+			shared[toolCallID]++
+		},
+	}))
+
+	s, err := StreamText(t.Context(), GenerateTextOpts{Model: m, Prompt: "x", Tools: []Tool{tool}, MaxSteps: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+	}
+	if s.Err() != nil {
+		t.Fatal(s.Err())
+	}
+	if shared["c1"] == 0 || shared["c2"] == 0 {
+		t.Fatalf("shared = %v, want non-zero counts for both IDs", shared)
 	}
 }

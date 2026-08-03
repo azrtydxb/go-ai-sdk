@@ -478,6 +478,19 @@ func resolveToolCallNames(ctx context.Context, byName map[string]Tool, calls []p
 // exactly once around this call either way — including for a denial, which
 // is why they're placed here rather than in the caller's pending/no-pending
 // branch.
+// fireOnInputAvailable invokes t's ToolInputCallbacks.OnInputAvailable, if
+// set, with the call's fully assembled arguments — shared by GenerateText's
+// and StreamText's tool loops (both funnel through executeToolCall), since
+// in both cases OnInputAvailable fires once per call, immediately before
+// Execute. It is nil-checked and never fires for a call that is never
+// actually executed (e.g. an approval-denied call, or the Output tool-mode
+// synthetic call, which never reaches executeToolCall at all).
+func fireOnInputAvailable(ctx context.Context, t Tool, toolCallID string, args json.RawMessage) {
+	if cb := t.InputCallbacks(); cb.OnInputAvailable != nil {
+		cb.OnInputAvailable(ctx, toolCallID, args)
+	}
+}
+
 func executeToolCall(ctx context.Context, byName map[string]Tool, c provider.ToolCallPart, decision *ApprovalDecision, repair repairFunc, stepIndex int, onStart func(int, ToolCallRecord), onEnd func(int, ToolResultRecord, error)) ToolResultRecord {
 	if onStart != nil {
 		onStart(stepIndex, ToolCallRecord{ID: c.ID, Name: c.Name, Args: c.Args})
@@ -493,6 +506,7 @@ func executeToolCall(ctx context.Context, byName map[string]Tool, c provider.Too
 	}
 
 	t := byName[c.Name]
+	fireOnInputAvailable(ctx, t, c.ID, c.Args)
 	res, err := t.Execute(ctx, c.Args)
 	if err != nil && repair != nil {
 		var iae *InvalidToolArgumentsError
@@ -516,6 +530,7 @@ func executeToolCall(ctx context.Context, byName map[string]Tool, c provider.Too
 					if ar, needsApproval := rt.(ApprovalRequirer); needsApproval && ar.ApprovalRequired(ctx, rc.Args) {
 						res, err = nil, &ToolApprovalDeniedError{ToolName: rc.Name, Reason: "approval required for repaired call"}
 					} else {
+						fireOnInputAvailable(ctx, rt, rc.ID, rc.Args)
 						res, err = rt.Execute(ctx, rc.Args)
 					}
 				}

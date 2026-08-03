@@ -22,8 +22,9 @@ func (t *docTool) Schema() json.RawMessage { return t.schema }
 func (t *docTool) Execute(_ context.Context, _ json.RawMessage) (any, error) {
 	panic("not used by these tests")
 }
-func (t *docTool) Strict() bool                     { return false }
-func (t *docTool) InputExamples() []json.RawMessage { return nil }
+func (t *docTool) Strict() bool                          { return false }
+func (t *docTool) InputExamples() []json.RawMessage      { return nil }
+func (t *docTool) InputCallbacks() ai.ToolInputCallbacks { return ai.ToolInputCallbacks{} }
 
 func TestAPIDocGoldenOutput(t *testing.T) {
 	search := &docTool{

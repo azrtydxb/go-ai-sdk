@@ -50,6 +50,10 @@ func (t *mcpTool) Strict() bool { return false }
 // inputs.
 func (t *mcpTool) InputExamples() []json.RawMessage { return nil }
 
+// InputCallbacks always returns a zero-value ai.ToolInputCallbacks: MCP
+// tools have no per-tool input-streaming lifecycle hooks.
+func (t *mcpTool) InputCallbacks() ai.ToolInputCallbacks { return ai.ToolInputCallbacks{} }
+
 // Execute implements ai.Tool. args passes through as raw JSON, unmodified;
 // it is not unmarshaled here since the server owns the schema. Both
 // transport failures and a ToolResult with IsError=true are turned into an

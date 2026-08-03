@@ -26,16 +26,55 @@ type Tool interface {
 	// complete JSON object matching Schema (see provider.ToolDef.InputExamples).
 	// Most tools return nil.
 	InputExamples() []json.RawMessage
+
+	// InputCallbacks returns the tool's input-streaming lifecycle hooks (see
+	// ToolInputCallbacks and WithToolInputCallbacks). Most tools return a
+	// zero-value ToolInputCallbacks (all fields nil); GenerateText and
+	// StreamText nil-check every field before invoking it.
+	InputCallbacks() ToolInputCallbacks
+}
+
+// ToolInputCallbacks are per-tool lifecycle hooks fired as a tool call's
+// arguments become available, mirroring the Vercel AI SDK's v6
+// onInputStart/onInputDelta/onInputAvailable. Attach via
+// WithToolInputCallbacks.
+//
+// StreamText fires OnInputStart the first time an argument delta for a given
+// toolCallID arrives, OnInputDelta for every argument delta thereafter
+// (including that first one) with the raw args-JSON text fragment, and
+// OnInputAvailable once the call's arguments are fully assembled — before
+// that call is executed. GenerateText (no streaming, so no deltas exist)
+// fires only OnInputAvailable, immediately before Execute. All three are
+// nil-checked and invoked synchronously on the consuming goroutine, and none
+// of them fire for the Output tool-mode synthetic call (see
+// GenerateTextOpts.Output), since that call is never executed via Tool.
+// Execute.
+type ToolInputCallbacks struct {
+	// OnInputStart fires once per toolCallID, when the first argument delta
+	// for that call arrives. Stream-only: never fires from GenerateText.
+	OnInputStart func(ctx context.Context, toolCallID string)
+
+	// OnInputDelta fires once per argument delta (including the first),
+	// carrying that fragment's raw args-JSON text. The concatenation of
+	// every delta for a given toolCallID equals the call's fully assembled
+	// arguments. Stream-only: never fires from GenerateText.
+	OnInputDelta func(ctx context.Context, toolCallID string, delta string)
+
+	// OnInputAvailable fires once per tool call, with its fully assembled
+	// arguments, immediately before that call is executed. Fires from both
+	// GenerateText and StreamText.
+	OnInputAvailable func(ctx context.Context, toolCallID string, input json.RawMessage)
 }
 
 // tool is the concrete implementation of the Tool interface.
 type tool struct {
-	name          string
-	description   string
-	schema        json.RawMessage
-	fn            any // We store this as any and use reflection to call it
-	strict        bool
-	inputExamples []json.RawMessage
+	name           string
+	description    string
+	schema         json.RawMessage
+	fn             any // We store this as any and use reflection to call it
+	strict         bool
+	inputExamples  []json.RawMessage
+	inputCallbacks ToolInputCallbacks
 }
 
 // ToolOption configures optional NewTool behavior (strict mode, input
@@ -43,8 +82,9 @@ type tool struct {
 type ToolOption func(*toolOptions)
 
 type toolOptions struct {
-	strict        bool
-	inputExamples []json.RawMessage
+	strict         bool
+	inputExamples  []json.RawMessage
+	inputCallbacks ToolInputCallbacks
 }
 
 // WithToolStrict marks the tool as requesting provider-enforced schema
@@ -68,6 +108,14 @@ func WithToolInputExamples[Args any](examples ...Args) ToolOption {
 			}
 			o.inputExamples = append(o.inputExamples, json.RawMessage(b))
 		}
+	}
+}
+
+// WithToolInputCallbacks attaches per-tool input-streaming lifecycle hooks
+// (see ToolInputCallbacks) to the resulting tool.
+func WithToolInputCallbacks(cb ToolInputCallbacks) ToolOption {
+	return func(o *toolOptions) {
+		o.inputCallbacks = cb
 	}
 }
 
@@ -95,12 +143,13 @@ func NewTool[Args any](name, description string, fn func(context.Context, Args) 
 	}
 
 	return &tool{
-		name:          name,
-		description:   description,
-		schema:        s,
-		fn:            fn,
-		strict:        o.strict,
-		inputExamples: o.inputExamples,
+		name:           name,
+		description:    description,
+		schema:         s,
+		fn:             fn,
+		strict:         o.strict,
+		inputExamples:  o.inputExamples,
+		inputCallbacks: o.inputCallbacks,
 	}
 }
 
@@ -122,6 +171,10 @@ func (t *tool) Strict() bool {
 
 func (t *tool) InputExamples() []json.RawMessage {
 	return t.inputExamples
+}
+
+func (t *tool) InputCallbacks() ToolInputCallbacks {
+	return t.inputCallbacks
 }
 
 func (t *tool) Execute(ctx context.Context, args json.RawMessage) (any, error) {

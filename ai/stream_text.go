@@ -193,10 +193,12 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 			var sources []provider.SourcePart
 			var toolCalls []provider.ToolCallPart
 			type pendingCall struct {
-				name string
-				args []byte
+				name       string
+				args       []byte
+				startFired bool
 			}
 			argsByID := map[string]*pendingCall{}
+			toolsByName := buildToolNameMap(s.opts.Tools)
 			var finish provider.FinishPart
 			var gotFinish bool
 			abandoned := false
@@ -226,6 +228,32 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 						pc.name = part.Name
 					}
 					pc.args = append(pc.args, part.ArgsDelta...)
+
+					// OnInputStart/OnInputDelta are stream-only (no
+					// GenerateText equivalent — see ToolInputCallbacks) and
+					// keyed by toolCallID; the tool is matched by name, which
+					// may arrive on a later delta than the first for a given
+					// ID (see ToolCallDelta.Name's doc), so OnInputStart can
+					// only fire once the name is known. A delta that arrives
+					// before the name is known (or names a tool the run
+					// doesn't have) is silently skipped rather than buffered
+					// for a later replay — matching how the fallback
+					// ToolCallPart assembly below already tolerates a
+					// same-ID delta stream with no matching tool.
+					if pc.name != "" {
+						if t, ok := toolsByName[pc.name]; ok {
+							cb := t.InputCallbacks()
+							if !pc.startFired {
+								pc.startFired = true
+								if cb.OnInputStart != nil {
+									cb.OnInputStart(s.ctx, part.ID)
+								}
+							}
+							if cb.OnInputDelta != nil {
+								cb.OnInputDelta(s.ctx, part.ID, part.ArgsDelta)
+							}
+						}
+					}
 				case provider.ToolCallEnd:
 					toolCalls = append(toolCalls, part.Call)
 				case provider.FinishPart:
@@ -426,6 +454,18 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 			s.current = next
 		}
 	}
+}
+
+// buildToolNameMap indexes tools by name, unfiltered by active-tool status:
+// used solely to look up a tool's ToolInputCallbacks by the name carried on
+// a ToolCallDelta, which is a streaming-lifecycle concern orthogonal to
+// whether the tool is currently active (see activeToolSet).
+func buildToolNameMap(tools []Tool) map[string]Tool {
+	m := make(map[string]Tool, len(tools))
+	for _, t := range tools {
+		m[t.Name()] = t
+	}
+	return m
 }
 
 // assistantContent returns a defensive copy of an assembled step's content

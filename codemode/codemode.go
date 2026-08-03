@@ -168,6 +168,11 @@ func (t *codeTool) Strict() bool { return false }
 // example inputs.
 func (t *codeTool) InputExamples() []json.RawMessage { return nil }
 
+// InputCallbacks implements ai.Tool. The generated run_code tool has no
+// per-tool input-streaming lifecycle hooks of its own (the wrapped tools'
+// own callbacks, if any, are not invoked by codemode's in-sandbox dispatch).
+func (t *codeTool) InputCallbacks() ai.ToolInputCallbacks { return ai.ToolInputCallbacks{} }
+
 // Execute implements ai.Tool. It decodes {"code": string}, runs it in the
 // sandbox with a CallTool binding that dispatches to the wrapped tools by
 // name, and returns the sandbox's Result rendered as a single string
