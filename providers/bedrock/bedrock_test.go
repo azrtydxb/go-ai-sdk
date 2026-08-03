@@ -833,6 +833,32 @@ func TestToolResultContentPointerVariant(t *testing.T) {
 	}
 }
 
+// TestToolResultContentEmptyValueDegradesToEmptyTextBlock covers the second
+// degenerate case alongside the nil-pointer one above: a non-nil
+// ai.ToolResultContent with empty Text and no Images (e.g. a tool that
+// explicitly returns ai.ToolResultContent{} to signal "no content") must
+// still produce exactly one {"text":""} block, not zero blocks — Converse
+// may reject a toolResult whose "content" array is empty.
+func TestToolResultContentEmptyValueDegradesToEmptyTextBlock(t *testing.T) {
+	got, err := toolResultContent(ai.ToolResultContent{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Text != "" {
+		t.Errorf("empty ai.ToolResultContent value: got = %#v, want single empty-text entry", got)
+	}
+
+	// Same check through the pointer variant, for symmetry with the
+	// nil-pointer case above.
+	got, err = toolResultContent(&ai.ToolResultContent{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Text != "" {
+		t.Errorf("empty *ai.ToolResultContent value: got = %#v, want single empty-text entry", got)
+	}
+}
+
 // TestRequestShapeUserMessageFilePartPDF verifies a PDF FilePart becomes a
 // Converse "document" content block with format "pdf", Name derived from
 // Filename (sans extension), and the base64 bytes carried the same way an

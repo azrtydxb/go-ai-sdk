@@ -395,7 +395,10 @@ func convertMessages(msgs []provider.Message) ([]wireMessage, error) {
 // content array supports images natively (unlike most other providers'
 // tool-result wire formats), so it is serialized as one {"text":...} entry
 // (only if Text is non-empty) followed by one {"image":...} entry per entry
-// in Images.
+// in Images. Two degenerate cases — a nil *ai.ToolResultContent, and a
+// non-nil ai.ToolResultContent with empty Text and no Images — both still
+// produce exactly one {"text":""} block rather than zero blocks, since
+// Converse may reject a toolResult whose "content" array is empty.
 func toolResultContent(result any) ([]wireToolResultContent, error) {
 	switch v := result.(type) {
 	case ai.ToolResultContent:
@@ -416,6 +419,12 @@ func toolResultContent(result any) ([]wireToolResultContent, error) {
 	}
 }
 
+// toolResultContentBlocks converts v into Converse toolResult content
+// blocks, guaranteeing at least one block is always returned: Converse may
+// reject a toolResult whose "content" array is empty, so a v with no Text
+// and no Images (a degenerate/empty ai.ToolResultContent, distinct from the
+// nil-pointer case handled by toolResultContent's caller) still produces a
+// single {"text":""} block rather than an empty array.
 func toolResultContentBlocks(v ai.ToolResultContent) []wireToolResultContent {
 	var out []wireToolResultContent
 	if v.Text != "" {
@@ -426,6 +435,9 @@ func toolResultContentBlocks(v ai.ToolResultContent) []wireToolResultContent {
 			Format: imageFormat(img.MediaType),
 			Source: wireImageSource{Bytes: base64.StdEncoding.EncodeToString(img.Data)},
 		}})
+	}
+	if len(out) == 0 {
+		out = append(out, wireToolResultContent{Text: ""})
 	}
 	return out
 }
