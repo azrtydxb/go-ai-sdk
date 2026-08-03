@@ -86,7 +86,14 @@ const bedrockAuthHeader = "Authorization"
 // signing time); every other entry is set AFTER signing, reaching the wire
 // unsigned. Either way, an entry named "Authorization" is dropped — Sign
 // always computes and sets that header itself, and Call.Headers must never
-// be able to override a provider's authentication.
+// be able to override a provider's authentication. A caller-supplied
+// "Content-Type" is dropped for the same reason: Content-Type is set to
+// "application/json" and signed into the canonical request BEFORE this
+// split runs, so letting it fall into the unsigned map would have
+// Header.Set overwrite the signed value on the wire after signing —
+// mismatching the signature and guaranteeing AWS rejects the request with
+// SignatureDoesNotMatch. Content-Type is provider-owned, same rationale as
+// the Authorization header above.
 func (p *Provider) doRequest(ctx context.Context, path string, body []byte, headers map[string]string) (*http.Response, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, path, bytes.NewReader(body))
 	if err != nil {
@@ -98,6 +105,8 @@ func (p *Provider) doRequest(ctx context.Context, path string, body []byte, head
 	for k, v := range headers {
 		switch {
 		case strings.EqualFold(k, bedrockAuthHeader):
+			continue
+		case strings.EqualFold(k, "Content-Type"):
 			continue
 		case len(k) >= 6 && strings.EqualFold(k[:6], "x-amz-"):
 			httpReq.Header.Set(k, v)

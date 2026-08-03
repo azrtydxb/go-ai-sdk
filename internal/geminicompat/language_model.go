@@ -203,6 +203,10 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 					if !yield(provider.ToolCallEnd{Call: call}) {
 						return
 					}
+				case part.Thought:
+					if !yield(provider.ReasoningDelta{Text: part.Text}) {
+						return
+					}
 				case part.Text != "":
 					if !yield(provider.TextDelta{Text: part.Text}) {
 						return

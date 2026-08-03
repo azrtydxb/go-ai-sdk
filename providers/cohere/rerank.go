@@ -67,6 +67,14 @@ func (m *rerankingModel) Rerank(ctx context.Context, call provider.RerankCall) (
 		return nil, fmt.Errorf("cohere: decode rerank response: %w", err)
 	}
 
+	// r.Index is passed through unvalidated against len(call.Documents)
+	// here — that's intentional. ai.Rerank (the only in-repo caller of
+	// provider.RerankingModel.Rerank) already guards out-of-range indices
+	// defensively when it maps RankedDocument.Index back to
+	// opts.Documents[r.Index] (see ai/rerank.go), so a duplicate check at
+	// this layer would be redundant. A caller invoking Rerank directly
+	// against the provider.RerankingModel interface (bypassing ai.Rerank)
+	// is responsible for its own bounds checking.
 	results := make([]provider.RankedDocument, 0, len(wr.Results))
 	for _, r := range wr.Results {
 		results = append(results, provider.RankedDocument{

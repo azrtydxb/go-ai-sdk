@@ -639,6 +639,52 @@ func TestRequestShape_Headers(t *testing.T) {
 	}
 }
 
+// TestRequestShape_CallerContentTypeDoesNotClobberSignedHeader asserts a
+// caller-supplied Content-Type in call.Headers cannot override the
+// provider-owned "application/json" Content-Type that was signed into the
+// SigV4 canonical request. Content-Type is not an x-amz-* header, so
+// without this guard it would land in the "unsigned" map and be
+// Header.Set AFTER sigv4.Sign, changing the on-wire Content-Type without
+// updating the signature — a guaranteed SignatureDoesNotMatch from AWS.
+func TestRequestShape_CallerContentTypeDoesNotClobberSignedHeader(t *testing.T) {
+	var gotContentType, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotContentType = r.Header.Get("Content-Type")
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		resp := converseResponse{
+			Output:     converseOutput{Message: wireMessage{Role: "assistant", Content: []wireContentBlock{{Text: strPtr("hi")}}}},
+			StopReason: "end_turn",
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	t.Cleanup(srv.Close)
+
+	p := New(
+		WithRegion("us-east-1"),
+		WithCredentials("AKIDEXAMPLE", "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY", ""),
+		WithBaseURL(srv.URL),
+	)
+	model := p.Model("anthropic.claude-3-sonnet-20240229-v1:0")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{provider.UserText("simple")},
+		Headers: map[string]string{
+			"Content-Type": "text/x",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	if gotContentType != "application/json" {
+		t.Errorf("on-wire Content-Type = %q, want application/json (provider-owned, must not be overridden by a caller header)", gotContentType)
+	}
+	if !strings.Contains(gotAuth, "AWS4-HMAC-SHA256") {
+		t.Fatalf("Authorization malformed: %q", gotAuth)
+	}
+}
+
 func TestRequestShape_ToolChoiceAutoAndTool(t *testing.T) {
 	model, fs := newTestModel(t)
 

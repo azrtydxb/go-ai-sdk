@@ -23,6 +23,20 @@ type wirePart struct {
 	FileData         *wireFileData         `json:"fileData,omitempty"`
 	FunctionCall     *wireFunctionCall     `json:"functionCall,omitempty"`
 	FunctionResponse *wireFunctionResponse `json:"functionResponse,omitempty"`
+	// Thought marks this part as a "thought summary" — Gemini's internal
+	// reasoning text, only present when the request set
+	// thinkingConfig.includeThoughts:true (see wireThinkingConfig). It must
+	// route to provider.ReasoningPart/ReasoningDelta, never to
+	// TextPart/TextDelta, or internal reasoning leaks into the visible
+	// answer.
+	Thought bool `json:"thought,omitempty"`
+	// ThoughtSignature is an opaque signature Gemini attaches to some
+	// thought parts, mirroring provider.ReasoningPart.Signature (see
+	// anthropic's handling of "thinking" blocks for the equivalent
+	// concept). Plumbed through so a reasoning part round-trips its
+	// signature even though geminicompat does not currently replay
+	// reasoning content back to the wire (see assistantParts).
+	ThoughtSignature string `json:"thoughtSignature,omitempty"`
 }
 
 type wireInlineData struct {
@@ -577,6 +591,11 @@ func convertResponse(wr generateContentResponse, raw []byte) *provider.Response 
 				ID:   fmt.Sprintf("call_%s_%d", part.FunctionCall.Name, i),
 				Name: part.FunctionCall.Name,
 				Args: args,
+			})
+		case part.Thought:
+			resp.Content = append(resp.Content, provider.ReasoningPart{
+				Text:      part.Text,
+				Signature: part.ThoughtSignature,
 			})
 		case part.Text != "":
 			resp.Content = append(resp.Content, provider.TextPart{Text: part.Text})

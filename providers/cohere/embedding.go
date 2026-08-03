@@ -59,6 +59,15 @@ func (m *embeddingModel) Embed(ctx context.Context, values []string) (*provider.
 		return nil, fmt.Errorf("cohere: decode embedding response: %w", err)
 	}
 
+	// /embed returns embeddings positionally (one per input value, in
+	// order) with no per-embedding identifier to correlate them back to
+	// their input. A short/mismatched response would otherwise silently
+	// zip embeddings to the wrong values downstream; fail loudly instead
+	// (mirrors vertex/geminicompat embedding.go's count check).
+	if len(wr.Embeddings.Float) != len(values) {
+		return nil, fmt.Errorf("cohere: embedding response count mismatch: requested %d values, got %d embeddings", len(values), len(wr.Embeddings.Float))
+	}
+
 	inputTokens := int(wr.Meta.BilledUnits.InputTokens)
 	return &provider.EmbeddingResponse{
 		Embeddings: wr.Embeddings.Float,

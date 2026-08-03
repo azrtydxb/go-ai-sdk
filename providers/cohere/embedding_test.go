@@ -86,6 +86,35 @@ func TestEmbedResultFloatVectorsAndUsage(t *testing.T) {
 	}
 }
 
+// TestEmbedResponseCountMismatchErrors covers a short/mismatched embed
+// response: cohere's /embed endpoint returns embeddings positionally with
+// no per-embedding identifier to correlate them back to their input text,
+// so a response with fewer embeddings than requested texts would otherwise
+// silently mis-zip downstream (e.g. embedding[i] no longer corresponds to
+// values[i]). Embed must fail loudly instead.
+func TestEmbedResponseCountMismatchErrors(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/embed", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		resp := embeddingResponse{
+			Embeddings: embeddingsWire{Float: [][]float64{
+				{0.1, 0.1},
+				{0.2, 0.2},
+			}},
+			Meta: embeddingMeta{BilledUnits: embeddingBilledUnits{InputTokens: 9}},
+		}
+		json.NewEncoder(w).Encode(resp)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).EmbeddingModel("embed-test")
+	_, err := model.Embed(context.Background(), []string{"a", "b", "c"})
+	if err == nil {
+		t.Fatal("Embed: want error for a 2-embedding response to 3 inputs, got nil")
+	}
+}
+
 func TestEmbedModelMetadata(t *testing.T) {
 	srv := newEmbeddingFixtureServer(t, nil)
 	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).EmbeddingModel("embed-test")
