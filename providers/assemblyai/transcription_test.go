@@ -197,6 +197,23 @@ func TestTranscribe_ErrorStatus(t *testing.T) {
 	}
 }
 
+func TestTranscribe_ErrorStatus_EmptyErrorFieldFallsBackToBody(t *testing.T) {
+	srv, _, _, _, _ := newFixtureServer(t, []string{
+		`{"id":"transcript-1","status":"error","error":"","distinctive_debug_field":"xyzzy-plugh"}`,
+	})
+
+	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
+	m := p.TranscriptionModel("universal")
+
+	_, err := m.Transcribe(context.Background(), provider.TranscriptionCall{Audio: []byte("x")})
+	if err == nil {
+		t.Fatal("expected error for error status")
+	}
+	if !strings.Contains(err.Error(), "xyzzy-plugh") {
+		t.Errorf("error = %q, want it to include the raw response body since the error field is empty", err.Error())
+	}
+}
+
 func TestTranscribe_ProviderOptionsMergeTopLevel(t *testing.T) {
 	srv, _, createBody, _, _ := newFixtureServer(t, []string{
 		`{"id":"transcript-1","status":"completed","text":"hi","audio_duration":0.1}`,
