@@ -54,6 +54,30 @@ func TestExtractJSONMiddleware_Generate_NoFencePassesThrough(t *testing.T) {
 	}
 }
 
+// TestExtractJSONMiddleware_Generate_ProseEmbeddedFencesPassThrough covers
+// that stripFences' whole-text rule requires a fence at BOTH the start and
+// end of the (trimmed) text: text that merely CONTAINS fence lines in the
+// middle of otherwise-unfenced prose is left completely untouched, since
+// neither end of the trimmed text is itself a bare "```".
+func TestExtractJSONMiddleware_Generate_ProseEmbeddedFencesPassThrough(t *testing.T) {
+	text := "Some prose\n```\ncode\n```\nmore prose"
+	mock := &aitest.MockModel{
+		Responses: []*provider.Response{
+			{Content: []provider.ContentPart{provider.TextPart{Text: text}}},
+		},
+	}
+	wrapped := ExtractJSONMiddleware(mock)
+
+	resp, err := wrapped.Generate(context.Background(), provider.Call{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	tp, ok := resp.Content[0].(provider.TextPart)
+	if !ok || tp.Text != text {
+		t.Errorf("Content[0] = %#v, want unchanged %q", resp.Content[0], text)
+	}
+}
+
 func TestExtractJSONMiddleware_Generate_NonTextPartsPassThrough(t *testing.T) {
 	tc := provider.ToolCallPart{ID: "c1", Name: "t", Args: []byte(`{}`)}
 	mock := &aitest.MockModel{
@@ -236,6 +260,74 @@ func TestExtractJSONMiddleware_Stream_UnclosedFenceMarkerAtEndFlushed(t *testing
 	}
 	if got != "hi``" {
 		t.Fatalf("got %q, want %q", got, "hi``")
+	}
+}
+
+// TestExtractJSONMiddleware_Stream_ProseEmbeddedFencesPassThrough is the
+// Stream counterpart to the Generate prose-embedded-fences test: neither the
+// first fence line (not the stream's first non-empty line) nor the second
+// (more content follows it before the stream ends) is ever a fence
+// candidate that resolves to "strip", so the whole text streams through
+// byte-for-byte unchanged.
+func TestExtractJSONMiddleware_Stream_ProseEmbeddedFencesPassThrough(t *testing.T) {
+	text := "Some prose\n```\ncode\n```\nmore prose"
+	mock := &aitest.MockModel{
+		Streams: [][]provider.StreamPart{{
+			provider.TextDelta{Text: text},
+			provider.FinishPart{Reason: provider.FinishStop},
+		}},
+	}
+	wrapped := ExtractJSONMiddleware(mock)
+
+	sr, err := wrapped.Stream(context.Background(), provider.Call{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var got string
+	for p := range sr.Parts() {
+		if d, ok := p.(provider.TextDelta); ok {
+			got += d.Text
+		}
+	}
+	if err := sr.Err(); err != nil {
+		t.Fatalf("stream error: %v", err)
+	}
+	if got != text {
+		t.Fatalf("got %q, want unchanged %q", got, text)
+	}
+}
+
+// TestExtractJSONMiddleware_Stream_TruncatedNoClosingFence documents and
+// pins the one deliberate divergence from Generate's whole-text rule: since
+// Stream can't wait indefinitely to find out whether a closing fence will
+// ever arrive, an opening fence is stripped unconditionally and
+// immediately, even when the stream then ends with no closing fence at
+// all — unlike Generate's stripFences, which requires both ends to match
+// before stripping either (so it would leave this exact text untouched).
+func TestExtractJSONMiddleware_Stream_TruncatedNoClosingFence(t *testing.T) {
+	mock := &aitest.MockModel{
+		Streams: [][]provider.StreamPart{{
+			provider.TextDelta{Text: "```json\n{\"a\":1}"},
+			provider.FinishPart{Reason: provider.FinishStop},
+		}},
+	}
+	wrapped := ExtractJSONMiddleware(mock)
+
+	sr, err := wrapped.Stream(context.Background(), provider.Call{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var got string
+	for p := range sr.Parts() {
+		if d, ok := p.(provider.TextDelta); ok {
+			got += d.Text
+		}
+	}
+	if err := sr.Err(); err != nil {
+		t.Fatalf("stream error: %v", err)
+	}
+	if got != `{"a":1}` {
+		t.Fatalf("got %q, want %q (opening fence stripped, no closing fence to strip)", got, `{"a":1}`)
 	}
 }
 
