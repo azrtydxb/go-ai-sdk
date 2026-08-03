@@ -1,0 +1,425 @@
+package openai
+
+import (
+	"bufio"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"net"
+	"net/http"
+	"net/url"
+	"testing"
+	"time"
+
+	"github.com/azrtydxb/go-ai-sdk/internal/websocket/websockettest"
+	"github.com/azrtydxb/go-ai-sdk/provider"
+)
+
+func listenerBaseURL(t *testing.T) (net.Listener, string) {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { l.Close() })
+	return l, "http://" + l.Addr().String()
+}
+
+// requestCapturingUpgrade performs the server-side WebSocket handshake like
+// websockettest.Upgrade, but also captures the client's Authorization /
+// OpenAI-Beta headers and full request URL for assertions.
+func requestCapturingUpgrade(conn net.Conn, gotAuth, gotBeta, gotURL *string) *bufio.Reader {
+	br := bufio.NewReader(conn)
+	req, err := http.ReadRequest(br)
+	if err != nil {
+		return br
+	}
+	defer req.Body.Close()
+	*gotAuth = req.Header.Get("Authorization")
+	*gotBeta = req.Header.Get("OpenAI-Beta")
+	*gotURL = req.URL.String()
+
+	key := req.Header.Get("Sec-WebSocket-Key")
+	accept := websockettest.ComputeAccept(key)
+	resp := "HTTP/1.1 101 Switching Protocols\r\n" +
+		"Upgrade: websocket\r\n" +
+		"Connection: Upgrade\r\n" +
+		"Sec-WebSocket-Accept: " + accept + "\r\n\r\n"
+	conn.Write([]byte(resp))
+	return br
+}
+
+func mustParseQuery(t *testing.T, rawURL string) url.Values {
+	t.Helper()
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		t.Fatalf("parse URL %q: %v", rawURL, err)
+	}
+	return u.Query()
+}
+
+func TestStreamTranscribe_HandshakeAndSessionUpdate(t *testing.T) {
+	l, baseURL := listenerBaseURL(t)
+
+	var gotAuth, gotBeta, gotURL string
+	var gotSessionMsg []byte
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		requestCapturingUpgrade(conn, &gotAuth, &gotBeta, &gotURL)
+		_, payload, err := websockettest.ReadMessage(conn)
+		if err == nil {
+			gotSessionMsg = payload
+		}
+		websockettest.WriteClose(conn, 1000, "")
+	}()
+
+	p := New(WithAPIKey("oa-key"), WithBaseURL(baseURL))
+	m := p.StreamingTranscriptionModel("gpt-4o-transcribe")
+	stream, err := m.StreamTranscribe(context.Background(), provider.StreamTranscriptionCall{
+		MediaType: "audio/pcm",
+		Language:  "en",
+		ProviderOptions: map[string]any{
+			"openai": map[string]any{"turn_detection": nil},
+		},
+	})
+	if err != nil {
+		t.Fatalf("StreamTranscribe: %v", err)
+	}
+	defer stream.Close()
+
+	for range stream.Events() {
+	}
+	<-done
+
+	if gotAuth != "Bearer oa-key" {
+		t.Fatalf("Authorization = %q, want %q", gotAuth, "Bearer oa-key")
+	}
+	if gotBeta != "realtime=v1" {
+		t.Fatalf("OpenAI-Beta = %q, want %q", gotBeta, "realtime=v1")
+	}
+	q := mustParseQuery(t, gotURL)
+	if q.Get("intent") != "transcription" {
+		t.Fatalf("intent query param missing/wrong: %q", gotURL)
+	}
+
+	var msg map[string]any
+	if err := json.Unmarshal(gotSessionMsg, &msg); err != nil {
+		t.Fatalf("decode session update: %v (%s)", err, gotSessionMsg)
+	}
+	if msg["type"] != "transcription_session.update" {
+		t.Fatalf("type = %v, want transcription_session.update", msg["type"])
+	}
+	session, ok := msg["session"].(map[string]any)
+	if !ok {
+		t.Fatalf("session missing or wrong type: %+v", msg)
+	}
+	if session["input_audio_format"] != "pcm16" {
+		t.Fatalf("input_audio_format = %v, want pcm16", session["input_audio_format"])
+	}
+	iat, ok := session["input_audio_transcription"].(map[string]any)
+	if !ok {
+		t.Fatalf("input_audio_transcription missing: %+v", session)
+	}
+	if iat["model"] != "gpt-4o-transcribe" || iat["language"] != "en" {
+		t.Fatalf("input_audio_transcription = %+v", iat)
+	}
+	if _, ok := session["turn_detection"]; !ok {
+		t.Fatalf("ProviderOptions[\"openai\"] not merged into session: %+v", session)
+	}
+}
+
+func TestStreamTranscribe_SendBase64Passthrough(t *testing.T) {
+	l, baseURL := listenerBaseURL(t)
+
+	msgCh := make(chan []byte, 8)
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		if err := websockettest.Upgrade(conn); err != nil {
+			return
+		}
+		// Session update is the first client message; drain it.
+		websockettest.ReadMessage(conn)
+		_, payload, err := websockettest.ReadMessage(conn)
+		if err == nil {
+			msgCh <- payload
+		}
+		websockettest.WriteClose(conn, 1000, "")
+	}()
+
+	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
+	m := p.StreamingTranscriptionModel("gpt-4o-transcribe")
+	stream, err := m.StreamTranscribe(context.Background(), provider.StreamTranscriptionCall{})
+	if err != nil {
+		t.Fatalf("StreamTranscribe: %v", err)
+	}
+	defer stream.Close()
+
+	if err := stream.Send(context.Background(), []byte("pcm-bytes")); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	select {
+	case got := <-msgCh:
+		var msg map[string]any
+		if err := json.Unmarshal(got, &msg); err != nil {
+			t.Fatalf("decode append message: %v", err)
+		}
+		if msg["type"] != "input_audio_buffer.append" {
+			t.Fatalf("type = %v, want input_audio_buffer.append", msg["type"])
+		}
+		wantB64 := base64.StdEncoding.EncodeToString([]byte("pcm-bytes"))
+		if msg["audio"] != wantB64 {
+			t.Fatalf("audio = %v, want %v", msg["audio"], wantB64)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for append message")
+	}
+
+	for range stream.Events() {
+	}
+}
+
+func TestStreamTranscribe_EventSequenceDeltaThenCompleted(t *testing.T) {
+	l, baseURL := listenerBaseURL(t)
+
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		if err := websockettest.Upgrade(conn); err != nil {
+			return
+		}
+		websockettest.ReadMessage(conn) // session update
+
+		websockettest.WriteMessage(conn, websockettest.OpText, []byte(
+			`{"type":"conversation.item.input_audio_transcription.delta","delta":"hel"}`))
+		websockettest.WriteMessage(conn, websockettest.OpText, []byte(
+			`{"type":"conversation.item.input_audio_transcription.completed","transcript":"hello"}`))
+		websockettest.WriteClose(conn, 1000, "")
+	}()
+
+	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
+	m := p.StreamingTranscriptionModel("gpt-4o-transcribe")
+	stream, err := m.StreamTranscribe(context.Background(), provider.StreamTranscriptionCall{})
+	if err != nil {
+		t.Fatalf("StreamTranscribe: %v", err)
+	}
+	defer stream.Close()
+
+	var got []provider.TranscriptEvent
+	for e := range stream.Events() {
+		got = append(got, e)
+	}
+	if err := stream.Err(); err != nil {
+		t.Fatalf("Err() = %v, want nil", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d events, want 2: %+v", len(got), got)
+	}
+	if got[0].Text != "hel" || got[0].Final {
+		t.Fatalf("event 0 = %+v", got[0])
+	}
+	if got[1].Text != "hello" || !got[1].Final {
+		t.Fatalf("event 1 = %+v", got[1])
+	}
+}
+
+func TestStreamTranscribe_ErrorEventSetsErr(t *testing.T) {
+	l, baseURL := listenerBaseURL(t)
+
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		if err := websockettest.Upgrade(conn); err != nil {
+			return
+		}
+		websockettest.ReadMessage(conn) // session update
+		websockettest.WriteMessage(conn, websockettest.OpText, []byte(
+			`{"type":"error","error":{"message":"invalid audio format"}}`))
+	}()
+
+	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
+	m := p.StreamingTranscriptionModel("gpt-4o-transcribe")
+	stream, err := m.StreamTranscribe(context.Background(), provider.StreamTranscriptionCall{})
+	if err != nil {
+		t.Fatalf("StreamTranscribe: %v", err)
+	}
+	defer stream.Close()
+
+	for range stream.Events() {
+	}
+	if stream.Err() == nil {
+		t.Fatal("Err() = nil, want the error event's message")
+	}
+}
+
+func TestStreamTranscribe_CloseSendWireShape(t *testing.T) {
+	l, baseURL := listenerBaseURL(t)
+
+	frameCh := make(chan struct {
+		opcode  int
+		payload []byte
+	}, 1)
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		if err := websockettest.Upgrade(conn); err != nil {
+			return
+		}
+		websockettest.ReadMessage(conn) // session update
+		opcode, payload, err := websockettest.ReadMessage(conn)
+		if err == nil {
+			frameCh <- struct {
+				opcode  int
+				payload []byte
+			}{opcode, payload}
+		}
+		websockettest.WriteClose(conn, 1000, "")
+	}()
+
+	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
+	m := p.StreamingTranscriptionModel("gpt-4o-transcribe")
+	stream, err := m.StreamTranscribe(context.Background(), provider.StreamTranscriptionCall{})
+	if err != nil {
+		t.Fatalf("StreamTranscribe: %v", err)
+	}
+	defer stream.Close()
+
+	if err := stream.CloseSend(context.Background()); err != nil {
+		t.Fatalf("CloseSend: %v", err)
+	}
+	if err := stream.CloseSend(context.Background()); err != nil {
+		t.Fatalf("CloseSend (2nd): %v", err)
+	}
+
+	select {
+	case f := <-frameCh:
+		if f.opcode != websockettest.OpText || string(f.payload) != `{"type":"input_audio_buffer.commit"}` {
+			t.Fatalf("frame = opcode=%d payload=%q", f.opcode, f.payload)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for commit frame")
+	}
+
+	for range stream.Events() {
+	}
+}
+
+func TestStreamTranscribe_ServerCloseIsCleanEnd(t *testing.T) {
+	l, baseURL := listenerBaseURL(t)
+
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		if err := websockettest.Upgrade(conn); err != nil {
+			return
+		}
+		websockettest.ReadMessage(conn) // session update
+		websockettest.WriteClose(conn, 1000, "done")
+	}()
+
+	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
+	m := p.StreamingTranscriptionModel("gpt-4o-transcribe")
+	stream, err := m.StreamTranscribe(context.Background(), provider.StreamTranscriptionCall{})
+	if err != nil {
+		t.Fatalf("StreamTranscribe: %v", err)
+	}
+	defer stream.Close()
+
+	for range stream.Events() {
+	}
+	if err := stream.Err(); err != nil {
+		t.Fatalf("Err() = %v, want nil", err)
+	}
+}
+
+func TestStreamTranscribe_CtxCancelMidStream(t *testing.T) {
+	l, baseURL := listenerBaseURL(t)
+
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		if err := websockettest.Upgrade(conn); err != nil {
+			return
+		}
+		websockettest.ReadMessage(conn) // session update
+		websockettest.ReadMessage(conn) // block until client disconnects
+	}()
+
+	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
+	m := p.StreamingTranscriptionModel("gpt-4o-transcribe")
+	ctx, cancel := context.WithCancel(context.Background())
+	stream, err := m.StreamTranscribe(ctx, provider.StreamTranscriptionCall{})
+	if err != nil {
+		t.Fatalf("StreamTranscribe: %v", err)
+	}
+	defer stream.Close()
+
+	cancel()
+
+	for range stream.Events() {
+	}
+	if !errors.Is(stream.Err(), context.Canceled) {
+		t.Fatalf("Err() = %v, want context.Canceled", stream.Err())
+	}
+}
+
+func TestStreamTranscribe_CloseIdempotent(t *testing.T) {
+	l, baseURL := listenerBaseURL(t)
+
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		websockettest.Upgrade(conn)
+		websockettest.ReadMessage(conn)
+		websockettest.ReadMessage(conn)
+	}()
+
+	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
+	m := p.StreamingTranscriptionModel("gpt-4o-transcribe")
+	stream, err := m.StreamTranscribe(context.Background(), provider.StreamTranscriptionCall{})
+	if err != nil {
+		t.Fatalf("StreamTranscribe: %v", err)
+	}
+
+	if err := stream.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatalf("Close (2nd): %v", err)
+	}
+
+	for range stream.Events() {
+	}
+	if err := stream.Err(); err != nil {
+		t.Fatalf("Err() = %v, want nil after explicit Close", err)
+	}
+}
