@@ -146,6 +146,8 @@ in [`examples/`](examples/), each compiled by CI.
 
 ## Provider and capability matrix
 
+<!-- Summarizes docs/providers/README.md's canonical capability matrix. Update all three together (README.md, docs/providers/README.md, docs/core/media.md). -->
+
 All supported providers, by capability:
 
 | Capability | OpenAI | Anthropic | Google | Groq | xAI | DeepSeek³ | Together | Fireworks | Cerebras | Perplexity¹ | Mistral² | Cohere | Azure | Vertex AI | Bedrock |

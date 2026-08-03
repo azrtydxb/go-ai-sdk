@@ -108,6 +108,8 @@ for _, seg := range result.Segments {
 
 ### Provider matrix
 
+<!-- Canonical capability matrix lives in docs/providers/README.md; README.md and this table summarize it. Update all three together. -->
+
 | Provider | Response shape | Segments | Notes |
 |---|---|---|---|
 | OpenAI | `verbose_json` (whisper-1 and similar), `json` (gpt-4o-\* models) | Only with `verbose_json` | Models whose ID contains `"gpt-4o"` reject `verbose_json`, so those get plain `json` (text only, no `Segments`/`Language`/`DurationSec`); everything else gets `verbose_json`. |

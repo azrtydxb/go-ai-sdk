@@ -20,6 +20,8 @@ hatch used throughout the pages below) are documented once, generically, in
 
 ## Capability matrix
 
+<!-- Canonical capability matrix. README.md and docs/core/media.md summarize this; update all three together. -->
+
 ✓ = supported · ✗ = not exposed by this package · ⚠ = supported with a
 caveat, see that provider's page
 
