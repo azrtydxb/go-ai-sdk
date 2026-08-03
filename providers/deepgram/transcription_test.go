@@ -116,6 +116,129 @@ func TestTranscribe_HappyPath(t *testing.T) {
 	}
 }
 
+func TestTranscribe_SegmentsPreferPunctuatedWord(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{
+			"metadata": {"duration": 1.2},
+			"results": {
+				"channels": [
+					{
+						"alternatives": [
+							{
+								"transcript": "Hello, world.",
+								"words": [
+									{"word":"hello","punctuated_word":"Hello,","start":0.0,"end":0.5},
+									{"word":"world","punctuated_word":"world.","start":0.6,"end":1.2}
+								]
+							}
+						]
+					}
+				]
+			}
+		}`))
+	}))
+	defer srv.Close()
+
+	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
+	m := p.TranscriptionModel("nova-3")
+
+	resp, err := m.Transcribe(context.Background(), provider.TranscriptionCall{
+		Audio:     []byte("x"),
+		MediaType: "audio/wav",
+	})
+	if err != nil {
+		t.Fatalf("Transcribe: %v", err)
+	}
+	if len(resp.Segments) != 2 {
+		t.Fatalf("Segments len = %d, want 2", len(resp.Segments))
+	}
+	if resp.Segments[0].Text != "Hello," {
+		t.Errorf("Segments[0].Text = %q, want punctuated form %q", resp.Segments[0].Text, "Hello,")
+	}
+	if resp.Segments[1].Text != "world." {
+		t.Errorf("Segments[1].Text = %q, want punctuated form %q", resp.Segments[1].Text, "world.")
+	}
+}
+
+func TestTranscribe_SegmentsFallBackToWordWhenPunctuatedWordAbsent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{
+			"metadata": {"duration": 0.5},
+			"results": {
+				"channels": [
+					{
+						"alternatives": [
+							{
+								"transcript": "hello",
+								"words": [
+									{"word":"hello","start":0.0,"end":0.5}
+								]
+							}
+						]
+					}
+				]
+			}
+		}`))
+	}))
+	defer srv.Close()
+
+	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
+	m := p.TranscriptionModel("nova-3")
+
+	resp, err := m.Transcribe(context.Background(), provider.TranscriptionCall{
+		Audio:     []byte("x"),
+		MediaType: "audio/wav",
+	})
+	if err != nil {
+		t.Fatalf("Transcribe: %v", err)
+	}
+	if len(resp.Segments) != 1 {
+		t.Fatalf("Segments len = %d, want 1", len(resp.Segments))
+	}
+	if resp.Segments[0].Text != "hello" {
+		t.Errorf("Segments[0].Text = %q, want fallback %q", resp.Segments[0].Text, "hello")
+	}
+}
+
+func TestTranscribe_ProviderOptionsOverrideModelQueryParam(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"metadata":{"duration":0},"results":{"channels":[{"alternatives":[{"transcript":"hi","words":[]}]}]}}`))
+	}))
+	defer srv.Close()
+
+	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
+	m := p.TranscriptionModel("nova-3")
+
+	_, err := m.Transcribe(context.Background(), provider.TranscriptionCall{
+		Audio:     []byte("x"),
+		MediaType: "audio/wav",
+		ProviderOptions: map[string]any{
+			"deepgram": map[string]any{
+				"model": "nova-2",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Transcribe: %v", err)
+	}
+
+	q, err := url.ParseQuery(gotQuery)
+	if err != nil {
+		t.Fatalf("parse query: %v", err)
+	}
+	if q.Get("model") != "nova-2" {
+		t.Errorf("model query param = %q, want provider-options override %q", q.Get("model"), "nova-2")
+	}
+}
+
 func TestTranscribe_NoLanguageOmitsQueryParam(t *testing.T) {
 	var gotQuery string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

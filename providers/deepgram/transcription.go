@@ -48,9 +48,10 @@ type wireAlternative struct {
 }
 
 type wireWord struct {
-	Word  string  `json:"word"`
-	Start float64 `json:"start"`
-	End   float64 `json:"end"`
+	Word           string  `json:"word"`
+	PunctuatedWord string  `json:"punctuated_word"`
+	Start          float64 `json:"start"`
+	End            float64 `json:"end"`
 }
 
 // Transcribe sends the audio to Deepgram's /v1/listen endpoint.
@@ -61,6 +62,9 @@ type wireWord struct {
 // are added as extra URL query parameters (each value stringified with
 // fmt.Sprint). This is a deliberate divergence from the option-merging
 // convention used by JSON-bodied providers such as fal and elevenlabs.
+// Options win: since they're applied after the reserved params (model,
+// smart_format, language), an entry in ProviderOptions["deepgram"] with one
+// of those keys overrides the SDK-set value.
 func (m *transcriptionModel) Transcribe(ctx context.Context, call provider.TranscriptionCall) (*provider.TranscriptionResponse, error) {
 	// call.Prompt is not supported by Deepgram's /v1/listen endpoint and is
 	// silently ignored.
@@ -118,8 +122,16 @@ func (m *transcriptionModel) Transcribe(ctx context.Context, call provider.Trans
 
 	segments := make([]provider.TranscriptSegment, 0, len(alt.Words))
 	for _, w := range alt.Words {
+		// Prefer punctuated_word (capitalized + punctuated, present when
+		// smart_format=true) so segment text matches the formatting of Text
+		// (which comes from the also-smart-formatted transcript field).
+		// Fall back to the raw word when punctuated_word is absent.
+		text := w.PunctuatedWord
+		if text == "" {
+			text = w.Word
+		}
 		segments = append(segments, provider.TranscriptSegment{
-			Text:     w.Word,
+			Text:     text,
 			StartSec: w.Start,
 			EndSec:   w.End,
 		})
