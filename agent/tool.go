@@ -30,16 +30,27 @@ type asToolTool struct {
 // AsTool exposes a as an ai.Tool so a parent agent can delegate to it. The
 // returned tool takes {"task": string} and, when called, runs a with
 // RunOpts{Prompt: task} and returns the sub-agent's decoded Output when it
-// has one, or its final Text otherwise. A sub-agent error propagates as the
-// tool's execution error — the parent's tool loop wraps it in a
-// *ai.ToolExecutionError, same as any other failing tool.
+// has one, or its final Text otherwise. A sub-agent error is wrapped in a
+// *ai.ToolExecutionError (ToolName set to the tool's own name, Cause the
+// sub-agent's error) before it is returned, matching the error taxonomy
+// ai.NewTool-built tools already produce for a failing handler — so a
+// failing sub-agent looks like any other failing tool to the parent's loop
+// and to code that type-switches/errors.As on ToolResultRecord.Err.
 //
-// The parent's ai.RuntimeContext flows into the sub-agent's ctx (it's just
-// the same ctx passed to Execute) only insofar as the sub-agent doesn't
-// install its own: a always installs its own RuntimeContext (nil if unset)
-// for its own run, per ai.GenerateTextOpts.RuntimeContext — so it is a's
-// RuntimeContext, not the parent's, that governs what a's own tools see via
-// ai.RuntimeContextFrom, regardless of what the parent had installed.
+// RuntimeContext scoping: ai.RuntimeContext installs once per
+// GenerateText/StreamText call, and installing a nil RuntimeContext is a
+// no-op (see ai.RuntimeContextFrom) — it leaves whatever was already on
+// ctx untouched rather than clearing it. That gives AsTool inherited
+// scoping by default: when a (the sub-agent) has RuntimeContext unset, the
+// ctx passed to a.Generate already carries the PARENT's RuntimeContext
+// (installed by the parent's own GenerateText/StreamText call before any
+// tool executes), so a's own tools see the parent's RuntimeContext via
+// ai.RuntimeContextFrom. Setting a.RuntimeContext overrides this: a
+// non-nil value (even an explicitly empty ai.RuntimeContext{}) always
+// installs and shadows whatever was on ctx for the duration of a's run —
+// so an empty ai.RuntimeContext{} is the way to explicitly isolate a
+// sub-agent's tools from the parent's RuntimeContext rather than merely
+// leaving it unset.
 func AsTool(a *Agent, name, description string) ai.Tool {
 	return &asToolTool{
 		agent:       a,
@@ -67,7 +78,7 @@ func (t *asToolTool) Execute(ctx context.Context, args json.RawMessage) (any, er
 
 	result, err := t.agent.Generate(ctx, RunOpts{Prompt: a.Task})
 	if err != nil {
-		return nil, err
+		return nil, &ai.ToolExecutionError{ToolName: t.name, Cause: err}
 	}
 
 	if result.Output != nil {

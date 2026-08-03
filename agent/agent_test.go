@@ -174,6 +174,20 @@ func TestStreamSmoke(t *testing.T) {
 	}
 }
 
+// TestStreamWithOutputPassesThroughError verifies Stream does not intercept
+// or drop ai.ErrOutputWithStreamText when Output is set — it's passed
+// through unchanged, same as calling ai.StreamText directly.
+func TestStreamWithOutputPassesThroughError(t *testing.T) {
+	a := &Agent{
+		Model:  &aitest.MockModel{},
+		Output: ai.OutputObject[struct{ X string }](),
+	}
+	_, err := a.Stream(t.Context(), RunOpts{Prompt: "hi"})
+	if !errors.Is(err, ai.ErrOutputWithStreamText) {
+		t.Fatalf("err = %v, want ai.ErrOutputWithStreamText", err)
+	}
+}
+
 // TestApproveToolCallDenialVisibleInTranscript verifies Agent.ApproveToolCall
 // is passed through: a denial shows up in the transcript exactly like it
 // would via raw ai.GenerateText.

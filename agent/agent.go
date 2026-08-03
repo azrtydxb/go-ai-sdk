@@ -57,7 +57,16 @@ type Agent struct {
 	Output ai.Output
 	// RuntimeContext is installed on the ctx passed to this agent's tools
 	// (and to ApproveToolCall/ApprovalRequired) for the duration of each
-	// run — see ai.RuntimeContext.
+	// run — see ai.RuntimeContext. Nil is a no-op, not a clear: per
+	// ai.RuntimeContextFrom, a nil RuntimeContext leaves whatever
+	// RuntimeContext was already installed on ctx untouched. This matters
+	// for an Agent run via AsTool as a sub-agent: with RuntimeContext left
+	// unset, the sub-agent's tools inherit the PARENT agent's
+	// RuntimeContext (already on ctx when the parent's tool loop calls
+	// this tool's Execute); setting RuntimeContext to any non-nil value
+	// (including an explicitly empty ai.RuntimeContext{}) overrides that
+	// inheritance and installs/shadows it for this agent's own run instead
+	// — see AsTool's doc for the full sub-agent scoping rule.
 	RuntimeContext ai.RuntimeContext
 	// ApproveToolCall, when set, is passed through to
 	// ai.GenerateTextOpts.ApproveToolCall unchanged.
@@ -123,7 +132,10 @@ func (a *Agent) Generate(ctx context.Context, run RunOpts) (*ai.GenerateTextResu
 }
 
 // Stream runs the agent once against run, delegating entirely to
-// ai.StreamText.
+// ai.StreamText. If Output is set, ai.StreamText's own restriction applies
+// unchanged: it returns ai.ErrOutputWithStreamText immediately rather than
+// streaming — Stream does not intercept or drop that error, it passes it
+// straight through to the caller.
 func (a *Agent) Stream(ctx context.Context, run RunOpts) (*ai.TextStream, error) {
 	if a == nil {
 		return nil, errors.New("agent: nil Agent")
