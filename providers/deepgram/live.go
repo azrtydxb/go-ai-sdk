@@ -38,6 +38,11 @@ func (m *streamingTranscriptionModel) ProviderName() string { return providerNam
 // The dial URL is derived from the provider's configured baseURL by
 // swapping http(s) for ws(s) — never hardcoded — so fixture servers set up
 // via WithBaseURL work the same as the real Deepgram host.
+//
+// A "Results" message with an empty transcript is skipped entirely (no
+// TranscriptEvent emitted) — including when it carries is_final:true — since
+// Deepgram sends empty-transcript results for silence/non-speech audio and
+// there is nothing useful to report for that segment.
 func (m *streamingTranscriptionModel) StreamTranscribe(ctx context.Context, call provider.StreamTranscriptionCall) (provider.TranscriptionStream, error) {
 	dialURL, err := buildDialURL(m.provider.baseURL, m.modelID, call)
 	if err != nil {
@@ -51,7 +56,13 @@ func (m *streamingTranscriptionModel) StreamTranscribe(ctx context.Context, call
 		return nil, fmt.Errorf("deepgram: dial live transcription: %w", err)
 	}
 
-	s := &liveStream{ctx: ctx, conn: conn, events: make(chan provider.TranscriptEvent, 32)}
+	s := &liveStream{
+		ctx:          ctx,
+		conn:         conn,
+		events:       make(chan provider.TranscriptEvent, 32),
+		closeCh:      make(chan struct{}),
+		readLoopDone: make(chan struct{}),
+	}
 	go s.readLoop()
 	return s, nil
 }
@@ -185,6 +196,16 @@ type liveStream struct {
 	conn   *websocket.Conn
 	events chan provider.TranscriptEvent
 
+	// closeCh is closed exactly once, by Close(), to unblock readLoop if
+	// it's parked trying to send a buffered event to a consumer that has
+	// already stopped ranging over Events() without cancelling ctx.
+	closeCh chan struct{}
+	// readLoopDone is closed when readLoop returns, after events is
+	// closed. Not part of the public interface; exists so tests (and
+	// Close, defensively) can observe that the reader goroutine has
+	// actually exited rather than just that events was closed.
+	readLoopDone chan struct{}
+
 	writeMu       sync.Mutex // serializes Send/CloseSend/Close (conn write contract)
 	closed        bool
 	closeSendSent bool
@@ -200,6 +221,9 @@ func (s *liveStream) Send(ctx context.Context, audio []byte) error {
 	defer s.writeMu.Unlock()
 	if s.closed {
 		return errors.New("deepgram: Send called after Close")
+	}
+	if s.closeSendSent {
+		return errors.New("deepgram: Send called after CloseSend")
 	}
 	return s.conn.WriteBinary(ctx, audio)
 }
@@ -217,7 +241,11 @@ func (s *liveStream) CloseSend(ctx context.Context) error {
 }
 
 // Close implements provider.TranscriptionStream by aborting the connection
-// without flushing. Idempotent.
+// without flushing, without waiting for outstanding events to be consumed.
+// Idempotent. Because abort is caller-initiated rather than a stream
+// failure, Err() reports nil once the stream ends as a result of Close
+// (matching a peer-initiated clean close) rather than surfacing whatever
+// error the now-closed connection produces on its next Read.
 func (s *liveStream) Close() error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
@@ -225,6 +253,7 @@ func (s *liveStream) Close() error {
 		return nil
 	}
 	s.closed = true
+	close(s.closeCh)
 	return s.conn.Close(websocket.CloseNormal, "")
 }
 
@@ -265,6 +294,7 @@ func (s *liveStream) setErr(err error) {
 // readLoop pumps conn.Read into s.events until the stream ends, then closes
 // s.events. It runs in its own goroutine, started by StreamTranscribe.
 func (s *liveStream) readLoop() {
+	defer close(s.readLoopDone)
 	defer close(s.events)
 	for {
 		mt, data, err := s.conn.Read(s.ctx)
@@ -291,6 +321,12 @@ func (s *liveStream) readLoop() {
 			case s.events <- e:
 			case <-s.ctx.Done():
 				s.setErr(s.ctx.Err())
+				return
+			case <-s.closeCh:
+				// Close() was called while an event was pending delivery
+				// to a consumer that has stopped (or never started)
+				// ranging over Events() — without this case, this send
+				// would block forever, leaking the goroutine.
 				return
 			}
 		}

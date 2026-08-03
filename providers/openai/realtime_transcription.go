@@ -65,7 +65,13 @@ func (m *streamingTranscriptionModel) StreamTranscribe(ctx context.Context, call
 		return nil, fmt.Errorf("openai: send transcription_session.update: %w", err)
 	}
 
-	s := &realtimeStream{ctx: ctx, conn: conn, events: make(chan provider.TranscriptEvent, 32)}
+	s := &realtimeStream{
+		ctx:          ctx,
+		conn:         conn,
+		events:       make(chan provider.TranscriptEvent, 32),
+		closeCh:      make(chan struct{}),
+		readLoopDone: make(chan struct{}),
+	}
 	go s.readLoop()
 	return s, nil
 }
@@ -146,6 +152,16 @@ type realtimeStream struct {
 	conn   *websocket.Conn
 	events chan provider.TranscriptEvent
 
+	// closeCh is closed exactly once, by Close(), to unblock readLoop if
+	// it's parked trying to send a buffered event to a consumer that has
+	// already stopped ranging over Events() without cancelling ctx.
+	closeCh chan struct{}
+	// readLoopDone is closed when readLoop returns, after events is
+	// closed. Not part of the public interface; exists so tests (and
+	// Close, defensively) can observe that the reader goroutine has
+	// actually exited rather than just that events was closed.
+	readLoopDone chan struct{}
+
 	writeMu       sync.Mutex // serializes Send/CloseSend/Close (conn write contract)
 	closed        bool
 	closeSendSent bool
@@ -161,6 +177,9 @@ func (s *realtimeStream) Send(ctx context.Context, audio []byte) error {
 	defer s.writeMu.Unlock()
 	if s.closed {
 		return errors.New("openai: Send called after Close")
+	}
+	if s.closeSendSent {
+		return errors.New("openai: Send called after CloseSend")
 	}
 	msg, err := json.Marshal(map[string]any{
 		"type":  "input_audio_buffer.append",
@@ -185,7 +204,11 @@ func (s *realtimeStream) CloseSend(ctx context.Context) error {
 }
 
 // Close implements provider.TranscriptionStream by aborting the connection
-// without flushing. Idempotent.
+// without flushing, without waiting for outstanding events to be consumed.
+// Idempotent. Because abort is caller-initiated rather than a stream
+// failure, Err() reports nil once the stream ends as a result of Close
+// (matching a peer-initiated clean close) rather than surfacing whatever
+// error the now-closed connection produces on its next Read.
 func (s *realtimeStream) Close() error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
@@ -193,6 +216,7 @@ func (s *realtimeStream) Close() error {
 		return nil
 	}
 	s.closed = true
+	close(s.closeCh)
 	return s.conn.Close(websocket.CloseNormal, "")
 }
 
@@ -233,6 +257,7 @@ func (s *realtimeStream) setErr(err error) {
 // readLoop pumps conn.Read into s.events until the stream ends, then closes
 // s.events. It runs in its own goroutine, started by StreamTranscribe.
 func (s *realtimeStream) readLoop() {
+	defer close(s.readLoopDone)
 	defer close(s.events)
 	for {
 		mt, data, err := s.conn.Read(s.ctx)
@@ -259,6 +284,12 @@ func (s *realtimeStream) readLoop() {
 			case s.events <- e:
 			case <-s.ctx.Done():
 				s.setErr(s.ctx.Err())
+				return
+			case <-s.closeCh:
+				// Close() was called while an event was pending delivery
+				// to a consumer that has stopped (or never started)
+				// ranging over Events() — without this case, this send
+				// would block forever, leaking the goroutine.
 				return
 			}
 		}

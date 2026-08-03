@@ -454,3 +454,98 @@ func TestStreamTranscribe_ConcurrentSendWhileRangingEvents(t *testing.T) {
 		t.Fatalf("count = %d, want 20", count)
 	}
 }
+
+// TestStreamTranscribe_AbandonedEventsThenCloseUnblocksReadLoop pins the fix
+// for a reader-goroutine leak: readLoop's per-event send used to select
+// only on the events channel and ctx.Done(), so a consumer that stops
+// ranging over Events() (the documented "break, then Close()" cleanup
+// pattern) without cancelling ctx left readLoop parked forever on that send
+// once the fixture-server-fed buffer filled up. Close() must unblock it.
+func TestStreamTranscribe_AbandonedEventsThenCloseUnblocksReadLoop(t *testing.T) {
+	l, baseURL := listenerBaseURL(t)
+
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		if err := websockettest.Upgrade(conn); err != nil {
+			return
+		}
+		// Flood far more Results messages than the stream's internal
+		// event-channel buffer (32) so the reader goroutine is guaranteed
+		// to still be blocked trying to deliver one when the consumer
+		// below abandons Events().
+		for i := 0; i < 200; i++ {
+			websockettest.WriteMessage(conn, websockettest.OpText, []byte(`{
+				"type":"Results","is_final":false,"channel":{"alternatives":[{"transcript":"x"}]}
+			}`))
+		}
+		// Keep the connection open; the client side closes it via Close().
+		websockettest.ReadMessage(conn)
+	}()
+
+	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
+	m := p.StreamingTranscriptionModel("nova-3")
+	streamIface, err := m.StreamTranscribe(context.Background(), provider.StreamTranscriptionCall{})
+	if err != nil {
+		t.Fatalf("StreamTranscribe: %v", err)
+	}
+	stream := streamIface.(*liveStream)
+
+	// Consume a handful of events, then abandon Events() by breaking out
+	// of the range — the documented cleanup path is to call Close(),
+	// without ever cancelling a ctx.
+	n := 0
+	for range stream.Events() {
+		n++
+		if n == 3 {
+			break
+		}
+	}
+
+	if err := stream.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	select {
+	case <-stream.readLoopDone:
+		// reader goroutine exited, as required.
+	case <-time.After(2 * time.Second):
+		t.Fatal("readLoop leaked: did not exit within 2s of Close() after Events() was abandoned")
+	}
+}
+
+func TestStreamTranscribe_SendAfterCloseSend(t *testing.T) {
+	l, baseURL := listenerBaseURL(t)
+
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		websockettest.Upgrade(conn)
+		websockettest.ReadMessage(conn) // CloseStream
+		websockettest.WriteClose(conn, 1000, "")
+	}()
+
+	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
+	m := p.StreamingTranscriptionModel("nova-3")
+	stream, err := m.StreamTranscribe(context.Background(), provider.StreamTranscriptionCall{})
+	if err != nil {
+		t.Fatalf("StreamTranscribe: %v", err)
+	}
+	defer stream.Close()
+
+	if err := stream.CloseSend(context.Background()); err != nil {
+		t.Fatalf("CloseSend: %v", err)
+	}
+	if err := stream.Send(context.Background(), []byte("late")); err == nil {
+		t.Fatal("Send after CloseSend: want error, got nil")
+	}
+
+	for range stream.Events() {
+	}
+}

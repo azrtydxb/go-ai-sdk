@@ -33,7 +33,11 @@ type TranscriptionStream interface {
 	// After it ends, Err reports the terminal error, nil on clean end.
 	Events() iter.Seq[TranscriptEvent]
 	Err() error
-	Close() error // aborts without flushing; idempotent
+	// Close aborts without flushing; idempotent. Because the abort is
+	// caller-initiated rather than a stream failure, Err() reports nil once
+	// Events ends as a result of Close, the same as a clean provider-side
+	// end of stream.
+	Close() error
 }
 
 // StreamingTranscriptionModel opens live bidirectional transcription
