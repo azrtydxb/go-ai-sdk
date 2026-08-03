@@ -2,7 +2,6 @@ package ai
 
 import (
 	"context"
-	"errors"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/retry"
 	"github.com/azrtydxb/go-ai-sdk/provider"
@@ -52,11 +51,7 @@ func Translate(ctx context.Context, opts TranslateOpts) (*TranslateResult, error
 		return opts.Model.Translate(ctx, call)
 	})
 	if err != nil {
-		var exhausted *retry.ExhaustedError
-		if errors.As(err, &exhausted) {
-			return nil, &RetryError{Attempts: exhausted.Attempts, LastErr: exhausted.LastErr}
-		}
-		return nil, err
+		return nil, translateRetryErr(err)
 	}
 
 	return &TranslateResult{

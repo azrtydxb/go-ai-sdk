@@ -296,6 +296,14 @@ func (s *liveStream) setErr(err error) {
 func (s *liveStream) readLoop() {
 	defer close(s.readLoopDone)
 	defer close(s.events)
+	// On a clean non-socket end (a "Metadata" message, or a decode/error
+	// terminal) the underlying conn is still open until something closes
+	// it. Without this, the TCP connection lingers until the caller
+	// eventually calls Close() (if ever) instead of being torn down as
+	// soon as the stream logically ends. Conn.Close is idempotent, so this
+	// is a no-op on the paths that already shut the conn down themselves
+	// (a *websocket.CloseError or an abnormal closure).
+	defer s.conn.Close(websocket.CloseNormal, "")
 	for {
 		mt, data, err := s.conn.Read(s.ctx)
 		if err != nil {

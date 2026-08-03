@@ -109,6 +109,10 @@ func (m *videoModel) GenerateVideos(ctx context.Context, call provider.VideoCall
 			return nil, fmt.Errorf("fal: fetch video: %w", err)
 		}
 		if v.ContentType != "" {
+			// The API-declared content type takes precedence over
+			// fetchVideo's HTTP Content-Type-header sniff: fal.ai reports
+			// it per-video in the response body, which is more trustworthy
+			// than whatever the CDN happened to send on the download.
 			mediaType = v.ContentType
 		}
 		videos = append(videos, provider.GeneratedVideo{Data: data, MediaType: mediaType, URL: v.URL})

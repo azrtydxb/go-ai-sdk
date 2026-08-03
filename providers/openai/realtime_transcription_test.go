@@ -269,6 +269,66 @@ func TestStreamTranscribe_ErrorEventSetsErr(t *testing.T) {
 	}
 }
 
+// --- Fix wave MINOR 10 — readLoop must close the underlying conn on a
+// clean non-socket termination (an "error" event), not just leave the TCP
+// connection lingering until the caller eventually calls Close(). ---
+
+func TestStreamTranscribe_ErrorEventClosesUnderlyingConn(t *testing.T) {
+	l, baseURL := listenerBaseURL(t)
+	tornDown := make(chan bool, 1)
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		if err := websockettest.Upgrade(conn); err != nil {
+			return
+		}
+		websockettest.ReadMessage(conn) // session update
+		websockettest.WriteMessage(conn, websockettest.OpText, []byte(
+			`{"type":"error","error":{"message":"invalid audio format"}}`))
+
+		// The stream's own Close() (called by the fixed readLoop) sends a
+		// close frame before tearing down the socket; drain it first so
+		// the raw Read below can't spuriously observe those buffered
+		// bytes instead of the eventual EOF/reset.
+		websockettest.ReadMessage(conn)
+
+		// Without calling stream.Close(), confirm the client tore down its
+		// socket as soon as readLoop saw the terminal "error" event,
+		// rather than leaving the TCP connection open until some later
+		// Close().
+		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		var b [1]byte
+		_, rerr := conn.Read(b[:])
+		var netErr net.Error
+		isTimeout := errors.As(rerr, &netErr) && netErr.Timeout()
+		tornDown <- rerr != nil && !isTimeout
+	}()
+
+	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
+	m := p.StreamingTranscriptionModel("gpt-4o-transcribe")
+	stream, err := m.StreamTranscribe(context.Background(), provider.StreamTranscriptionCall{})
+	if err != nil {
+		t.Fatalf("StreamTranscribe: %v", err)
+	}
+	// Deliberately not calling stream.Close(): readLoop's own exit path
+	// must be the thing that closes the conn.
+
+	for range stream.Events() {
+	}
+
+	select {
+	case ok := <-tornDown:
+		if !ok {
+			t.Error("expected the client to have closed its socket after the terminal error event without stream.Close() being called")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting to observe the client's socket closure")
+	}
+}
+
 func TestStreamTranscribe_CloseSendWireShape(t *testing.T) {
 	l, baseURL := listenerBaseURL(t)
 

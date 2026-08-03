@@ -2,7 +2,6 @@ package ai
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/retry"
@@ -53,11 +52,7 @@ func GenerateVideo(ctx context.Context, opts GenerateVideoOpts) (*GenerateVideoR
 		return opts.Model.GenerateVideos(ctx, call)
 	})
 	if err != nil {
-		var exhausted *retry.ExhaustedError
-		if errors.As(err, &exhausted) {
-			return nil, &RetryError{Attempts: exhausted.Attempts, LastErr: exhausted.LastErr}
-		}
-		return nil, err
+		return nil, translateRetryErr(err)
 	}
 
 	if len(resp.Videos) == 0 {

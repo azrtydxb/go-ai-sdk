@@ -127,10 +127,14 @@ func buildSessionUpdate(modelID string, call provider.StreamTranscriptionCall) (
 	return data, nil
 }
 
-// audioFormatFor maps a MediaType to OpenAI's input_audio_format: "pcm16"
-// for "audio/pcm" (params such as ";rate=..." are ignored — OpenAI's
-// Realtime API always expects 24kHz mono PCM16 regardless), and "pcm16" as
-// the default for anything else (including an empty MediaType).
+// audioFormatFor maps a MediaType to OpenAI's input_audio_format. OpenAI's
+// Realtime API only supports "pcm16" as of this writing, so every
+// recognized raw-PCM MediaType ("audio/pcm" or "audio/l16"; params such as
+// ";rate=..." are ignored since the Realtime API always expects 24kHz mono
+// PCM16 regardless) — and anything else, including an empty MediaType —
+// all map to "pcm16". The switch stays explicit (rather than collapsing to
+// an unconditional return) so a future second format is a one-line add,
+// not a rewrite.
 func audioFormatFor(mediaType string) string {
 	base := mediaType
 	if i := strings.IndexByte(mediaType, ';'); i >= 0 {
@@ -138,9 +142,11 @@ func audioFormatFor(mediaType string) string {
 	}
 	base = strings.ToLower(strings.TrimSpace(base))
 	switch base {
-	case "audio/pcm", "":
+	case "audio/pcm", "audio/l16":
 		return "pcm16"
 	default:
+		// Includes "" and any unrecognized MediaType: OpenAI's Realtime
+		// API has no other supported input_audio_format today.
 		return "pcm16"
 	}
 }
@@ -259,6 +265,14 @@ func (s *realtimeStream) setErr(err error) {
 func (s *realtimeStream) readLoop() {
 	defer close(s.readLoopDone)
 	defer close(s.events)
+	// On a clean non-socket end (an "error" event, or a decode/error
+	// terminal) the underlying conn is still open until something closes
+	// it. Without this, the TCP connection lingers until the caller
+	// eventually calls Close() (if ever) instead of being torn down as
+	// soon as the stream logically ends. Conn.Close is idempotent, so this
+	// is a no-op on the paths that already shut the conn down themselves
+	// (a *websocket.CloseError or an abnormal closure).
+	defer s.conn.Close(websocket.CloseNormal, "")
 	for {
 		mt, data, err := s.conn.Read(s.ctx)
 		if err != nil {
