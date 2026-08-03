@@ -3,13 +3,16 @@
 `go-ai-sdk` exposes every provider through the same `provider.LanguageModel`
 / `provider.EmbeddingModel` / `provider.ImageModel` / `provider.SpeechModel`
 / `provider.TranscriptionModel` interfaces, constructed from a per-provider
-package under [`providers/`](../../providers). Nine of the sixteen
+package under [`providers/`](../../providers), 22 in total. Nine of them
 (OpenAI, Azure, Groq, xAI, DeepSeek, Cerebras, Together, Fireworks,
 Perplexity) share one implementation, [`internal/openaicompat`](../../internal/openaicompat),
 configured per provider by a `Config` preset; Google and Vertex AI share
 [`internal/geminicompat`](../../internal/geminicompat); Anthropic, Bedrock,
-Mistral, Cohere, and ElevenLabs are standalone implementations because
-their wire formats diverge too far from either shared base.
+Mistral, Cohere, ElevenLabs, fal, Replicate, Luma, Deepgram, LMNT, and Hume
+are standalone implementations because their wire formats diverge too far
+from either shared base (or, for the six newest media providers, because
+they implement only a single media capability with no shared text-model
+base to build on).
 
 Every provider reads its API key from an environment variable by default
 and accepts a `With*` functional option to override it — see
@@ -43,6 +46,12 @@ caveat, see that provider's page
 | [Google](google.md) | ✓ | ✓ | ✓ native | ✓ | ✓ | ✗ | ✗ |
 | [Vertex AI](vertex.md) | ✓ | ✓ | ✓ native | ✓ | ✓ | ✗ | ✗ |
 | [Amazon Bedrock](bedrock.md) | ✓ | ✓ | ⚠⁵ tool-mode | ✓ | ✗ | ✗ | ✗ |
+| [fal](fal.md) | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ |
+| [Replicate](replicate.md) | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ |
+| [Luma](luma.md) | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ |
+| [Deepgram](deepgram.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
+| [LMNT](lmnt.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
+| [Hume](hume.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
 
 ¹ xAI's image endpoint rejects the `size` parameter — see
 [xAI quirks](xai.md#quirks-and-notes).
@@ -93,6 +102,12 @@ example.
 | [Google](google.md) | `GOOGLE_GENERATIVE_AI_API_KEY` | `https://generativelanguage.googleapis.com/v1beta` | `x-goog-api-key` header |
 | [Vertex AI](vertex.md) | `GOOGLE_VERTEX_PROJECT` / `GOOGLE_VERTEX_LOCATION` / `GOOGLE_APPLICATION_CREDENTIALS` | derived from project/location | OAuth2 bearer (service account or `WithTokenSource`) |
 | [Amazon Bedrock](bedrock.md) | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` / `AWS_REGION` | derived from region | AWS SigV4 |
+| [fal](fal.md) | `FAL_API_KEY` (falls back to `FAL_KEY`) | `https://fal.run` | `Authorization: Key` header |
+| [Replicate](replicate.md) | `REPLICATE_API_TOKEN` | `https://api.replicate.com` | `Authorization: Bearer` |
+| [Luma](luma.md) | `LUMA_API_KEY` | `https://api.lumalabs.ai` | `Authorization: Bearer` |
+| [Deepgram](deepgram.md) | `DEEPGRAM_API_KEY` | `https://api.deepgram.com` | `Authorization: Token` header |
+| [LMNT](lmnt.md) | `LMNT_API_KEY` | `https://api.lmnt.com` | `X-API-Key` header |
+| [Hume](hume.md) | `HUME_API_KEY` | `https://api.hume.ai` | `X-Hume-Api-Key` header |
 
 ## Provider pages
 
@@ -112,6 +127,29 @@ example.
 - [Google](google.md) — Gemini Developer API, grounding citations, Imagen
 - [Vertex AI](vertex.md) — Gemini on Google Cloud, OAuth2/service-account auth, global location
 - [Amazon Bedrock](bedrock.md) — Converse API, SigV4 signing, document attachments
+- [fal](fal.md) — synchronous `fal.run` image generation, `Key` auth header
+- [Replicate](replicate.md) — synchronous (`Prefer: wait`) predictions API, `input`-nested options
+- [Luma](luma.md) — asynchronous Dream Machine image generation, poll-until-terminal
+- [Deepgram](deepgram.md) — `/v1/listen` transcription, raw-audio request body, query-param options
+- [LMNT](lmnt.md) — text-to-speech, `X-API-Key` auth header
+- [Hume](hume.md) — Octave text-to-speech, base64-encoded JSON audio response
+
+## Live-testing status
+
+Every provider in this SDK — all 22, including the six media providers
+added most recently (fal, Replicate, Luma, Deepgram, LMNT, Hume) — is
+verified only against recorded, documented wire formats: unit tests run
+each provider's HTTP client against an `httptest` server that replays
+fixture request/response bodies shaped to match that provider's published
+API docs. **None of the 22 providers have been smoke-tested against a live
+upstream API yet.**
+
+The six newest media providers (fal, Replicate, Luma, Deepgram, LMNT, Hume)
+are the **highest priority** for live verification: they're the
+least-battle-tested implementations in the SDK, each page above carries a
+"⚠ Not yet verified against the live API" note, and their corresponding
+package doc comments state the same thing. Live verification against real
+API keys should happen before relying on any of the six in production.
 
 ## Source of truth
 

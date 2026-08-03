@@ -134,7 +134,7 @@ Shared SSE parser in `internal/sse` (handles `data:` framing, `[DONE]`, comment 
 | 2 (shipped) | Groq, xAI, DeepSeek, Together, Fireworks, Cerebras, Perplexity | Thin presets over the OpenAI-compatible base |
 | 2 (shipped) | Mistral, Cohere | Own APIs, full provider implementations |
 | 3 (shipped) | Azure OpenAI, Vertex AI, Amazon Bedrock | Platform auth: Azure (API-key preset over the OpenAI-compatible base), Vertex AI (Google service-account/ADC auth), Bedrock (AWS SigV4 request signing); no submodule split was needed |
-| later | Image/speech/transcription providers | Out of scope for v1 — requires new model capability interfaces |
+| 8 (shipped) | fal, Replicate, Luma (image); Deepgram (transcription); LMNT, Hume (speech) | Standalone media-only implementations against documented wire formats; closes the Vercel-supported media roster targeted for v0.1. Not yet smoke-tested against live APIs — see [Provider overview: Live-testing status](../../providers/README.md#live-testing-status) |
 
 ## Testing
 

@@ -40,6 +40,9 @@ than being silently ignored:
 | xAI | `Size` | `AspectRatio` |
 | Google (Imagen) | `AspectRatio` (e.g. `"16:9"`) | `Size` |
 | Vertex AI (Imagen) | `AspectRatio` | `Size` |
+| fal | `Size` | `AspectRatio` |
+| Replicate | `AspectRatio` | `Size` |
+| Luma | `AspectRatio` | `Size` |
 
 OpenAI and xAI both go through the shared `openaicompat` base and its
 `images/generations` wire format, which has no aspect-ratio parameter; a
@@ -47,14 +50,22 @@ non-empty `AspectRatio` returns `"<provider>: aspect ratio is not
 supported; use Size"`. Google and Vertex both go through the shared
 `geminicompat` base and Imagen's `:predict` wire format, which has no size
 parameter; a non-empty `Size` returns `"<provider>: size is not supported;
-use AspectRatio"`.
+use AspectRatio"`. fal follows the OpenAI/xAI family (`Size` only, mapped
+to `image_size`); Replicate and Luma follow the Google/Vertex family
+(`AspectRatio` only, mapped to `aspect_ratio`) — see
+[fal](../providers/fal.md), [Replicate](../providers/replicate.md), and
+[Luma](../providers/luma.md) for the exact error strings.
 
 `Seed` is silently ignored by OpenAI/xAI (the images API has no seed
-parameter) but is sent through by Google/Vertex.
+parameter) and by Luma (Dream Machine has no seed parameter), but is sent
+through by Google/Vertex, fal, and Replicate.
 
 `N` (image count) defaults to 1 for Google/Vertex when left at 0; OpenAI/xAI
 pass `N` through as-is (omitted from the wire request when 0, which the API
-then defaults itself).
+then defaults itself). fal maps `N` to `num_images` the same way; Replicate
+maps it to `num_outputs`. Luma rejects `N > 1` outright (`"luma: multiple
+images per call are not supported"`) since Dream Machine's image endpoint
+produces exactly one image per generation.
 
 ## GenerateSpeech
 
@@ -80,9 +91,13 @@ fmt.Println(result.MediaType) // "audio/mpeg"
 |---|---|---|---|
 | OpenAI | `"alloy"` | `"mp3"` (→ `audio/mpeg`) | `response_format` values `mp3`/`wav`/`opus`/`aac`/`flac`/`pcm` map to their matching MIME type; any other value returned by the API falls back to `audio/mpeg`. |
 | ElevenLabs | voice id `21m00Tcm4TlvDq8ikWAM` ("Rachel") | `"mp3"` → `mp3_44100_128` (`audio/mpeg`) | `"pcm"` maps to `pcm_44100` (`audio/pcm`); `"ulaw"` maps to `ulaw_8000` (`audio/basic`); any other value is passed through verbatim as the `output_format` query parameter, with `MediaType` reported as `application/octet-stream`. `Language` is sent as `language_code`, which ElevenLabs only accepts for turbo/flash v2.5 models — other models may reject it server-side. |
+| LMNT | `"leah"` | `"mp3"` (→ `audio/mpeg`); `"wav"` → `audio/wav`; other → `application/octet-stream` | `Language` and `Speed` pass straight through to the wire request with no rewriting. See [LMNT](../providers/lmnt.md). |
+| Hume | none (an empty `Voice` omits the field rather than substituting a default) | `"mp3"` (→ `audio/mpeg`); `"wav"` → `audio/wav`; `"pcm"` → `audio/pcm`; other → `application/octet-stream` | `Language` is silently ignored — Hume's wire format has no equivalent field. Response audio is base64-encoded JSON, not a raw binary body. See [Hume](../providers/hume.md). |
 
-Both providers require a voice; when `Voice` is left empty, the SDK
-substitutes the default above rather than sending an empty value.
+OpenAI, ElevenLabs, and LMNT require a voice; when `Voice` is left empty,
+the SDK substitutes the default above rather than sending an empty value.
+Hume is the exception: an empty `Voice` simply omits the field from the
+wire request, since Hume has no SDK-enforced default.
 
 ## Transcribe
 
@@ -115,12 +130,15 @@ for _, seg := range result.Segments {
 | OpenAI | `verbose_json` (whisper-1 and similar), `json` (gpt-4o-\* models) | Only with `verbose_json` | Models whose ID contains `"gpt-4o"` reject `verbose_json`, so those get plain `json` (text only, no `Segments`/`Language`/`DurationSec`); everything else gets `verbose_json`. |
 | Groq | Same `openaicompat` base as OpenAI | Same rule as OpenAI | Groq's transcription models go through the identical wire format and `gpt-4o` substring check. |
 | ElevenLabs | word-level timestamps | Synthesized from `type == "word"` entries | `DurationSec` is derived as the last segment's `EndSec` (ElevenLabs doesn't report a duration field directly); `Language` comes from `language_code`. |
+| Deepgram | `/v1/listen` JSON response, word-level timestamps | From `results.channels[0].alternatives[0].words` | Request body is the raw audio bytes, not multipart or JSON — the only transcription provider in this SDK that doesn't upload a file part. `Text` prefers `punctuated_word` over `word`. See [Deepgram](../providers/deepgram.md). |
 
-All three upload `Audio` as a multipart file part; `MediaType` selects the
-upload filename's extension for OpenAI/Groq (`audio/mpeg`→`mp3`,
-`audio/wav`→`wav`, `audio/mp4`→`mp4`, `audio/webm`→`webm`, anything else→
-`bin`) and is otherwise sent through as-is as the part's `Content-Type`
-(defaulting to `application/octet-stream` when empty).
+OpenAI, Groq, and ElevenLabs upload `Audio` as a multipart file part;
+`MediaType` selects the upload filename's extension for OpenAI/Groq
+(`audio/mpeg`→`mp3`, `audio/wav`→`wav`, `audio/mp4`→`mp4`,
+`audio/webm`→`webm`, anything else→`bin`) and is otherwise sent through
+as-is as the part's `Content-Type` (defaulting to `application/octet-stream`
+when empty). Deepgram instead sends `Audio` as the literal request body
+with `Content-Type: MediaType` (defaulting the same way).
 
 ## FilePart attachment matrix
 
@@ -175,10 +193,16 @@ returns an error):
   [`provider/speech.go`](../../provider/speech.go),
   [`provider/transcription.go`](../../provider/transcription.go)
 - [`internal/openaicompat/image.go`](../../internal/openaicompat/image.go),
-  [`internal/geminicompat/image.go`](../../internal/geminicompat/image.go)
+  [`internal/geminicompat/image.go`](../../internal/geminicompat/image.go),
+  [`providers/fal/image.go`](../../providers/fal/image.go),
+  [`providers/replicate/image.go`](../../providers/replicate/image.go),
+  [`providers/luma/image.go`](../../providers/luma/image.go)
 - [`internal/openaicompat/speech.go`](../../internal/openaicompat/speech.go),
-  [`providers/elevenlabs/speech.go`](../../providers/elevenlabs/speech.go)
+  [`providers/elevenlabs/speech.go`](../../providers/elevenlabs/speech.go),
+  [`providers/lmnt/speech.go`](../../providers/lmnt/speech.go),
+  [`providers/hume/speech.go`](../../providers/hume/speech.go)
 - [`internal/openaicompat/transcription.go`](../../internal/openaicompat/transcription.go),
+  [`providers/deepgram/transcription.go`](../../providers/deepgram/transcription.go),
   [`providers/elevenlabs/transcription.go`](../../providers/elevenlabs/transcription.go)
 - [`provider/message.go`](../../provider/message.go) (`FilePart` doc
   comment)

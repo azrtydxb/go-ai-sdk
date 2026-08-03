@@ -9,7 +9,7 @@ once it reaches 1.0.
 ## [Unreleased] — v0.1.0 candidate
 
 The public API described in the [design spec](docs/superpowers/specs/2026-08-02-go-ai-sdk-design.md)
-is implemented and tested end-to-end: the full core SDK, 16 providers, media
+is implemented and tested end-to-end: the full core SDK, 22 providers, media
 capabilities, and the parity features listed below.
 No tag has been cut yet; this section will become `v0.1.0` at release.
 
@@ -63,7 +63,7 @@ No tag has been cut yet; this section will become `v0.1.0` at release.
   extra response data (Anthropic prompt-cache token counts,
   `openaicompat`'s `system_fingerprint`).
 
-**Providers (16)**
+**Providers (22)**
 
 - Wave 1 — OpenAI, Anthropic, Google (Gemini): full, independent
   implementations proving the provider abstraction across three distinct
@@ -87,6 +87,14 @@ No tag has been cut yet; this section will become `v0.1.0` at release.
 - OpenAI (image, speech, transcription), Google/Vertex AI (Imagen image
   generation), xAI (image), Groq (transcription), and ElevenLabs (speech
   + transcription) implementations.
+- Wave 8 — fal and Replicate (synchronous image generation), Luma
+  (asynchronous, poll-until-terminal image generation via
+  `WithPollInterval`), Deepgram (transcription, raw-audio request body),
+  and LMNT and Hume (speech synthesis), closing out the Vercel-supported
+  media roster targeted for v0.1. All six are implemented against
+  documented wire formats and covered by fixture-based unit tests, but
+  not yet smoke-tested against the live APIs — see
+  [Provider overview: Live-testing status](docs/providers/README.md#live-testing-status).
 
 **Core parity features**
 

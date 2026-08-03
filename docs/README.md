@@ -46,6 +46,12 @@ exists — the SDK's public API is implemented and documented end-to-end (see
 - [Mistral](providers/mistral.md)
 - [Cohere](providers/cohere.md)
 - [ElevenLabs](providers/elevenlabs.md)
+- [fal](providers/fal.md)
+- [Replicate](providers/replicate.md)
+- [Luma](providers/luma.md)
+- [Deepgram](providers/deepgram.md)
+- [LMNT](providers/lmnt.md)
+- [Hume](providers/hume.md)
 
 ## Versioning
 

@@ -101,6 +101,12 @@ provider package:
 | Mistral | `providers/mistral` | `MISTRAL_API_KEY` | |
 | Cohere | `providers/cohere` | `COHERE_API_KEY` | |
 | ElevenLabs | `providers/elevenlabs` | `ELEVENLABS_API_KEY` | |
+| fal | `providers/fal` | `FAL_API_KEY` (falls back to `FAL_KEY`) | |
+| Replicate | `providers/replicate` | `REPLICATE_API_TOKEN` | |
+| Luma | `providers/luma` | `LUMA_API_KEY` | |
+| Deepgram | `providers/deepgram` | `DEEPGRAM_API_KEY` | |
+| LMNT | `providers/lmnt` | `LMNT_API_KEY` | |
+| Hume | `providers/hume` | `HUME_API_KEY` | |
 
 ## Streaming quickstart
 

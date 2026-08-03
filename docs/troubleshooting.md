@@ -38,6 +38,19 @@ env var table. A few providers need more than a bare API key:
   yourself with the AWS SDK for Go and pass the result explicitly. See
   [Bedrock](providers/bedrock.md).
 
+- **fal, Replicate, Luma, Deepgram, LMNT, Hume** — each of these six media
+  providers uses a different, provider-specific auth header rather than a
+  uniform `Authorization: Bearer`: fal sends `Authorization: Key <key>`,
+  Deepgram sends `Authorization: Token <key>`, LMNT sends `X-API-Key`,
+  and Hume sends `X-Hume-Api-Key`; only Replicate and Luma use the
+  standard `Authorization: Bearer <key>` shape. If one of these providers
+  returns a 401/403, double-check you're not assuming the `Bearer` shape
+  applies — see each provider's own page (linked from
+  [Provider overview](providers/README.md#construction-at-a-glance)) for
+  its exact header and env var. fal is also the one provider in this SDK
+  with a two-variable fallback: `WithAPIKey` defaults to
+  `FAL_API_KEY`, then `FAL_KEY` if that's unset.
+
 If a request fails with an auth-shaped error, it surfaces as
 `*ai.APICallError` — check `StatusCode` and the provider's raw response
 body (see [Errors and retries](core/errors-and-retries.md#apicallerror)).
