@@ -1009,3 +1009,194 @@ func TestStreamTextToolInputCallbacksRace(t *testing.T) {
 		t.Fatalf("shared = %v, want non-zero counts for both IDs", shared)
 	}
 }
+
+// TestStreamTextToolInputCallbacksRepairFiresOnInputAvailableAgain pins down
+// the documented judgment call from Task 4's report: when RepairToolCall
+// fixes a call whose original args failed to decode, OnInputAvailable fires
+// AGAIN for the repaired args (since a second, genuine Execute happens),
+// while OnInputStart/OnInputDelta — fired only once, during the original
+// arg-streaming — are NOT re-fired for the repair (there is no second round
+// of streamed deltas to fire them for).
+func TestStreamTextToolInputCallbacksRepairFiresOnInputAvailableAgain(t *testing.T) {
+	m := &aitest.MockModel{Streams: [][]provider.StreamPart{
+		{
+			provider.ToolCallDelta{ID: "c1", Name: "get_weather", ArgsDelta: `{"bogus":`},
+			provider.ToolCallDelta{ID: "c1", ArgsDelta: `1}`},
+			provider.ToolCallEnd{Call: provider.ToolCallPart{ID: "c1", Name: "get_weather", Args: []byte(`{"bogus":1}`)}},
+			provider.FinishPart{Reason: provider.FinishToolCalls},
+		},
+		{
+			provider.TextDelta{Text: "sunny"},
+			provider.FinishPart{Reason: provider.FinishStop},
+		},
+	}}
+
+	var starts []string
+	var deltas []string
+	var availableIDs []string
+	var availableInputs []string
+
+	weather := NewTool("get_weather", "", func(_ context.Context, a weatherArgs) (any, error) {
+		return "sunny in " + a.City, nil
+	}, WithToolInputCallbacks(ToolInputCallbacks{
+		OnInputStart: func(ctx context.Context, toolCallID string) {
+			starts = append(starts, toolCallID)
+		},
+		OnInputDelta: func(ctx context.Context, toolCallID, delta string) {
+			deltas = append(deltas, delta)
+		},
+		OnInputAvailable: func(ctx context.Context, toolCallID string, input json.RawMessage) {
+			availableIDs = append(availableIDs, toolCallID)
+			availableInputs = append(availableInputs, string(input))
+		},
+	}))
+
+	var repairCalls int
+	s, err := StreamText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "weather?", Tools: []Tool{weather}, MaxSteps: 2,
+		RepairToolCall: func(_ context.Context, call ToolCallRecord, toolErr error) (ToolCallRecord, bool) {
+			repairCalls++
+			var iae *InvalidToolArgumentsError
+			if errors.As(toolErr, &iae) {
+				call.Args = []byte(`{"city":"Ghent"}`)
+				return call, true
+			}
+			return ToolCallRecord{}, false
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+	}
+	if s.Err() != nil {
+		t.Fatal(s.Err())
+	}
+	if repairCalls != 1 {
+		t.Fatalf("repairCalls = %d, want 1", repairCalls)
+	}
+	if s.Steps()[0].ToolResults[0].Result != "sunny in Ghent" {
+		t.Fatalf("result = %v, want repaired result", s.Steps()[0].ToolResults[0].Result)
+	}
+
+	if len(starts) != 1 || starts[0] != "c1" {
+		t.Fatalf("OnInputStart calls = %v, want exactly one (not re-fired for the repair)", starts)
+	}
+	if len(deltas) != 2 {
+		t.Fatalf("OnInputDelta calls = %d, want 2 (only the original streamed deltas, not re-fired for the repair)", len(deltas))
+	}
+	if len(availableIDs) != 2 {
+		t.Fatalf("OnInputAvailable calls = %d, want 2 (original + repaired)", len(availableIDs))
+	}
+	if availableIDs[0] != "c1" || availableInputs[0] != `{"bogus":1}` {
+		t.Fatalf("OnInputAvailable[0] = (%q, %s), want (c1, {\"bogus\":1})", availableIDs[0], availableInputs[0])
+	}
+	if availableIDs[1] != "c1" || availableInputs[1] != `{"city":"Ghent"}` {
+		t.Fatalf("OnInputAvailable[1] = (%q, %s), want (c1, {\"city\":\"Ghent\"}) — the REPAIRED args", availableIDs[1], availableInputs[1])
+	}
+}
+
+// TestStreamTextToolInputCallbacksNoDeltasStillFiresAvailable verifies that
+// when a provider stream emits a tool call with zero ToolCallDelta parts
+// (the whole call arrives via a single terminal ToolCallEnd, no incremental
+// arg streaming), OnInputStart and OnInputDelta never fire — there is no
+// delta to key them off — while OnInputAvailable still fires once with the
+// full assembled args.
+func TestStreamTextToolInputCallbacksNoDeltasStillFiresAvailable(t *testing.T) {
+	m := &aitest.MockModel{Streams: [][]provider.StreamPart{
+		{
+			provider.ToolCallEnd{Call: provider.ToolCallPart{ID: "c1", Name: "get_weather", Args: []byte(`{"city":"Ghent"}`)}},
+			provider.FinishPart{Reason: provider.FinishToolCalls},
+		},
+		{
+			provider.TextDelta{Text: "sunny"},
+			provider.FinishPart{Reason: provider.FinishStop},
+		},
+	}}
+
+	var starts, deltas, availables int
+	var availableID string
+	var availableInput json.RawMessage
+
+	tool := NewTool("get_weather", "", func(_ context.Context, a weatherArgs) (any, error) {
+		return "sunny", nil
+	}, WithToolInputCallbacks(ToolInputCallbacks{
+		OnInputStart: func(ctx context.Context, toolCallID string) { starts++ },
+		OnInputDelta: func(ctx context.Context, toolCallID, delta string) { deltas++ },
+		OnInputAvailable: func(ctx context.Context, toolCallID string, input json.RawMessage) {
+			availables++
+			availableID = toolCallID
+			availableInput = input
+		},
+	}))
+
+	s, err := StreamText(t.Context(), GenerateTextOpts{Model: m, Prompt: "x", Tools: []Tool{tool}, MaxSteps: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+	}
+	if s.Err() != nil {
+		t.Fatal(s.Err())
+	}
+
+	if starts != 0 {
+		t.Fatalf("OnInputStart calls = %d, want 0 (no ToolCallDelta parts were ever streamed)", starts)
+	}
+	if deltas != 0 {
+		t.Fatalf("OnInputDelta calls = %d, want 0 (no ToolCallDelta parts were ever streamed)", deltas)
+	}
+	if availables != 1 {
+		t.Fatalf("OnInputAvailable calls = %d, want 1", availables)
+	}
+	if availableID != "c1" {
+		t.Fatalf("OnInputAvailable toolCallID = %q, want c1", availableID)
+	}
+	if string(availableInput) != `{"city":"Ghent"}` {
+		t.Fatalf("OnInputAvailable input = %s, want %s", availableInput, `{"city":"Ghent"}`)
+	}
+}
+
+// TestApproveToolCallDeniedNeverFiresOnInputAvailable verifies that an
+// approval-denied call (RequireApproval-wrapped tool, denied via
+// ApproveToolCall) never fires OnInputAvailable: the call never reaches
+// Tool.Execute at all, and fireOnInputAvailable is only invoked immediately
+// before an actual Execute call.
+func TestApproveToolCallDeniedNeverFiresOnInputAvailable(t *testing.T) {
+	var executed bool
+	var availableCalls int
+
+	base := NewTool("get_weather", "", func(_ context.Context, a weatherArgs) (any, error) {
+		executed = true
+		return "sunny", nil
+	}, WithToolInputCallbacks(ToolInputCallbacks{
+		OnInputAvailable: func(ctx context.Context, toolCallID string, input json.RawMessage) {
+			availableCalls++
+		},
+	}))
+	tool := RequireApproval(base)
+
+	m := &aitest.MockModel{Responses: []*provider.Response{
+		toolCallResponse("get_weather", "c1", `{"city":"Ghent"}`),
+		{Content: []provider.ContentPart{provider.TextPart{Text: "done"}}, FinishReason: provider.FinishStop},
+	}}
+	res, err := GenerateText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "x", Tools: []Tool{tool}, MaxSteps: 2,
+		ApproveToolCall: func(_ context.Context, req ApprovalRequest) (ApprovalDecision, bool) {
+			return ApprovalDecision{ToolCallID: req.Call.ID, Approved: false, Reason: "not allowed"}, true
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executed {
+		t.Fatal("tool must not execute when denied")
+	}
+	var deniedErr *ToolApprovalDeniedError
+	if !errors.As(res.Steps[0].ToolResults[0].Err, &deniedErr) {
+		t.Fatalf("ToolResults[0].Err = %v, want *ToolApprovalDeniedError", res.Steps[0].ToolResults[0].Err)
+	}
+	if availableCalls != 0 {
+		t.Fatalf("OnInputAvailable calls = %d, want 0 (denied call never executes)", availableCalls)
+	}
+}
