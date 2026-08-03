@@ -4,9 +4,9 @@
 models, with a single, provider-agnostic API for text generation, structured
 output, tool calling, streaming, embeddings, and media generation.
 
-This is the index for the full documentation tree. Pages that don't exist
-yet are still listed here so the tree reads as a map of the whole product —
-check back as the SDK fills in.
+This is the index for the full documentation tree. Every page listed below
+exists — the SDK's public API is implemented and documented end-to-end (see
+[`CHANGELOG.md`](../CHANGELOG.md) for the release record).
 
 ## Start here
 
@@ -51,6 +51,7 @@ check back as the SDK fills in.
 
 - [Migrating from the Vercel AI SDK](migrating-from-vercel-ai-sdk.md)
 - [Architecture](architecture.md)
+- [Changelog](../CHANGELOG.md) — release history
 
 ## Source of truth
 

@@ -272,7 +272,7 @@ dependent fragments a consumer accumulates — everything else in
 7. **Add a package doc comment**, a `docs/providers/<name>.md` page, and a
    row in the README's provider/capability tables.
 8. **Register it in the design spec's provider roadmap** if it fills in a
-   previously-tracked-but-unimplemented wave entry.
+   previously-tracked-but-unimplemented provider entry.
 
 ## How to add a capability
 

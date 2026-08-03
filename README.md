@@ -174,18 +174,18 @@ Supported providers for media capabilities:
 
 **Note:** Other Vercel-supported media providers (Fal, Replicate, Luma, Deepgram, LMNT, Hume) are not yet included. The provider interface makes them straightforward follow-ups.
 
-### Provider roadmap
+### Provider coverage
 
-| Wave | Providers | Status |
-|---|---|---|
-| 1 | OpenAI, Anthropic, Google (Gemini) | Shipped — three distinct wire formats prove the abstraction |
-| 2 (shipped) | Groq, xAI, DeepSeek, Together, Fireworks, Cerebras, Perplexity | Thin presets over the OpenAI-compatible base |
-| 2 (shipped) | Mistral, Cohere | Own APIs, full provider implementations |
-| 3 (shipped) | Azure OpenAI, Vertex AI, Amazon Bedrock | Platform auth: Azure (API-key preset over the OpenAI-compatible base), Vertex AI (Google service-account/ADC auth), Bedrock (AWS SigV4 request signing) |
-| 4–6 (shipped) | ElevenLabs (speech + transcription); image/speech/transcription for OpenAI, Google/Vertex, xAI, Groq | Media capabilities layered onto the wave 1–3 roster |
-| later | Additional media providers (Fal, Replicate, Luma, Deepgram, LMNT, Hume) | Follow-ups — the provider interface already accommodates them |
+| Providers | Notes |
+|---|---|
+| OpenAI, Anthropic, Google (Gemini) | Three distinct wire formats prove the abstraction |
+| Groq, xAI, DeepSeek, Together, Fireworks, Cerebras, Perplexity | Thin presets over the OpenAI-compatible base |
+| Mistral, Cohere | Own APIs, full provider implementations |
+| Azure OpenAI, Vertex AI, Amazon Bedrock | Platform auth: Azure (API-key preset over the OpenAI-compatible base), Vertex AI (Google service-account/ADC auth), Bedrock (AWS SigV4 request signing) |
+| ElevenLabs (speech + transcription); image/speech/transcription for OpenAI, Google/Vertex, xAI, Groq | Media capabilities layered onto the text-generation roster |
+| Not yet implemented: Fal, Replicate, Luma, Deepgram, LMNT, Hume | The provider interface already accommodates them as follow-ups |
 
-See [`CHANGELOG.md`](CHANGELOG.md) for what shipped in each wave, and the
+See [`CHANGELOG.md`](CHANGELOG.md) for the full release history, and the
 [design spec](docs/superpowers/specs/2026-08-02-go-ai-sdk-design.md) for
 architecture, package layout, and the full decisions log.
 

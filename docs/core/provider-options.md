@@ -42,19 +42,24 @@ for you. The anthropic thinking example from [Reasoning](reasoning.md) uses
 there is no translation layer between what you write and what goes over
 the wire.
 
-**Divergence from the Vercel AI SDK:** Vercel's TypeScript SDK follows the
-same per-provider-namespace shape (`providerOptions: { anthropic: {...} }`)
-but its provider packages define typed, camelCased option keys that the SDK
-maps onto the wire format for you — e.g. `budgetTokens` in TypeScript
-becomes `budget_tokens` on the wire. `go-ai-sdk` has no such per-provider
-options schema or translation step: what you put under
+**Divergence from the Vercel AI SDK:** Vercel's TypeScript SDK is documented
+as following the same per-provider-namespace shape (`providerOptions: {
+anthropic: {...} }`), with its provider packages defining typed, camelCased
+option keys that the SDK maps onto the wire format for you — e.g.
+`budgetTokens` in TypeScript is documented as becoming `budget_tokens` on
+the wire. (Per the sourcing note in
+[Migrating from the Vercel AI SDK](../migrating-from-vercel-ai-sdk.md):
+this claim is based on Vercel's public documentation, not its source, since
+this repository has no access to `ai`'s TypeScript codebase to verify
+against.) `go-ai-sdk` has no such
+per-provider options schema or translation step: what you put under
 `ProviderOptions["anthropic"]` is merged into the request body verbatim, so
 it must already be the wire key. Porting a Vercel AI SDK call means
 snake_casing (or otherwise wire-matching) every provider option key by
 hand, not just moving the map over.
 
 ```go
-// Vercel AI SDK (TypeScript) — translated by the anthropic provider:
+// Vercel AI SDK (TypeScript) — documented behavior, translated by the anthropic provider:
 // providerOptions: { anthropic: { thinking: { type: 'enabled', budgetTokens: 2000 } } }
 
 // go-ai-sdk — raw wire key, no translation:

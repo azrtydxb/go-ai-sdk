@@ -9,7 +9,8 @@ once it reaches 1.0.
 ## [Unreleased] — v0.1.0 candidate
 
 The public API described in the [design spec](docs/superpowers/specs/2026-08-02-go-ai-sdk-design.md)
-is implemented and tested end-to-end, covering waves 1–7 of the roadmap.
+is implemented and tested end-to-end: the full core SDK, 16 providers, media
+capabilities, and the parity features listed below.
 No tag has been cut yet; this section will become `v0.1.0` at release.
 
 ### Added

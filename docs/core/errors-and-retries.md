@@ -74,7 +74,7 @@ type InvalidToolArgumentsError struct {
 Returned when a tool call's arguments fail to unmarshal into the tool's
 argument type. Unlike `NoSuchToolError`, this is recorded on the tool
 result rather than aborting the batch (see
-[Tools](tools.md#error-taxonomy)).
+[Tools](tools.md#execution-error-taxonomy)).
 
 ### `*ai.ToolExecutionError`
 

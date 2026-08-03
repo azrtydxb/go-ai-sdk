@@ -495,3 +495,18 @@ seam above, which an application can bridge to OTel itself).
 4. **All Vercel-supported providers as the end goal**, delivered in waves; v0.1 ships wave 1.
 5. **Reflection-based JSON Schema from structs** replaces Zod for tools and structured output.
 6. **Wave 4 media interfaces** — new top-level interfaces for image/speech/transcription (not embedded in LanguageModel) to keep the contract simple and separate concerns. Providers implement one, some, or all capabilities; the capability matrix is the source of truth.
+
+## Status: feature-complete (v0.1.0 candidate)
+
+All goals in this spec are implemented and tested end-to-end: the core SDK
+(text/streaming, tool calling, structured output, embeddings), all 16
+planned providers (OpenAI, Anthropic, Google, Groq, xAI, DeepSeek,
+Together, Fireworks, Cerebras, Perplexity, Mistral, Cohere, Azure OpenAI,
+Vertex AI, Amazon Bedrock, ElevenLabs), media capabilities
+(image/speech/transcription), and the parity features tracked across waves
+2–7 (reasoning/extended thinking, provider options and metadata,
+middleware, the model registry, telemetry, MCP tool integration, and
+file/document attachments). See [`CHANGELOG.md`](../../../CHANGELOG.md)
+for the full, feature-organized release record and
+[`docs/README.md`](../../README.md) for the current documentation index.
+No tag has been cut yet; this is the `v0.1.0` candidate state.
