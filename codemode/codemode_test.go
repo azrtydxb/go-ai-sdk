@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
 	"github.com/azrtydxb/go-ai-sdk/ai/aitest"
@@ -127,6 +128,57 @@ func TestOutputTruncation(t *testing.T) {
 	want := "abcde\n[truncated]"
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestToolPanicsOnDuplicateToolName(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("want panic on duplicate tool name")
+		}
+		msg := fmt.Sprintf("%v", r)
+		if !strings.Contains(msg, "duplicate tool name") || !strings.Contains(msg, "echo") {
+			t.Fatalf("panic message = %q, want it to mention duplicate tool name and echo", msg)
+		}
+	}()
+	Tool(&fakeSandbox{}, []ai.Tool{newEchoTool(), newEchoTool()}, nil)
+}
+
+func TestOutputTruncationAtExactBoundary(t *testing.T) {
+	sb := &fakeSandbox{result: &Result{Output: "abcde"}}
+	tool := Tool(sb, nil, &Options{MaxOutputBytes: 5})
+
+	got, err := tool.Execute(t.Context(), json.RawMessage(`{"code":"x"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "abcde" {
+		t.Fatalf("got %q, want %q (no truncation, no suffix)", got, "abcde")
+	}
+}
+
+func TestOutputTruncationDoesNotSplitMultiByteRune(t *testing.T) {
+	// "é" is the 2-byte UTF-8 sequence 0xC3 0xA9. With a limit of 5 bytes,
+	// "abcé" is 3 ASCII bytes + 2 bytes for é = 5 bytes exactly ("abc" +
+	// "é"), then one more rune "X" pushes the total past the limit; the
+	// cut must land on a rune boundary rather than slicing the "é" in
+	// half.
+	sb := &fakeSandbox{result: &Result{Output: "abcéX"}}
+	tool := Tool(sb, nil, &Options{MaxOutputBytes: 4})
+
+	got, err := tool.Execute(t.Context(), json.RawMessage(`{"code":"x"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Byte 4 (0-indexed) is the second byte of "é" (0xA9) -- not a rune
+	// boundary, so the cut must back up to byte 3, keeping only "abc".
+	want := "abc\n[truncated]"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	if !utf8.ValidString(got.(string)) {
+		t.Fatalf("truncated output is not valid UTF-8: %q", got)
 	}
 }
 

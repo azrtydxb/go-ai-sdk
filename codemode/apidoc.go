@@ -35,11 +35,14 @@ func APIDoc(language string, tools []ai.Tool) string {
 	return strings.Join(entries, "\n")
 }
 
-// apiDocEntry renders a single tool's entry.
+// apiDocEntry renders a single tool's entry. A schema that fails to parse
+// as a JSON object is deliberately swallowed here (the error is ignored)
+// rather than propagated: schemaMap is left nil, and renderArgs then
+// renders it exactly like a properties-less schema, "(args: object)" —
+// APIDoc favors a working (if less informative) doc entry over failing
+// the whole tool description because one tool's schema is malformed.
 func apiDocEntry(t ai.Tool) string {
 	var schemaMap map[string]any
-	// Malformed/empty schema is treated the same as a properties-less
-	// schema: render "(args: object)" rather than failing the whole doc.
 	_ = json.Unmarshal(t.Schema(), &schemaMap)
 
 	args := renderArgs(schemaMap)

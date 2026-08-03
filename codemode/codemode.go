@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
 )
@@ -88,6 +89,15 @@ type codeTool struct {
 // Tool wraps tools into a single "run_code" ai.Tool: the model writes code
 // that calls the tools through the sandbox's binding, instead of invoking
 // them one call at a time.
+//
+// Tool panics if two entries in tools share the same Name(). Tool has no
+// error return (the signature is fixed by the brief), so a duplicate name
+// is treated as a programmer error rather than something to silently drop:
+// without this check the dispatch map would resolve calls to whichever
+// tool happened to be last in the slice while APIDoc would still document
+// both entries, leaving one documented function the model can never
+// actually reach. This mirrors ai.NewTool's construction-time panic on
+// schema-derivation failure (itself likened to regexp.MustCompile).
 func Tool(sandbox Sandbox, tools []ai.Tool, opts *Options) ai.Tool {
 	language := defaultLanguage
 	maxOutputBytes := defaultMaxOutputBytes
@@ -102,6 +112,9 @@ func Tool(sandbox Sandbox, tools []ai.Tool, opts *Options) ai.Tool {
 
 	byName := make(map[string]ai.Tool, len(tools))
 	for _, t := range tools {
+		if _, dup := byName[t.Name()]; dup {
+			panic(fmt.Sprintf("codemode: duplicate tool name %q", t.Name()))
+		}
 		byName[t.Name()] = t
 	}
 
@@ -152,7 +165,7 @@ func (t *codeTool) Execute(ctx context.Context, args json.RawMessage) (any, erro
 
 	output := result.Output
 	if len(output) > t.maxOutputBytes {
-		output = output[:t.maxOutputBytes] + "\n[truncated]"
+		output = truncateOutput(output, t.maxOutputBytes) + "\n[truncated]"
 	}
 	var b strings.Builder
 	b.WriteString(output)
@@ -161,6 +174,20 @@ func (t *codeTool) Execute(ctx context.Context, args json.RawMessage) (any, erro
 		b.WriteString(line)
 	}
 	return b.String(), nil
+}
+
+// truncateOutput cuts s to at most n bytes, backing the cut point up to the
+// start of the previous UTF-8 rune when a naive byte-slice at n would land
+// in the middle of a multi-byte sequence. n is assumed < len(s).
+func truncateOutput(s string, n int) string {
+	cut := n
+	// utf8.RuneStart(b) is true for a byte that begins a rune (or any
+	// single-byte ASCII byte); walk backward at most utf8.UTFMax-1 bytes to
+	// find one, matching how far into a multi-byte sequence n could land.
+	for cut > 0 && cut > n-utf8.UTFMax && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }
 
 // dispatch resolves name against the wrapped tools and executes it,
