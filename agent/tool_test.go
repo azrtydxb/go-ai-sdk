@@ -238,6 +238,49 @@ func TestAsToolOwnRuntimeContextOverridesParent(t *testing.T) {
 	}
 }
 
+// TestAsToolSuspendedSubAgentIsTypedError pins finding 4: when the
+// sub-agent's own run suspends (PendingApprovals non-empty — one of its
+// tools needed approval and no decision was available), AsTool must not
+// return "" as if that were a successful result. There is no resume channel
+// through a tool call — the parent's loop has no way to surface
+// PendingApprovals or later supply Approvals for the sub-agent's run — so
+// the only sound outcome is a typed error the parent (and its own
+// RepairToolCall/inspection code) can recognize via errors.Is.
+func TestAsToolSuspendedSubAgentIsTypedError(t *testing.T) {
+	var executed bool
+	guarded := ai.RequireApproval(ai.NewTool("danger", "", func(_ context.Context, _ noArgs) (any, error) {
+		executed = true
+		return "boom", nil
+	}))
+	sub := &Agent{
+		Model: &aitest.MockModel{Responses: []*provider.Response{
+			toolCallResponse("danger", "s1", `{}`),
+		}},
+		Tools:    []ai.Tool{guarded},
+		MaxSteps: 2,
+		// No ApproveToolCall configured: the sub-agent's own run suspends.
+	}
+	tool := AsTool(sub, "helper", "a helper agent")
+
+	_, err := tool.Execute(context.Background(), []byte(`{"task":"do the dangerous thing"}`))
+	if err == nil {
+		t.Fatal("want error for a suspended sub-agent run")
+	}
+	if executed {
+		t.Fatal("the sub-agent's guarded tool must not execute while pending")
+	}
+	if !errors.Is(err, ErrSubAgentSuspended) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrSubAgentSuspended)", err)
+	}
+	var tee *ai.ToolExecutionError
+	if !errors.As(err, &tee) {
+		t.Fatalf("err = %v, want *ai.ToolExecutionError", err)
+	}
+	if tee.ToolName != "helper" {
+		t.Fatalf("ToolName = %q, want %q", tee.ToolName, "helper")
+	}
+}
+
 // TestAsToolBadArgsIsError verifies malformed args to the generated tool
 // return an error rather than panicking.
 func TestAsToolBadArgsIsError(t *testing.T) {

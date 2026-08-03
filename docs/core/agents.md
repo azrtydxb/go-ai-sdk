@@ -220,6 +220,40 @@ res, err := parent.Generate(ctx, agent.RunOpts{Prompt: "..."})
 // errors.Is/errors.As still reach it through Cause/Unwrap.
 ```
 
+### Suspension: sub-agents must decide approvals inline
+
+**A sub-agent run via `AsTool` cannot suspend and resume the way a top-level
+`Agent`/`ai.GenerateText` call can.** If the sub-agent's own `Generate` call
+returns a result whose `PendingApprovals` is non-empty (one of the
+sub-agent's tools needed approval and no decision was available for it),
+`Execute` does not return `""` or any other value as if that were a
+successful result — it returns
+
+```go
+&ai.ToolExecutionError{ToolName: name, Cause: agent.ErrSubAgentSuspended}
+```
+
+Check for this with `errors.Is(err, agent.ErrSubAgentSuspended)`.
+
+The reason there's no resume channel: resuming a suspended run means
+resending `Messages` (ending in the unanswered tool-call batch) with
+`Approvals` set — but the parent's tool loop only sees the sub-agent tool's
+single `Execute` call and its returned `(any, error)`; it has no way to
+receive the sub-agent's `PendingApprovals`/`Messages` out through that
+return value, stash them, and later feed `Approvals` back into a *second*
+call to the same sub-agent run. By the time `Execute` returns, that
+suspended conversation state is gone.
+
+**The fix is to decide approvals inline, before they ever reach this
+boundary:** set `Agent.ApproveToolCall` on the sub-agent so every
+approval-needing call it makes is resolved synchronously (see
+[Approval passthrough](#approval-passthrough) above and
+[Tools § Inline flow](tools.md#inline-flow-approvetoolcall-decides-synchronously)).
+A sub-agent run purely through `AsTool` should never be *expected* to
+suspend — if one of its tools needs a human-in-the-loop decision, wire that
+decision through `ApproveToolCall`, or don't delegate that tool through a
+sub-agent at all.
+
 ## Naming: ToolLoopAgent vs Agent
 
 The Vercel AI SDK's equivalent construct is documented as `ToolLoopAgent`.

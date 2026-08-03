@@ -3,10 +3,22 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
 )
+
+// ErrSubAgentSuspended is the Cause of the *ai.ToolExecutionError AsTool's
+// Execute returns when the sub-agent's own run suspends (its
+// ai.GenerateTextResult.PendingApprovals is non-empty) rather than
+// completing. There is no resume channel through a tool call — the parent's
+// tool loop has no way to surface the sub-agent's PendingApprovals or later
+// supply Approvals for the sub-agent's run — so a suspended sub-agent must
+// decide its approvals inline, via Agent.ApproveToolCall, rather than
+// suspend-and-resume like a top-level GenerateText/StreamText call would.
+// Check for it with errors.Is.
+var ErrSubAgentSuspended = errors.New("agent: sub-agent run suspended pending tool approval")
 
 // asToolArgs is the {"task": string} argument shape AsTool's schema
 // describes and its Execute decodes.
@@ -36,6 +48,11 @@ type asToolTool struct {
 // ai.NewTool-built tools already produce for a failing handler — so a
 // failing sub-agent looks like any other failing tool to the parent's loop
 // and to code that type-switches/errors.As on ToolResultRecord.Err.
+//
+// Suspension: a sub-agent run via AsTool cannot suspend and resume the way
+// a top-level Agent/ai.GenerateText call can — see ErrSubAgentSuspended's
+// doc. Sub-agents must decide their own tools' approvals inline, via
+// a.ApproveToolCall.
 //
 // RuntimeContext scoping: ai.RuntimeContext installs once per
 // GenerateText/StreamText call, and installing a nil RuntimeContext is a
@@ -79,6 +96,13 @@ func (t *asToolTool) Execute(ctx context.Context, args json.RawMessage) (any, er
 	result, err := t.agent.Generate(ctx, RunOpts{Prompt: a.Task})
 	if err != nil {
 		return nil, &ai.ToolExecutionError{ToolName: t.name, Cause: err}
+	}
+
+	if len(result.PendingApprovals) > 0 {
+		// A suspended sub-agent run is not a successful "" result — see
+		// ErrSubAgentSuspended's doc for why this can't be resumed through
+		// a tool call the way a top-level suspension can.
+		return nil, &ai.ToolExecutionError{ToolName: t.name, Cause: ErrSubAgentSuspended}
 	}
 
 	if result.Output != nil {
