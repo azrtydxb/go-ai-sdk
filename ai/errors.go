@@ -99,6 +99,23 @@ func (e *ToolExecutionError) Unwrap() error {
 	return e.Cause
 }
 
+// ToolApprovalDeniedError is recorded on a ToolResultRecord.Err (never
+// returned/raised directly) when a tool call needing approval was denied —
+// see GenerateTextOpts.ApproveToolCall and Approvals.
+type ToolApprovalDeniedError struct {
+	ToolName string
+	Reason   string
+}
+
+// Error implements the error interface. Reason is omitted from the message
+// when empty.
+func (e *ToolApprovalDeniedError) Error() string {
+	if e.Reason == "" {
+		return fmt.Sprintf("ai: tool %q execution denied", e.ToolName)
+	}
+	return fmt.Sprintf("ai: tool %q execution denied: %s", e.ToolName, e.Reason)
+}
+
 // RetryError is returned when retries are exhausted.
 type RetryError struct {
 	Attempts int

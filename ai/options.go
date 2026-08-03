@@ -9,9 +9,19 @@ import (
 
 // GenerateTextOpts configures a GenerateText call.
 type GenerateTextOpts struct {
-	Model      provider.LanguageModel // required
-	System     string                 // optional; prepended as system message
-	Prompt     string                 // exactly one of Prompt/Messages
+	Model  provider.LanguageModel // required
+	System string                 // optional; prepended as system message
+	Prompt string                 // exactly one of Prompt/Messages
+	// Messages, when its LAST message is an assistant message containing
+	// ToolCallParts (necessarily unanswered, since it's the last message —
+	// no RoleTool message follows it), resumes a previously-suspended tool
+	// loop: both GenerateText and StreamText run that batch first (approval
+	// rules applied against Approvals/ApproveToolCall, same as any other
+	// batch) before making any model call, append the RoleTool results
+	// message, and proceed with the loop as usual. If that batch is itself
+	// still pending (no decision available for some call), the run
+	// suspends again immediately — see PendingApprovals — without ever
+	// calling the model.
 	Messages   []provider.Message
 	Tools      []Tool
 	ToolChoice *provider.ToolChoice
@@ -254,6 +264,28 @@ type GenerateTextOpts struct {
 	// ID, if RepairToolCall may rename calls.
 	OnToolExecutionStart func(stepIndex int, call ToolCallRecord)
 	OnToolExecutionEnd   func(stepIndex int, result ToolResultRecord, err error)
+
+	// RuntimeContext, when set, is installed on the ctx passed to Tool.
+	// Execute, ApprovalRequirer.ApprovalRequired, and ApproveToolCall for
+	// this run — retrieve it with RuntimeContextFrom. It is installed once,
+	// before the tool loop begins (both loops), so every step and every
+	// resumed batch sees the same value.
+	RuntimeContext RuntimeContext
+
+	// ApproveToolCall decides approval-needing calls inline. Called once per
+	// call whose Tool implements ApprovalRequirer and reports true from
+	// ApprovalRequired, UNLESS Approvals already supplies a decision for
+	// that call's ToolCallID (Approvals is checked first). Return
+	// (decision, true) to decide; (zero, false) to leave the call pending,
+	// which suspends the loop (see PendingApprovals). The ctx passed in
+	// carries the same RuntimeContext installed for the run.
+	ApproveToolCall func(ctx context.Context, req ApprovalRequest) (ApprovalDecision, bool)
+	// Approvals supplies out-of-band decisions on a resume call, matched by
+	// ToolCallID against the unanswered assistant tool-call batch at the end
+	// of Messages (see Messages's resume semantics). Also consulted for
+	// approval-needing calls arising later in the SAME run, before falling
+	// back to ApproveToolCall.
+	Approvals []ApprovalDecision
 }
 
 // ModelCallEnd is the argument to GenerateTextOpts.OnModelCallEnd — see that

@@ -88,6 +88,17 @@ type GenerateTextResult struct {
 	// returned transcript is always well-formed for a round-trip resend —
 	// no provider's wire format is left with an unanswered tool call.
 	Output any
+	// PendingApprovals is non-empty when the tool loop suspended because
+	// some call(s) in a batch needed approval (see ApprovalRequirer) and no
+	// decision was available for them (checked against Approvals, then
+	// ApproveToolCall). Batch atomicity: when this is non-empty, NO tool in
+	// that batch executed, even ones that needed no approval or were
+	// already decided. One entry per approval-needing call without a
+	// decision, in call order. Messages ends with the assistant tool-call
+	// message (round-trippable — resend it, with Approvals set to answer
+	// these calls, to resume). Not an error: OnFinish still fires, and
+	// FinishReason is the step's real finish reason (tool-calls).
+	PendingApprovals []ApprovalRequest
 }
 
 // GenerateText calls opts.Model (through retry), running a multi-step
@@ -117,6 +128,10 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 		return nil, err
 	}
 
+	// RuntimeContext is installed once, before the loop (and before the
+	// resume batch, if any) — see GenerateTextOpts.RuntimeContext.
+	ctx = withRuntimeContext(ctx, opts.RuntimeContext)
+
 	maxRetries := defaultMaxRetries
 	if opts.MaxRetries != nil {
 		maxRetries = *opts.MaxRetries
@@ -134,7 +149,30 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 
 	var steps []Step
 	var totalUsage provider.Usage
+	var pendingApprovals []ApprovalRequest
 	model := opts.Model
+
+	// Resume: an unanswered assistant tool-call batch at the end of
+	// Messages is run first — approval rules applied — before the first
+	// model call. See GenerateTextOpts.Messages's resume-semantics doc.
+	if resumeCalls := trailingUnansweredToolCalls(messages); len(resumeCalls) > 0 {
+		batch, berr := runApprovalAwareToolCalls(ctx, opts, opts.Tools, resumeCalls, active, 0)
+		if berr != nil {
+			return fail(berr)
+		}
+		if len(batch.pending) > 0 {
+			result := &GenerateTextResult{
+				Messages:         messages,
+				FinishReason:     provider.FinishToolCalls,
+				PendingApprovals: batch.pending,
+			}
+			if opts.OnFinish != nil {
+				opts.OnFinish(result)
+			}
+			return result, nil
+		}
+		messages = append(messages, toolResultMessage(batch.results))
+	}
 
 	for {
 		stepIndex := len(steps)
@@ -245,22 +283,24 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 		}
 
 		if hasToolCalls {
-			results, err := runToolCalls(ctx, opts.Tools, toolCalls, active, opts.RepairToolCall, stepIndex, opts.OnToolExecutionStart, opts.OnToolExecutionEnd)
+			batch, err := runApprovalAwareToolCalls(ctx, opts, opts.Tools, toolCalls, active, stepIndex)
 			if err != nil {
 				return fail(err)
 			}
-			step.ToolResults = results
-
-			resultParts := make([]provider.ContentPart, 0, len(results))
-			for _, r := range results {
-				resultParts = append(resultParts, provider.ToolResultPart{
-					ToolCallID: r.ToolCallID,
-					Name:       r.Name,
-					Result:     toolResultValue(r),
-					IsError:    r.Err != nil,
-				})
+			if len(batch.pending) > 0 {
+				// Batch atomicity: nothing in this batch executed. The step
+				// is still recorded (tool-result-less) and OnStepFinish
+				// still fires, but the loop stops here — see
+				// GenerateTextResult.PendingApprovals.
+				pendingApprovals = batch.pending
+				steps = append(steps, step)
+				if opts.OnStepFinish != nil {
+					opts.OnStepFinish(step)
+				}
+				break
 			}
-			messages = append(messages, provider.Message{Role: provider.RoleTool, Content: resultParts})
+			step.ToolResults = batch.results
+			messages = append(messages, toolResultMessage(batch.results))
 		}
 
 		steps = append(steps, step)
@@ -301,16 +341,17 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 	}
 
 	result := &GenerateTextResult{
-		Text:          last.Text,
-		ReasoningText: last.ReasoningText,
-		Sources:       last.Sources,
-		Steps:         steps,
-		ToolCalls:     last.ToolCalls,
-		ToolResults:   last.ToolResults,
-		FinishReason:  last.FinishReason,
-		Usage:         totalUsage,
-		Messages:      messages,
-		Output:        decoded,
+		Text:             last.Text,
+		ReasoningText:    last.ReasoningText,
+		Sources:          last.Sources,
+		Steps:            steps,
+		ToolCalls:        last.ToolCalls,
+		ToolResults:      last.ToolResults,
+		FinishReason:     last.FinishReason,
+		Usage:            totalUsage,
+		Messages:         messages,
+		Output:           decoded,
+		PendingApprovals: pendingApprovals,
 	}
 	if opts.OnFinish != nil {
 		opts.OnFinish(result)
@@ -351,6 +392,21 @@ type repairFunc func(ctx context.Context, call ToolCallRecord, toolErr error) (T
 // is nil or declines, is recorded on ToolResultRecord.Err rather than
 // aborting.
 func runToolCalls(ctx context.Context, tools []Tool, calls []provider.ToolCallPart, active map[string]bool, repair repairFunc, stepIndex int, onStart func(int, ToolCallRecord), onEnd func(int, ToolResultRecord, error)) ([]ToolResultRecord, error) {
+	byName := buildActiveToolMap(tools, active)
+	resolved, err := resolveToolCallNames(ctx, byName, calls, repair)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]ToolResultRecord, 0, len(resolved))
+	for _, c := range resolved {
+		results = append(results, executeToolCall(ctx, byName, c, nil, repair, stepIndex, onStart, onEnd))
+	}
+	return results, nil
+}
+
+// buildActiveToolMap indexes tools by name, dropping any not in active (nil
+// active means every tool is active — see activeToolSet).
+func buildActiveToolMap(tools []Tool, active map[string]bool) map[string]Tool {
 	byName := make(map[string]Tool, len(tools))
 	for _, t := range tools {
 		if active != nil && !active[t.Name()] {
@@ -358,7 +414,15 @@ func runToolCalls(ctx context.Context, tools []Tool, calls []provider.ToolCallPa
 		}
 		byName[t.Name()] = t
 	}
+	return byName
+}
 
+// resolveToolCallNames validates that every call in calls names a tool in
+// byName, offering an unknown name to repair once (see RepairToolCall's
+// doc); it returns a *NoSuchToolError without resolving anything further if
+// any call (post-repair) still names an unknown tool — so earlier calls in
+// the batch never execute just because a later one is unknown.
+func resolveToolCallNames(ctx context.Context, byName map[string]Tool, calls []provider.ToolCallPart, repair repairFunc) ([]provider.ToolCallPart, error) {
 	resolved := make([]provider.ToolCallPart, len(calls))
 	for i, c := range calls {
 		if _, ok := byName[c.Name]; ok {
@@ -379,44 +443,157 @@ func runToolCalls(ctx context.Context, tools []Tool, calls []provider.ToolCallPa
 		}
 		return nil, toolErr
 	}
+	return resolved, nil
+}
+
+// executeToolCall executes a single already-validated call. When decision is
+// non-nil and not Approved, Execute is never called: the recorded result
+// carries a *ToolApprovalDeniedError instead (see ApprovalDecision.Reason).
+// Otherwise (decision nil, meaning no approval was required, or Approved)
+// it executes normally, offering an *InvalidToolArgumentsError to repair
+// once, exactly as before approvals existed. OnToolExecutionStart/End fire
+// exactly once around this call either way — including for a denial, which
+// is why they're placed here rather than in the caller's pending/no-pending
+// branch.
+func executeToolCall(ctx context.Context, byName map[string]Tool, c provider.ToolCallPart, decision *ApprovalDecision, repair repairFunc, stepIndex int, onStart func(int, ToolCallRecord), onEnd func(int, ToolResultRecord, error)) ToolResultRecord {
+	if onStart != nil {
+		onStart(stepIndex, ToolCallRecord{ID: c.ID, Name: c.Name, Args: c.Args})
+	}
+
+	if decision != nil && !decision.Approved {
+		deniedErr := &ToolApprovalDeniedError{ToolName: c.Name, Reason: decision.Reason}
+		result := ToolResultRecord{ToolCallID: c.ID, Name: c.Name, Err: deniedErr}
+		if onEnd != nil {
+			onEnd(stepIndex, result, deniedErr)
+		}
+		return result
+	}
+
+	t := byName[c.Name]
+	res, err := t.Execute(ctx, c.Args)
+	if err != nil && repair != nil {
+		var iae *InvalidToolArgumentsError
+		if errors.As(err, &iae) {
+			rc, ok := repair(ctx, ToolCallRecord{ID: c.ID, Name: c.Name, Args: c.Args}, err)
+			if ok {
+				if rt, known := byName[rc.Name]; known {
+					res, err = rt.Execute(ctx, rc.Args)
+					c.ID, c.Name = rc.ID, rc.Name
+				}
+				// else: repair renamed the call to a tool that isn't in
+				// the active set either; res/err are left as the
+				// original InvalidToolArgumentsError rather than
+				// re-validated into a NoSuchToolError — this retry path
+				// is only entered for bad-args repair, so an unknown
+				// name here is recorded as-is, not retried again.
+			}
+		}
+	}
+	result := ToolResultRecord{
+		ToolCallID: c.ID,
+		Name:       c.Name,
+		Result:     res,
+		Err:        err,
+	}
+	if onEnd != nil {
+		onEnd(stepIndex, result, err)
+	}
+	return result
+}
+
+// toolBatchResult is the outcome of runApprovalAwareToolCalls: either
+// Results (every call in the batch executed, possibly some denied) or
+// Pending (batch atomicity — nothing executed; see GenerateTextResult.
+// PendingApprovals).
+type toolBatchResult struct {
+	results []ToolResultRecord
+	pending []ApprovalRequest
+}
+
+// runApprovalAwareToolCalls is runToolCalls plus approval handling (see
+// GenerateTextOpts.ApproveToolCall/Approvals and ApprovalRequirer). It
+// validates unknown tool names first (same as runToolCalls — rule: approval
+// checks happen after unknown-tool validation, before execution/repair),
+// then resolves an ApprovalDecision for every call whose Tool implements
+// ApprovalRequirer and reports true: first checking opts.Approvals by
+// ToolCallID, then opts.ApproveToolCall if set. Any call left undecided
+// makes the WHOLE batch pending — nothing executes, and Pending lists every
+// undecided call, in call order.
+func runApprovalAwareToolCalls(ctx context.Context, opts GenerateTextOpts, tools []Tool, calls []provider.ToolCallPart, active map[string]bool, stepIndex int) (*toolBatchResult, error) {
+	byName := buildActiveToolMap(tools, active)
+	resolved, err := resolveToolCallNames(ctx, byName, calls, opts.RepairToolCall)
+	if err != nil {
+		return nil, err
+	}
+
+	decisions := make(map[string]*ApprovalDecision, len(resolved))
+	var pending []ApprovalRequest
+	for _, c := range resolved {
+		ar, ok := byName[c.Name].(ApprovalRequirer)
+		if !ok || !ar.ApprovalRequired(ctx, c.Args) {
+			continue
+		}
+		rec := ToolCallRecord{ID: c.ID, Name: c.Name, Args: c.Args}
+		if d, found := findApprovalDecision(opts.Approvals, c.ID); found {
+			decisions[c.ID] = &d
+			continue
+		}
+		if opts.ApproveToolCall != nil {
+			if d, ok := opts.ApproveToolCall(ctx, ApprovalRequest{StepIndex: stepIndex, Call: rec}); ok {
+				decisions[c.ID] = &d
+				continue
+			}
+		}
+		pending = append(pending, ApprovalRequest{StepIndex: stepIndex, Call: rec})
+	}
+
+	if len(pending) > 0 {
+		return &toolBatchResult{pending: pending}, nil
+	}
 
 	results := make([]ToolResultRecord, 0, len(resolved))
 	for _, c := range resolved {
-		t := byName[c.Name]
-		if onStart != nil {
-			onStart(stepIndex, ToolCallRecord{ID: c.ID, Name: c.Name, Args: c.Args})
-		}
-		res, err := t.Execute(ctx, c.Args)
-		if err != nil && repair != nil {
-			var iae *InvalidToolArgumentsError
-			if errors.As(err, &iae) {
-				rc, ok := repair(ctx, ToolCallRecord{ID: c.ID, Name: c.Name, Args: c.Args}, err)
-				if ok {
-					if rt, known := byName[rc.Name]; known {
-						res, err = rt.Execute(ctx, rc.Args)
-						c.ID, c.Name = rc.ID, rc.Name
-					}
-					// else: repair renamed the call to a tool that isn't in
-					// the active set either; res/err are left as the
-					// original InvalidToolArgumentsError rather than
-					// re-validated into a NoSuchToolError — this retry path
-					// is only entered for bad-args repair, so an unknown
-					// name here is recorded as-is, not retried again.
-				}
-			}
-		}
-		result := ToolResultRecord{
-			ToolCallID: c.ID,
-			Name:       c.Name,
-			Result:     res,
-			Err:        err,
-		}
-		if onEnd != nil {
-			onEnd(stepIndex, result, err)
-		}
-		results = append(results, result)
+		results = append(results, executeToolCall(ctx, byName, c, decisions[c.ID], opts.RepairToolCall, stepIndex, opts.OnToolExecutionStart, opts.OnToolExecutionEnd))
 	}
-	return results, nil
+	return &toolBatchResult{results: results}, nil
+}
+
+// toolResultMessage builds the RoleTool message carrying results, in order —
+// used by both the normal in-loop batch and the resume path.
+func toolResultMessage(results []ToolResultRecord) provider.Message {
+	parts := make([]provider.ContentPart, 0, len(results))
+	for _, r := range results {
+		parts = append(parts, provider.ToolResultPart{
+			ToolCallID: r.ToolCallID,
+			Name:       r.Name,
+			Result:     toolResultValue(r),
+			IsError:    r.Err != nil,
+		})
+	}
+	return provider.Message{Role: provider.RoleTool, Content: parts}
+}
+
+// trailingUnansweredToolCalls returns the ToolCallParts of the last message
+// in messages when it is an assistant message containing tool calls — since
+// it's the last message, no RoleTool message answers it yet. Returns nil
+// otherwise (including when messages is empty, or the last message is an
+// assistant message with no tool calls at all). See GenerateTextOpts.
+// Messages's resume-semantics doc.
+func trailingUnansweredToolCalls(messages []provider.Message) []provider.ToolCallPart {
+	if len(messages) == 0 {
+		return nil
+	}
+	last := messages[len(messages)-1]
+	if last.Role != provider.RoleAssistant {
+		return nil
+	}
+	var calls []provider.ToolCallPart
+	for _, part := range last.Content {
+		if tc, ok := part.(provider.ToolCallPart); ok {
+			calls = append(calls, tc)
+		}
+	}
+	return calls
 }
 
 // findToolCallByName returns the first call in calls whose Name is name.

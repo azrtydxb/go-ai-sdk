@@ -34,6 +34,12 @@ type TextStream struct {
 	lastReasoning string
 	lastSources   []provider.SourcePart
 	lastFinish    provider.FinishReason
+
+	// pendingApprovals is set when the tool loop suspended because some
+	// call(s) needed approval and none was available — either on the
+	// resume batch (before any stream ran) or mid-loop, after a step. See
+	// GenerateTextResult.PendingApprovals.
+	pendingApprovals []ApprovalRequest
 }
 
 // StreamText starts the first model call (retried like GenerateText) and
@@ -62,6 +68,10 @@ func StreamText(ctx context.Context, opts GenerateTextOpts) (*TextStream, error)
 
 	messages := append([]provider.Message(nil), call.Messages...)
 
+	// RuntimeContext is installed once, before the loop (and before the
+	// resume batch, if any) — see GenerateTextOpts.RuntimeContext.
+	ctx = withRuntimeContext(ctx, opts.RuntimeContext)
+
 	s := &TextStream{
 		ctx:         ctx,
 		opts:        opts,
@@ -72,7 +82,29 @@ func StreamText(ctx context.Context, opts GenerateTextOpts) (*TextStream, error)
 		activeTools: activeToolSet(opts.ActiveTools),
 	}
 
-	call.Messages = messages
+	// Resume: an unanswered assistant tool-call batch at the end of
+	// Messages is run first — approval rules applied — before the first
+	// model call. See GenerateTextOpts.Messages's resume-semantics doc.
+	if resumeCalls := trailingUnansweredToolCalls(messages); len(resumeCalls) > 0 {
+		batch, berr := runApprovalAwareToolCalls(ctx, opts, opts.Tools, resumeCalls, s.activeTools, 0)
+		if berr != nil {
+			// Mirrors the first-stream-start failure path below: no
+			// *TextStream has been returned to a caller yet, so this is
+			// reported solely via the returned error, not OnError.
+			return nil, berr
+		}
+		if len(batch.pending) > 0 {
+			// Nothing has streamed yet — Parts() will observe s.current ==
+			// nil and finish immediately, delivering PendingApprovals via
+			// the result surface (see Parts and buildResult).
+			s.pendingApprovals = batch.pending
+			s.lastFinish = provider.FinishToolCalls
+			return s, nil
+		}
+		s.messages = append(s.messages, toolResultMessage(batch.results))
+	}
+
+	call.Messages = s.messages
 	if opts.PrepareStep != nil {
 		if plan, ok := opts.PrepareStep(0, StepPlan{Call: call, Model: s.model}); ok {
 			call = plan.Call
@@ -131,6 +163,16 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 		for {
 			stream := s.current
 			if stream == nil {
+				// Reached when the resume batch (see StreamText) suspended
+				// before any model call was ever made: there is no step to
+				// emit parts for, so finish immediately (OnFinish still
+				// fires, carrying PendingApprovals) when that's why we're
+				// here; otherwise (nothing left to do, and nothing was ever
+				// pending) this is a no-op, matching the pre-approvals
+				// behavior.
+				if len(s.pendingApprovals) > 0 && len(s.steps) == 0 {
+					s.finish()
+				}
 				return
 			}
 			stepIndex := len(s.steps)
@@ -297,7 +339,7 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 			hasToolCalls := len(toolCalls) > 0
 
 			if hasToolCalls {
-				results, err := runToolCalls(s.ctx, s.opts.Tools, toolCalls, s.activeTools, s.opts.RepairToolCall, stepIndex, s.opts.OnToolExecutionStart, s.opts.OnToolExecutionEnd)
+				batch, err := runApprovalAwareToolCalls(s.ctx, s.opts, s.opts.Tools, toolCalls, s.activeTools, stepIndex)
 				if err != nil {
 					s.err = err
 					step.ToolResults = nil
@@ -306,18 +348,22 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 					s.reportAbortOrError(err)
 					return
 				}
-				step.ToolResults = results
-
-				resultParts := make([]provider.ContentPart, 0, len(results))
-				for _, r := range results {
-					resultParts = append(resultParts, provider.ToolResultPart{
-						ToolCallID: r.ToolCallID,
-						Name:       r.Name,
-						Result:     toolResultValue(r),
-						IsError:    r.Err != nil,
-					})
+				if len(batch.pending) > 0 {
+					// Batch atomicity: nothing in this batch executed. The
+					// step is still recorded (tool-result-less) and
+					// OnStepFinish still fires, but the loop stops here —
+					// see GenerateTextResult.PendingApprovals.
+					s.pendingApprovals = batch.pending
+					s.steps = append(s.steps, step)
+					if s.opts.OnStepFinish != nil {
+						s.opts.OnStepFinish(step)
+					}
+					s.current = nil
+					s.finish()
+					return
 				}
-				s.messages = append(s.messages, provider.Message{Role: provider.RoleTool, Content: resultParts})
+				step.ToolResults = batch.results
+				s.messages = append(s.messages, toolResultMessage(batch.results))
 			}
 
 			s.steps = append(s.steps, step)
@@ -463,9 +509,11 @@ func (s *TextStream) finish() {
 // same underlying model script.
 func (s *TextStream) buildResult() *GenerateTextResult {
 	result := &GenerateTextResult{
-		Steps:    append([]Step(nil), s.steps...),
-		Usage:    s.totalUsage,
-		Messages: s.messages,
+		Steps:            append([]Step(nil), s.steps...),
+		Usage:            s.totalUsage,
+		Messages:         s.messages,
+		FinishReason:     s.lastFinish,
+		PendingApprovals: s.pendingApprovals,
 	}
 	if len(s.steps) > 0 {
 		last := s.steps[len(s.steps)-1]
@@ -514,6 +562,15 @@ func (s *TextStream) FinishReason() provider.FinishReason { return s.lastFinish 
 // has been iterated (fully or partially); before that it is just the
 // initial request messages.
 func (s *TextStream) Messages() []provider.Message { return s.messages }
+
+// PendingApprovals returns the same value as GenerateTextResult.
+// PendingApprovals would carry, for a stream that suspended because some
+// tool call(s) needed approval and none was available — see
+// ApprovalRequirer and GenerateTextOpts.ApproveToolCall/Approvals. Nil when
+// the stream never suspended. Valid after Parts() has been iterated (fully
+// or partially, including the immediate-suspension case where Parts()
+// yields nothing at all because the resumed batch itself was pending).
+func (s *TextStream) PendingApprovals() []ApprovalRequest { return s.pendingApprovals }
 
 // Close releases the underlying provider stream, if one is still open. It
 // is idempotent and safe to call at any point: before Parts() has ever been
