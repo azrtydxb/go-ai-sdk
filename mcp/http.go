@@ -9,10 +9,82 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"strconv"
 	"sync"
+	"time"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/sse"
 )
+
+// defaultRetryBaseDelay is the base delay used for the transport's capped
+// exponential backoff when no explicit Retry-After header is present.
+const defaultRetryBaseDelay = 200 * time.Millisecond
+
+// defaultRetryMaxDelay caps the backoff delay regardless of attempt count.
+const defaultRetryMaxDelay = 10 * time.Second
+
+// TokenProvider supplies a bearer token per request, enabling refresh and
+// rotation: Token is called fresh on every Send (and on every retry
+// attempt), and its result is sent as "Authorization: Bearer <token>"
+// unless a custom header has been configured via WithAuthHeader, in which
+// case the raw token is sent under that header instead. A TokenProvider
+// overrides any static Authorization header configured via headers/
+// NewStreamableHTTPTransport.
+type TokenProvider interface {
+	Token(ctx context.Context) (string, error)
+}
+
+// TokenProviderFunc adapts a function to the TokenProvider interface.
+type TokenProviderFunc func(ctx context.Context) (string, error)
+
+// Token implements TokenProvider.
+func (f TokenProviderFunc) Token(ctx context.Context) (string, error) { return f(ctx) }
+
+// HTTPOption configures the Streamable HTTP transport constructed by
+// NewStreamableHTTPTransportWithOptions.
+type HTTPOption func(*httpTransport)
+
+// WithTokenProvider configures tp to supply a fresh bearer token on every
+// request (see TokenProvider's doc for details). It overrides any static
+// Authorization header.
+func WithTokenProvider(tp TokenProvider) HTTPOption {
+	return func(t *httpTransport) { t.tokenProvider = tp }
+}
+
+// WithAuthHeader sends the TokenProvider's token under the header named
+// name (the raw token value, no "Bearer " prefix) instead of the default
+// Authorization header. It has no effect without a TokenProvider.
+func WithAuthHeader(name string) HTTPOption {
+	return func(t *httpTransport) { t.authHeader = name }
+}
+
+// WithHTTPRetry enables retrying Send on transient failures: HTTP 429/503
+// responses and connection errors. maxRetries is the number of retries
+// after the initial attempt (0, the default, disables retrying entirely).
+// Retries use capped exponential backoff, honoring a Retry-After response
+// header when present (seconds or an HTTP-date), and respect ctx
+// cancellation while backing off. 4xx responses other than 429, and any
+// failure once SSE response bytes have begun being consumed, are never
+// retried. Each retry attempt re-invokes the configured TokenProvider, if
+// any, for a fresh token — the transport does not retry 401s itself;
+// refreshing credentials on auth failure is the TokenProvider's job.
+func WithHTTPRetry(maxRetries int) HTTPOption {
+	return func(t *httpTransport) { t.maxRetries = maxRetries }
+}
+
+// WithHTTPClientOpt overrides the *http.Client used to send requests
+// (default http.DefaultClient).
+func WithHTTPClientOpt(c *http.Client) HTTPOption {
+	return func(t *httpTransport) { t.client = c }
+}
+
+// withStaticHeaders configures a fixed set of headers added to every
+// request, unconditionally overridden per-header by WithTokenProvider /
+// WithAuthHeader when those are also set. It backs the legacy
+// NewStreamableHTTPTransport constructor.
+func withStaticHeaders(headers map[string]string) HTTPOption {
+	return func(t *httpTransport) { t.headers = headers }
+}
 
 // recvQueueSize bounds the number of received-but-not-yet-drained messages
 // an httpTransport will buffer. It's generous relative to how many messages
@@ -37,6 +109,12 @@ type httpTransport struct {
 	url     string
 	headers map[string]string
 	client  *http.Client
+
+	tokenProvider TokenProvider
+	authHeader    string // header name for TokenProvider's token; "" means Authorization
+
+	maxRetries     int           // 0 disables retrying (default)
+	retryBaseDelay time.Duration // base delay for capped exponential backoff; 0 means defaultRetryBaseDelay
 
 	// mu guards sessionID, openBodies, and closedFlag together: trackBody
 	// must check closedFlag and register the body (plus drainWG.Add) as one
@@ -88,17 +166,49 @@ type httpTransport struct {
 //     channel, so server-initiated requests/notifications outside of a
 //     POST response are not supported.
 func NewStreamableHTTPTransport(url string, headers map[string]string) Transport {
-	return &httpTransport{
+	return NewStreamableHTTPTransportWithOptions(url, withStaticHeaders(headers))
+}
+
+// NewStreamableHTTPTransportWithOptions is the options-taking form of
+// NewStreamableHTTPTransport: it speaks the same MCP Streamable HTTP
+// transport (see NewStreamableHTTPTransport's doc for the full protocol
+// description), configured by opts. Use WithTokenProvider/WithAuthHeader
+// for per-request bearer auth, WithHTTPRetry to opt into retrying transient
+// failures, and WithHTTPClientOpt to supply a custom *http.Client.
+func NewStreamableHTTPTransportWithOptions(url string, opts ...HTTPOption) Transport {
+	t := &httpTransport{
 		url:        url,
-		headers:    headers,
 		client:     http.DefaultClient,
 		recvCh:     make(chan json.RawMessage, recvQueueSize),
 		openBodies: make(map[io.Closer]struct{}),
 		closed:     make(chan struct{}),
 	}
+	for _, opt := range opts {
+		opt(t)
+	}
+	return t
 }
 
-// Send implements Transport.
+// retryableHTTPError marks a Send failure as eligible for the transport's
+// opt-in retry (see WithHTTPRetry): HTTP 429/503 responses and connection
+// errors. Any other error from sendOnce (including read/enqueue failures
+// once a response's bytes have started being consumed) is returned as-is
+// and never retried, per the at-most-once guarantee for streaming
+// responses.
+type retryableHTTPError struct {
+	err        error
+	retryAfter time.Duration // 0 means "no Retry-After hint; use backoff"
+}
+
+func (e *retryableHTTPError) Error() string { return e.err.Error() }
+func (e *retryableHTTPError) Unwrap() error { return e.err }
+
+// Send implements Transport. When WithHTTPRetry has configured
+// maxRetries > 0, Send retries a retryableHTTPError up to maxRetries times
+// with capped exponential backoff (honoring a Retry-After response header
+// when the failure carried one), re-invoking the TokenProvider (if any) on
+// every attempt. It aborts the backoff wait, without a further attempt, if
+// ctx is done or the transport is closed.
 func (t *httpTransport) Send(ctx context.Context, msg json.RawMessage) error {
 	select {
 	case <-t.closed:
@@ -106,6 +216,51 @@ func (t *httpTransport) Send(ctx context.Context, msg json.RawMessage) error {
 	default:
 	}
 
+	totalAttempts := 1
+	if t.maxRetries > 0 {
+		totalAttempts += t.maxRetries
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < totalAttempts; attempt++ {
+		err := t.sendOnce(ctx, msg)
+		if err == nil {
+			return nil
+		}
+
+		var re *retryableHTTPError
+		if !errors.As(err, &re) || attempt == totalAttempts-1 {
+			return err
+		}
+		lastErr = err
+
+		delay := re.retryAfter
+		if delay <= 0 {
+			delay = t.backoffDelay(attempt)
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-t.closed:
+			timer.Stop()
+			return errors.New("mcp: transport closed")
+		}
+	}
+	return lastErr
+}
+
+// sendOnce performs a single POST attempt: it builds the request fresh
+// (including re-invoking the TokenProvider, if any, for a current token),
+// sends it, and either enqueues the resulting message(s) or returns an
+// error. HTTP 429/503 and connection errors are returned as
+// *retryableHTTPError so Send can decide whether to retry; every other
+// error (including any failure once response bytes have started being
+// read, whether a direct JSON body or an SSE stream) is returned plainly
+// and is never retried.
+func (t *httpTransport) sendOnce(ctx context.Context, msg json.RawMessage) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.url, bytes.NewReader(msg))
 	if err != nil {
 		return fmt.Errorf("mcp: build request: %w", err)
@@ -115,13 +270,19 @@ func (t *httpTransport) Send(ctx context.Context, msg json.RawMessage) error {
 	for k, v := range t.headers {
 		req.Header.Set(k, v)
 	}
+	if err := t.applyAuth(ctx, req); err != nil {
+		return err
+	}
 	if sid := t.getSessionID(); sid != "" {
 		req.Header.Set("Mcp-Session-Id", sid)
 	}
 
 	resp, err := t.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("mcp: http request: %w", err)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return &retryableHTTPError{err: fmt.Errorf("mcp: http request: %w", err)}
 	}
 
 	if sid := resp.Header.Get("Mcp-Session-Id"); sid != "" {
@@ -133,6 +294,15 @@ func (t *httpTransport) Send(ctx context.Context, msg json.RawMessage) error {
 		_, _ = io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 		return nil
+	}
+	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable {
+		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		resp.Body.Close()
+		return &retryableHTTPError{
+			err:        fmt.Errorf("mcp: http status %d: %s", resp.StatusCode, string(body)),
+			retryAfter: retryAfter,
+		}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
@@ -174,6 +344,71 @@ func (t *httpTransport) Send(ctx context.Context, msg json.RawMessage) error {
 		}
 		return t.enqueue(ctx, json.RawMessage(body))
 	}
+}
+
+// applyAuth sets the request's auth header from the configured
+// TokenProvider, if any, calling Token(ctx) fresh for every call (i.e.
+// every Send attempt, including retries) so token refresh/rotation is
+// reflected immediately. It overrides any static Authorization header
+// already set from t.headers. Without a TokenProvider, it is a no-op.
+func (t *httpTransport) applyAuth(ctx context.Context, req *http.Request) error {
+	if t.tokenProvider == nil {
+		return nil
+	}
+	tok, err := t.tokenProvider.Token(ctx)
+	if err != nil {
+		return fmt.Errorf("mcp: token provider: %w", err)
+	}
+	header := t.authHeader
+	if header == "" {
+		header = "Authorization"
+		tok = "Bearer " + tok
+	}
+	req.Header.Set(header, tok)
+	return nil
+}
+
+// backoffDelay returns the capped exponential backoff delay for the given
+// zero-based retry attempt number, doubling from retryBaseDelay (or
+// defaultRetryBaseDelay if unset) and capping at defaultRetryMaxDelay.
+func (t *httpTransport) backoffDelay(attempt int) time.Duration {
+	base := t.retryBaseDelay
+	if base <= 0 {
+		base = defaultRetryBaseDelay
+	}
+	delay := base
+	for i := 0; i < attempt; i++ {
+		if delay >= defaultRetryMaxDelay/2 {
+			return defaultRetryMaxDelay
+		}
+		delay *= 2
+	}
+	if delay > defaultRetryMaxDelay {
+		delay = defaultRetryMaxDelay
+	}
+	return delay
+}
+
+// parseRetryAfter parses a Retry-After header value, which per RFC 9110
+// is either a non-negative integer number of seconds or an HTTP-date. It
+// returns 0 (meaning "no usable hint") if v is empty or invalid, or if the
+// parsed instant is not in the future.
+func parseRetryAfter(v string) time.Duration {
+	if v == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(v); err == nil {
+		if secs <= 0 {
+			return 0
+		}
+		return time.Duration(secs) * time.Second
+	}
+	if when, err := http.ParseTime(v); err == nil {
+		if d := time.Until(when); d > 0 {
+			return d
+		}
+	}
+	return 0
 }
 
 // drainSSE reads SSE events from body, enqueuing each one's data in arrival
