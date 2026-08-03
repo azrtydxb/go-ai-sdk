@@ -245,7 +245,8 @@ and known transport deviations are in [MCP § Limitations](mcp.md#limitations-v1
 - **Anthropic citations** — Anthropic's citations feature (source-grounded
   text spans) isn't surfaced as a distinct part type yet; only Google's
   `groundingMetadata` is mapped to `provider.SourcePart` today (see
-  `core/generating-text.md` and the README's Sources section).
+  [`core/streaming.md#streampart-reference`](core/streaming.md#streampart-reference)
+  and the grounding coverage in [`providers/google.md`](providers/google.md#quirks-and-notes)).
 - **Provider-executed tools** (e.g. Anthropic/OpenAI server-side tools
   like web search or code execution that run on the provider's
   infrastructure rather than round-tripping through the caller) — not
