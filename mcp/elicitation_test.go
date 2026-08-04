@@ -117,7 +117,12 @@ func TestElicitationNilHandlerAutoDeclines(t *testing.T) {
 	}
 }
 
-func TestElicitationHandlerErrorRespondsCancel(t *testing.T) {
+// TestElicitationHandlerErrorRespondsInternalError pins that an
+// ElicitationHandler returning an error is reported to the server as a
+// JSON-RPC -32603 "Internal error" reply, not a synthesized Action "cancel"
+// result — a handler bug must be distinguishable on the wire from a
+// deliberate user cancellation.
+func TestElicitationHandlerErrorRespondsInternalError(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
 	defer c.Close()
@@ -133,14 +138,17 @@ func TestElicitationHandlerErrorRespondsCancel(t *testing.T) {
 	})
 
 	resp := recvServerResponse(t, server)
-	var result struct {
-		Action string `json:"action"`
+	if resp.ID != 3 {
+		t.Fatalf("ID = %d, want 3", resp.ID)
 	}
-	if err := json.Unmarshal(resp.Result, &result); err != nil {
-		t.Fatalf("decode result: %v", err)
+	if resp.Error == nil {
+		t.Fatalf("Error = nil, want -32603 (handler error must not be reported as a user action)")
 	}
-	if result.Action != "cancel" {
-		t.Fatalf("Action = %q, want cancel", result.Action)
+	if resp.Error.Code != rpcInternalError {
+		t.Fatalf("Error.Code = %d, want %d", resp.Error.Code, rpcInternalError)
+	}
+	if resp.Result != nil {
+		t.Fatalf("Result = %s, want nil (error reply must not also carry a result)", resp.Result)
 	}
 }
 
@@ -340,6 +348,62 @@ func TestInitializeDeclaresElicitationWithHandler(t *testing.T) {
 	recvRequest(t, server)
 	if err := <-done; err != nil {
 		t.Fatalf("Initialize: %v", err)
+	}
+}
+
+// TestElicitationReachableAtLatestProtocolVersion pins the functional fix:
+// elicitation is a 2025-06-18 feature, so a server that negotiates
+// 2025-06-18 (the version this client now requests, see
+// supportedProtocolVersions) must be able to reach the installed
+// ElicitationHandler — the earlier client, pinned to 2025-03-26, made this
+// unreachable against a conforming server.
+func TestElicitationReachableAtLatestProtocolVersion(t *testing.T) {
+	client, server := newPipePair()
+	c := NewClient(client)
+	defer c.Close()
+
+	handlerCalled := make(chan struct{}, 1)
+	c.SetElicitationHandler(func(ctx context.Context, req ElicitationRequest) (ElicitationResult, error) {
+		handlerCalled <- struct{}{}
+		return ElicitationResult{Action: "accept", Content: map[string]any{"name": "Al"}}, nil
+	})
+
+	done := make(chan error, 1)
+	go func() { done <- c.Initialize(context.Background()) }()
+
+	req := recvRequest(t, server)
+	sendResult(t, server, *req.ID, map[string]any{
+		"protocolVersion": "2025-06-18",
+		"capabilities":    map[string]any{},
+	})
+	recvRequest(t, server) // notifications/initialized
+	if err := <-done; err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	if got := c.ProtocolVersion(); got != "2025-06-18" {
+		t.Fatalf("ProtocolVersion() = %q, want 2025-06-18", got)
+	}
+
+	sendServerRequest(t, server, 1, "elicitation/create", map[string]any{
+		"message":         "name?",
+		"requestedSchema": map[string]any{"type": "object"},
+	})
+
+	select {
+	case <-handlerCalled:
+	case <-time.After(testTimeout):
+		t.Fatal("elicitation handler was not invoked at negotiated protocol version 2025-06-18")
+	}
+
+	resp := recvServerResponse(t, server)
+	var result struct {
+		Action string `json:"action"`
+	}
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if result.Action != "accept" {
+		t.Fatalf("Action = %q, want accept", result.Action)
 	}
 }
 

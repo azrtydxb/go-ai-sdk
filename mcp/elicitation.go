@@ -75,7 +75,11 @@ func (c *Client) dispatchServerRequest(req serverRequest) {
 // to decode) get a JSON-RPC -32602 "Invalid params" error reply, mirroring
 // the -32601 "Method not found" path for unknown methods. A handler error
 // (the installed ElicitationHandler itself returning err) is reported to
-// the server as Action "cancel".
+// the server as a JSON-RPC -32603 "Internal error" reply, not a synthesized
+// Action "cancel" result: "cancel"/"decline" are reserved for a genuine
+// ElicitationResult the handler returned, so the server (and anything it
+// reports to a human) can tell a handler bug apart from a deliberate user
+// cancellation.
 func (c *Client) handleElicitationCreate(req serverRequest) {
 	c.mu.Lock()
 	h := c.elicitationHandler
@@ -97,7 +101,7 @@ func (c *Client) handleElicitationCreate(req serverRequest) {
 		RequestedSchema: params.RequestedSchema,
 	})
 	if err != nil {
-		c.respondServerResult(req.ID, elicitationCreateResultWire{Action: "cancel"})
+		c.respondServerError(req.ID, rpcInternalError, "Internal error")
 		return
 	}
 	c.respondServerResult(req.ID, elicitationCreateResultWire{

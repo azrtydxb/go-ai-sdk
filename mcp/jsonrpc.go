@@ -16,6 +16,22 @@ import (
 // client was closed.
 const errClosedMsg = "mcp: client closed"
 
+// rpcInternalError is the standard JSON-RPC "Internal error" code. It is
+// used both for the "server busy" reply when the server-request dispatch
+// semaphore is full and for a handler that returns an error (see
+// handleElicitationCreate) — in both cases the failure is on the client
+// side, not a well-formed protocol-level rejection like -32601/-32602.
+const rpcInternalError = -32603
+
+// maxConcurrentServerDispatch bounds the number of server-initiated
+// requests (e.g. "elicitation/create") dispatched concurrently. Without a
+// bound, a malicious or buggy server flooding the client with server
+// requests would spawn unbounded goroutines. A server request that arrives
+// while the bound is already saturated is rejected immediately with a
+// JSON-RPC error rather than queued or blocked, so recvLoop is never stalled
+// waiting for dispatch capacity.
+const maxConcurrentServerDispatch = 8
+
 // rpcRequest is a JSON-RPC 2.0 request object (always carries an id).
 type rpcRequest struct {
 	JSONRPC string `json:"jsonrpc"`
@@ -109,9 +125,26 @@ type Client struct {
 	// "resources", "prompts"). Guarded by mu. Nil until Initialize succeeds.
 	serverCaps map[string]json.RawMessage
 
+	// negotiatedProtocolVersion is the protocolVersion the server returned
+	// in its "initialize" response, once accepted. Guarded by mu. Empty
+	// until Initialize succeeds.
+	negotiatedProtocolVersion string
+
 	// elicitationHandler, if set, is invoked for server-initiated
 	// "elicitation/create" requests. Guarded by mu.
 	elicitationHandler ElicitationHandler
+
+	// dispatchSem bounds the number of server-initiated requests dispatched
+	// concurrently (see maxConcurrentServerDispatch): recvLoop acquires a
+	// slot before spawning a dispatch goroutine and rejects the request with
+	// a JSON-RPC error instead of spawning if none is free.
+	dispatchSem chan struct{}
+
+	// dispatchWG tracks in-flight dispatch goroutines spawned by recvLoop.
+	// Close waits on it (after recvLoop has stopped, so no further Add can
+	// race with Wait) so that no dispatch goroutine outlives Close and
+	// possibly calls transport.Send after the transport is closed.
+	dispatchWG sync.WaitGroup
 
 	// sendMu serializes writes to the transport: Transport only guarantees
 	// safety for one concurrent writer, but Client.call may be invoked by
@@ -134,12 +167,13 @@ type Client struct {
 func NewClient(t Transport) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &Client{
-		transport: t,
-		ctx:       ctx,
-		cancel:    cancel,
-		pending:   make(map[int64]chan rpcResponse),
-		closeCh:   make(chan struct{}),
-		loopDone:  make(chan struct{}),
+		transport:   t,
+		ctx:         ctx,
+		cancel:      cancel,
+		pending:     make(map[int64]chan rpcResponse),
+		closeCh:     make(chan struct{}),
+		loopDone:    make(chan struct{}),
+		dispatchSem: make(chan struct{}, maxConcurrentServerDispatch),
 	}
 	go c.recvLoop()
 	return c
@@ -171,8 +205,26 @@ func (c *Client) recvLoop() {
 			// slow handler doesn't block recvLoop from reading further
 			// messages (e.g. responses to our own in-flight calls). The id
 			// is forwarded verbatim (raw bytes) so string ids round-trip.
+			//
+			// Dispatch is bounded by dispatchSem: acquiring it (instead of
+			// spawning unconditionally) caps the number of concurrent
+			// dispatch goroutines, protecting against a server flooding us
+			// with server-initiated requests. If the bound is already
+			// saturated, the request is rejected immediately with a
+			// JSON-RPC error rather than spawned or queued, so recvLoop
+			// itself never blocks waiting for dispatch capacity.
 			req := serverRequest{ID: resp.ID, Method: resp.Method, Params: resp.Params}
-			go c.dispatchServerRequest(req)
+			select {
+			case c.dispatchSem <- struct{}{}:
+				c.dispatchWG.Add(1)
+				go func() {
+					defer c.dispatchWG.Done()
+					defer func() { <-c.dispatchSem }()
+					c.dispatchServerRequest(req)
+				}()
+			default:
+				c.respondServerError(req.ID, rpcInternalError, "server busy")
+			}
 			continue
 		}
 
@@ -331,8 +383,21 @@ func (c *Client) notify(ctx context.Context, method string, params any) error {
 // Close shuts down the receive loop, abandons any pending calls with a
 // "mcp: client closed" error, and closes the underlying transport (via
 // closeWith, which performs the actual transport.Close call — see its doc).
+// It also drains any in-flight server-request dispatch goroutines
+// (dispatchWG) before returning, so no dispatch goroutine outlives Close.
+//
+// Ordering matters: closeWith cancels c.ctx (so a ctx-respecting handler in
+// a dispatch goroutine exits promptly) and closes the transport (so
+// recvLoop's blocked Receive call returns an error and recvLoop exits,
+// closing loopDone). Only after <-c.loopDone — meaning recvLoop has
+// definitely stopped and will spawn no further dispatch goroutines — is it
+// safe to call dispatchWG.Wait(): sync.WaitGroup forbids a positive-delta
+// Add racing with a Wait call that could observe a zero counter, and
+// waiting immediately after closeWith (while recvLoop might still be
+// spawning new dispatch goroutines) would risk exactly that race.
 func (c *Client) Close() error {
 	c.closeWith(errors.New(errClosedMsg))
 	<-c.loopDone
+	c.dispatchWG.Wait()
 	return c.transportCloseErr
 }

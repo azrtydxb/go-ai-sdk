@@ -140,7 +140,7 @@ func TestInitializeHandshake(t *testing.T) {
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		t.Fatalf("decode params: %v", err)
 	}
-	if params.ProtocolVersion != "2025-03-26" {
+	if params.ProtocolVersion != "2025-06-18" {
 		t.Errorf("protocolVersion = %q", params.ProtocolVersion)
 	}
 	if params.ClientInfo.Name != "go-ai-sdk" || params.ClientInfo.Version != "0.1" {
@@ -194,6 +194,69 @@ func TestInitializeRejectsUnsupportedProtocolVersion(t *testing.T) {
 	defer cancel()
 	if _, err := server.Receive(shortCtx); err == nil {
 		t.Fatal("server received a further message after version mismatch, want none")
+	}
+}
+
+// TestInitializeAcceptsLatestProtocolVersion pins that the client sends the
+// latest supported protocol version (2025-06-18, needed to make elicitation
+// reachable at all — see supportedProtocolVersions) and, when the server
+// echoes that same version back, accepts it and stores it as negotiated.
+func TestInitializeAcceptsLatestProtocolVersion(t *testing.T) {
+	client, server := newPipePair()
+	c := NewClient(client)
+	defer c.Close()
+
+	done := make(chan error, 1)
+	go func() { done <- c.Initialize(context.Background()) }()
+
+	req := recvRequest(t, server)
+	var params struct {
+		ProtocolVersion string `json:"protocolVersion"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		t.Fatalf("decode params: %v", err)
+	}
+	if params.ProtocolVersion != "2025-06-18" {
+		t.Fatalf("protocolVersion = %q, want 2025-06-18", params.ProtocolVersion)
+	}
+	sendResult(t, server, *req.ID, map[string]any{
+		"protocolVersion": "2025-06-18",
+		"capabilities":    map[string]any{},
+	})
+	recvRequest(t, server) // notifications/initialized
+
+	if err := <-done; err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	if got := c.ProtocolVersion(); got != "2025-06-18" {
+		t.Fatalf("ProtocolVersion() = %q, want 2025-06-18", got)
+	}
+}
+
+// TestInitializeAcceptsOlderSupportedProtocolVersion pins the back-compat
+// half of the negotiation: a server that only understands 2025-03-26 (older
+// than what the client requests) is still accepted, not rejected, because
+// 2025-03-26 remains in supportedProtocolVersions.
+func TestInitializeAcceptsOlderSupportedProtocolVersion(t *testing.T) {
+	client, server := newPipePair()
+	c := NewClient(client)
+	defer c.Close()
+
+	done := make(chan error, 1)
+	go func() { done <- c.Initialize(context.Background()) }()
+
+	req := recvRequest(t, server)
+	sendResult(t, server, *req.ID, map[string]any{
+		"protocolVersion": "2025-03-26",
+		"capabilities":    map[string]any{},
+	})
+	recvRequest(t, server) // notifications/initialized
+
+	if err := <-done; err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	if got := c.ProtocolVersion(); got != "2025-03-26" {
+		t.Fatalf("ProtocolVersion() = %q, want 2025-03-26", got)
 	}
 }
 

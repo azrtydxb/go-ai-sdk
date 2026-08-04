@@ -7,8 +7,31 @@ import (
 	"strings"
 )
 
-// protocolVersion is the MCP protocol version this client speaks.
-const protocolVersion = "2025-03-26"
+// supportedProtocolVersions is the ordered set of MCP protocol versions this
+// client supports, latest first. The latest ("2025-06-18") is sent as the
+// requested version in the "initialize" request; any version in this set
+// that the server returns is accepted and stored as the negotiated version
+// (see Client.ProtocolVersion). Only a version outside this set is rejected.
+//
+// Elicitation ("elicitation/create") is a 2025-06-18 feature: a
+// spec-conforming server never sends it to a client that negotiated
+// 2025-03-26. Pinning the client to 2025-03-26 alone (as an earlier version
+// of this client did) would therefore make elicitation permanently
+// unreachable even with a handler installed. Supporting the range keeps
+// elicitation reachable against a 2025-06-18 server while remaining
+// back-compatible with a 2025-03-26 server.
+var supportedProtocolVersions = []string{"2025-06-18", "2025-03-26"}
+
+// isSupportedProtocolVersion reports whether v is one of
+// supportedProtocolVersions.
+func isSupportedProtocolVersion(v string) bool {
+	for _, sv := range supportedProtocolVersions {
+		if sv == v {
+			return true
+		}
+	}
+	return false
+}
 
 type clientInfo struct {
 	Name    string `json:"name"`
@@ -31,10 +54,13 @@ type initializeResult struct {
 
 // Initialize performs the MCP handshake: an "initialize" request, followed
 // by a "notifications/initialized" notification once the server replies. It
-// rejects the handshake if the server's negotiated protocolVersion isn't
-// the one this client speaks (protocolVersion, "2025-03-26"). The server's
-// advertised capabilities are stored on the Client so later calls (e.g.
-// ListResources, ListPrompts) can gate on them.
+// sends the latest supported protocol version (supportedProtocolVersions[0])
+// and accepts any version the server returns that is in
+// supportedProtocolVersions, rejecting the handshake only if the returned
+// version is outside that set. The negotiated version is stored on the
+// Client (see ProtocolVersion). The server's advertised capabilities are
+// likewise stored on the Client so later calls (e.g. ListResources,
+// ListPrompts) can gate on them.
 func (c *Client) Initialize(ctx context.Context) error {
 	caps := map[string]any{}
 	c.mu.Lock()
@@ -44,7 +70,7 @@ func (c *Client) Initialize(ctx context.Context) error {
 		caps["elicitation"] = struct{}{}
 	}
 	params := initializeParams{
-		ProtocolVersion: protocolVersion,
+		ProtocolVersion: supportedProtocolVersions[0],
 		ClientInfo:      clientInfo{Name: "go-ai-sdk", Version: "0.1"},
 		Capabilities:    caps,
 	}
@@ -56,16 +82,26 @@ func (c *Client) Initialize(ctx context.Context) error {
 	if err := json.Unmarshal(raw, &res); err != nil {
 		return fmt.Errorf("mcp: decode initialize result: %w", err)
 	}
-	if res.ProtocolVersion != protocolVersion {
+	if !isSupportedProtocolVersion(res.ProtocolVersion) {
 		return fmt.Errorf("mcp: server negotiated unsupported protocol version %q", res.ProtocolVersion)
 	}
 	c.mu.Lock()
 	c.serverCaps = res.Capabilities
+	c.negotiatedProtocolVersion = res.ProtocolVersion
 	c.mu.Unlock()
 	if err := c.notify(ctx, "notifications/initialized", nil); err != nil {
 		return fmt.Errorf("mcp: notifications/initialized: %w", err)
 	}
 	return nil
+}
+
+// ProtocolVersion returns the MCP protocol version negotiated during
+// Initialize (one of supportedProtocolVersions). It is empty until
+// Initialize has completed successfully.
+func (c *Client) ProtocolVersion() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.negotiatedProtocolVersion
 }
 
 // CapabilityError is returned when a method requires a server capability
