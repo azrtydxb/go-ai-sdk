@@ -304,7 +304,30 @@ type pinnedTransportNilKey struct{}
 // every subsequent call with an equal base returns that same instance, so
 // its connection pool is reused rather than rebuilt from scratch.
 func PinnedTransport(base http.RoundTripper) http.RoundTripper {
-	var key any = base
+	// Type-switch on base BEFORE touching pinnedTransportCache: base's
+	// dynamic type may be unhashable (e.g. a func-typed RoundTripper,
+	// `type roundTripFunc func(*http.Request) (*http.Response, error)`
+	// with a RoundTrip method) -- using it as a sync.Map key would panic
+	// ("hash of unhashable type"). Only *http.Transport and nil are ever
+	// used as cache keys; every other RoundTripper is returned unchanged,
+	// without ever being handed to the cache.
+	var bt *http.Transport
+	switch b := base.(type) {
+	case *http.Transport:
+		bt = b
+	case nil:
+		// handled below via the nil-key path
+	default:
+		// Not an *http.Transport: dial-time pinning isn't possible without
+		// knowledge of how it dials, and it may not even be a comparable
+		// type -- return it unchanged, uncached. Callers get only
+		// ValidateURL's pre-connect protection (not rebind-safe) for this
+		// transport, same as before; the only change is that the cache is
+		// never touched for a base like this.
+		return base
+	}
+
+	var key any = bt
 	if base == nil {
 		key = pinnedTransportNilKey{}
 	}
@@ -313,16 +336,10 @@ func PinnedTransport(base http.RoundTripper) http.RoundTripper {
 	}
 
 	var t *http.Transport
-	switch bt := base.(type) {
-	case *http.Transport:
+	if bt != nil {
 		t = bt.Clone()
-	case nil:
+	} else {
 		t = http.DefaultTransport.(*http.Transport).Clone()
-	default:
-		// Not an *http.Transport: dial-time pinning isn't possible, so
-		// return (and cache) base unchanged.
-		actual, _ := pinnedTransportCache.LoadOrStore(key, base)
-		return actual.(http.RoundTripper)
 	}
 
 	innerDial := t.DialContext

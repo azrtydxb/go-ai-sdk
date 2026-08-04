@@ -582,3 +582,93 @@ func (rt *recordingRoundTripper) RoundTrip(req *http.Request) (*http.Response, e
 	rt.calls++
 	return nil, errors.New("recordingRoundTripper: should not be called")
 }
+
+// funcRoundTripper is an http.RoundTripper implemented as a bare func value
+// (no pointer receiver, no wrapping struct) -- the shape that's unhashable
+// and therefore panics if ever used directly as a sync.Map/map key. Real
+// callers plausibly construct a custom RoundTripper this way (e.g.
+// `http.RoundTripper(roundTripFunc(fn))`), so PinnedTransport must not
+// touch pinnedTransportCache with a base of this shape.
+type funcRoundTripper func(req *http.Request) (*http.Response, error)
+
+func (f funcRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+// TestPinnedTransportFuncRoundTripperDoesNotPanic pins the fix for a
+// regression: PinnedTransport used to key pinnedTransportCache directly on
+// base (`var key any = base`) before checking whether base is even an
+// *http.Transport. A func-typed RoundTripper is unhashable, so
+// sync.Map.Load/LoadOrStore on that key panicked with "hash of unhashable
+// type" -- reachable from the public API via any provider's
+// WithHTTPClient(client) whose client.Transport is a func-typed
+// RoundTripper (or any other unhashable custom RoundTripper), on every
+// media/result-URL fetch. PinnedTransport must type-switch on base BEFORE
+// touching the cache: only *http.Transport (and nil) go through the
+// pinning+cache path; any other RoundTripper must be handled without ever
+// being used as a map key.
+func TestPinnedTransportFuncRoundTripperDoesNotPanic(t *testing.T) {
+	var calls int
+	base := funcRoundTripper(func(req *http.Request) (*http.Response, error) {
+		calls++
+		return nil, errors.New("funcRoundTripper: should not be called")
+	})
+
+	var got http.RoundTripper
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("PinnedTransport panicked with a func-typed (unhashable) base RoundTripper: %v", r)
+			}
+		}()
+		got = PinnedTransport(base)
+	}()
+
+	if got == nil {
+		t.Fatal("PinnedTransport(funcRoundTripper) returned nil")
+	}
+	// Calling it again must also not panic (exercises the cache-hit path,
+	// if any, for this base).
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("second PinnedTransport call panicked: %v", r)
+			}
+		}()
+		PinnedTransport(base)
+	}()
+}
+
+// TestFetchWithFuncRoundTripperClientDoesNotPanic exercises the same
+// regression through the public Fetch entry point, matching how a real
+// caller would hit it: a *http.Client whose Transport is a func-typed
+// RoundTripper, passed to a provider via WithHTTPClient, used for a media
+// fetch. Fetch must not panic, and must still get a response back via the
+// (unpinned-fallback) transport.
+func TestFetchWithFuncRoundTripperClientDoesNotPanic(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "video/mp4")
+		w.Write([]byte("data"))
+	}))
+	defer srv.Close()
+
+	base := funcRoundTripper(func(req *http.Request) (*http.Response, error) {
+		return http.DefaultTransport.RoundTrip(req)
+	})
+	client := &http.Client{Transport: base}
+
+	var data []byte
+	var err error
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("Fetch panicked with a func-typed (unhashable) client.Transport: %v", r)
+			}
+		}()
+		data, _, err = Fetch(context.Background(), client, srv.URL, "test", 0)
+	}()
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if string(data) != "data" {
+		t.Errorf("data = %q, want %q", data, "data")
+	}
+}
