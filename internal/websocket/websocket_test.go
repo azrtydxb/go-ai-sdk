@@ -1176,3 +1176,134 @@ func TestDial_ReservedHeadersSkipped(t *testing.T) {
 		t.Errorf("X-Custom = %q, want %q (non-reserved headers must pass through)", got, "value1")
 	}
 }
+
+// --- Task 3 — a blocked WriteText/WriteBinary must not clobber an
+// in-flight control write it's merely queued behind on writeMu ---
+
+// blockingConn is a net.Conn test double whose Write blocks until either
+// releaseWrite is closed (simulating the write finally completing) or the
+// most recently set write deadline (tracked via the embedded fakeConn) has
+// passed — mimicking how a real net.Conn aborts a blocked Write once
+// SetWriteDeadline is called with a time in the past. writeStarted is
+// closed the first time Write is entered, letting a test synchronize with
+// the write becoming genuinely in-flight.
+type blockingConn struct {
+	*fakeConn
+	writeStarted chan struct{}
+	releaseWrite chan struct{}
+	startOnce    sync.Once
+}
+
+func (b *blockingConn) Write(p []byte) (int, error) {
+	b.startOnce.Do(func() { close(b.writeStarted) })
+	ticker := time.NewTicker(2 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-b.releaseWrite:
+			return len(p), nil
+		case <-ticker.C:
+			_, _, writeDeadlines := b.fakeConn.snapshot()
+			if len(writeDeadlines) == 0 {
+				continue
+			}
+			last := writeDeadlines[len(writeDeadlines)-1]
+			if !last.IsZero() && time.Now().After(last) {
+				return 0, errors.New("i/o timeout (simulated deadline exceeded)")
+			}
+		}
+	}
+}
+
+func TestWriteMu_BlockedWriterCtxCancelDoesNotClobberInFlightControlWrite(t *testing.T) {
+	writeStarted := make(chan struct{})
+	releaseWrite := make(chan struct{})
+	bc := &blockingConn{fakeConn: &fakeConn{}, writeStarted: writeStarted, releaseWrite: releaseWrite}
+	c := &Conn{conn: bc}
+
+	// Start a control write (as Read's auto-pong path does) and wait for
+	// it to actually be in flight, holding writeMu.
+	controlDone := make(chan error, 1)
+	go func() {
+		controlDone <- c.writeControl(opPong, []byte("pong-payload"))
+	}()
+
+	select {
+	case <-writeStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("control write never started")
+	}
+
+	// Now queue a WriteText behind it. It must block on writeMu (the
+	// control write holds it), then have its ctx cancelled while still
+	// waiting.
+	ctx, cancel := context.WithCancel(context.Background())
+	writeDone := make(chan error, 1)
+	go func() {
+		writeDone <- c.writeMessage(ctx, opText, []byte("hello"))
+	}()
+
+	time.Sleep(100 * time.Millisecond) // let the WriteText goroutine block on writeMu
+	cancel()
+
+	select {
+	case err := <-writeDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("blocked writeMessage returned %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("blocked writeMessage did not return promptly after its ctx was cancelled")
+	}
+
+	// The control write must still be genuinely in flight and untouched —
+	// release it now and confirm it completes successfully rather than
+	// having been aborted by a deadline the cancelled writer set while it
+	// was only waiting on writeMu, not actually writing.
+	close(releaseWrite)
+
+	select {
+	case err := <-controlDone:
+		if err != nil {
+			t.Fatalf("in-flight control write was aborted by the blocked writer's ctx cancellation: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("control write never completed")
+	}
+}
+
+// TestWriteMu_InFlightWriteStillInterruptedByOwnCtx confirms the fix didn't
+// remove ctx-cancellation for a write that's genuinely in flight (owns
+// writeMu, is blocked in conn.Write): that case must still be interrupted
+// promptly via the deadline, per Read/Write's documented contract.
+func TestWriteMu_InFlightWriteStillInterruptedByOwnCtx(t *testing.T) {
+	writeStarted := make(chan struct{})
+	releaseWrite := make(chan struct{})
+	defer close(releaseWrite) // let the goroutine's Write eventually return, even after the deadline fires
+	bc := &blockingConn{fakeConn: &fakeConn{}, writeStarted: writeStarted, releaseWrite: releaseWrite}
+	c := &Conn{conn: bc}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	writeDone := make(chan error, 1)
+	go func() {
+		writeDone <- c.writeMessage(ctx, opText, []byte("hello"))
+	}()
+
+	select {
+	case <-writeStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("write never started")
+	}
+
+	cancel() // this write owns writeMu and is genuinely in flight: must be interrupted
+
+	select {
+	case err := <-writeDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("in-flight writeMessage returned %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("in-flight writeMessage was not interrupted by its own ctx cancellation")
+	}
+}

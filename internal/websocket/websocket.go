@@ -119,10 +119,53 @@ type Conn struct {
 	br         *bufio.Reader
 	maxMessage int
 
-	writeMu        sync.Mutex
+	// writeMu is a 1-slot channel semaphore (not a sync.Mutex) so that
+	// waiting to acquire it can be cancelled via ctx without ever touching
+	// the conn's write deadline — see lockWrite. It's lazily created by
+	// writeSem so a zero-value Conn (as whitebox tests construct directly)
+	// still works.
+	writeMu        chan struct{}
+	writeMuOnce    sync.Once
 	closeFrameOnce sync.Once
 	shutdownOnce   sync.Once
 	localClose     atomic.Bool
+}
+
+// writeSem returns c's write semaphore, creating it on first use. Safe for
+// concurrent first use (e.g. a WriteText and Read's auto-pong racing to
+// acquire the lock for the first time).
+func (c *Conn) writeSem() chan struct{} {
+	c.writeMuOnce.Do(func() {
+		c.writeMu = make(chan struct{}, 1)
+	})
+	return c.writeMu
+}
+
+// lockWrite acquires the write lock, honoring ctx cancellation while
+// *waiting* for it. Critically, it never touches the conn's write deadline
+// to interrupt that wait: if another write currently holds the lock (e.g.
+// Read's auto-pong control write), a blocked lockWrite call has not started
+// any I/O of its own — there is nothing of *its* to interrupt, and setting
+// a deadline here would abort the in-flight write that owns the lock
+// instead (the clobber this restructuring exists to prevent). Once the
+// lock is acquired, the caller is responsible for arming a ctx-scoped
+// deadline (via runWithContext) around its own conn access.
+//
+// ctx values with no deadline/cancellation (context.Background(), used by
+// writeControl and Close) simply block until the lock is available, same
+// as a plain mutex.
+func (c *Conn) lockWrite(ctx context.Context) error {
+	select {
+	case c.writeSem() <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// unlockWrite releases the lock acquired by lockWrite.
+func (c *Conn) unlockWrite() {
+	<-c.writeSem()
 }
 
 // Dial performs the RFC 6455 client opening handshake against a ws:// or
@@ -594,19 +637,23 @@ func closePayload(code int, reason string) []byte {
 }
 
 // writeControl writes a masked control frame, serialized against user
-// writes via writeMu. The write carries a bounded deadline (see
-// controlWriteTimeout) so a stalled peer can't wedge it — and, transitively,
-// a Read call blocked replying to a ping — forever; the deadline is cleared
-// again before returning so it doesn't leak into a subsequent WriteText/
-// WriteBinary call made with a ctx that has no deadline of its own to
-// overwrite it.
+// writes via writeMu (acquired with context.Background(), i.e. it simply
+// blocks until available — writeControl runs on the read path and has no
+// ctx of the caller's to honor for the *lock wait*). The write itself
+// carries a bounded deadline (see controlWriteTimeout) so a stalled peer
+// can't wedge it — and, transitively, a Read call blocked replying to a
+// ping — forever; the deadline is cleared again before returning so it
+// doesn't leak into a subsequent WriteText/WriteBinary call made with a ctx
+// that has no deadline of its own to overwrite it.
 func (c *Conn) writeControl(opcode uint8, payload []byte) error {
 	key, err := newMaskKey()
 	if err != nil {
 		return err
 	}
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
+	if err := c.lockWrite(context.Background()); err != nil {
+		return err
+	}
+	defer c.unlockWrite()
 	_ = c.conn.SetWriteDeadline(time.Now().Add(controlWriteTimeout))
 	defer c.conn.SetWriteDeadline(time.Time{})
 	return writeFrame(c.conn, true, opcode, payload, &key)
@@ -635,13 +682,23 @@ func (c *Conn) WriteBinary(ctx context.Context, data []byte) error {
 }
 
 func (c *Conn) writeMessage(ctx context.Context, opcode uint8, data []byte) error {
+	// Acquire the lock first, with the *wait* itself cancelable via ctx but
+	// never touching the conn's deadline to do so (see lockWrite). Only
+	// once this call actually owns the conn for writing does it arm the
+	// ctx-deadline watcher (runWithContext) around the real conn.Write —
+	// otherwise a ctx firing while merely queued behind another write
+	// (e.g. Read's auto-pong) would abort that other, healthy write
+	// instead of anything belonging to this call.
+	if err := c.lockWrite(ctx); err != nil {
+		return err
+	}
+	defer c.unlockWrite()
+
 	return runWithContext(ctx, c.conn, dirWrite, func() error {
 		key, err := newMaskKey()
 		if err != nil {
 			return err
 		}
-		c.writeMu.Lock()
-		defer c.writeMu.Unlock()
 		return writeFrame(c.conn, true, opcode, data, &key)
 	})
 }
