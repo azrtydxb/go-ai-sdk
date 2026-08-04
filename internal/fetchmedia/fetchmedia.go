@@ -42,6 +42,18 @@ const maxRedirects = 10
 // blocked IP on the next.
 var lookupIPAddr = net.DefaultResolver.LookupIPAddr
 
+// SetLookupIPAddrForTest overrides the DNS resolver used for SSRF validation
+// and returns a function that restores the previous one. It exists so tests
+// in OTHER packages within this module (e.g. providers/bfl) can exercise the
+// registrable-domain / SSRF gates against non-loopback hostnames without a
+// live DNS lookup, keeping the suite hermetic. Test-only; not safe for
+// concurrent use.
+func SetLookupIPAddrForTest(fn func(ctx context.Context, host string) ([]net.IPAddr, error)) (restore func()) {
+	prev := lookupIPAddr
+	lookupIPAddr = fn
+	return func() { lookupIPAddr = prev }
+}
+
 // Fetch GETs url using client (or http.DefaultClient if client is nil),
 // returning the raw response body and a MediaType taken from the
 // response's Content-Type header (parameters such as "; charset=..."

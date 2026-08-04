@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
+	"github.com/azrtydxb/go-ai-sdk/internal/fetchmedia"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -408,6 +410,15 @@ func TestGenerateImages_RegionalPollingURLSameRegistrableDomainWorks(t *testing.
 		t.Fatalf("parse regionSrv.URL: %v", err)
 	}
 	rt := &rewriteHostRoundTripper{target: target}
+
+	// Keep the test hermetic: the SSRF validator would otherwise do a live
+	// DNS lookup of api.us1.bfl.ai. Point it at a public TEST-NET IP so the
+	// registrable-domain gate + x-key attachment are exercised without any
+	// real resolution (and so it passes in offline/air-gapped CI).
+	restore := fetchmedia.SetLookupIPAddrForTest(func(_ context.Context, host string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("203.0.113.10")}}, nil
+	})
+	defer restore()
 
 	p := New(WithAPIKey("secret-key"), WithBaseURL("https://api.bfl.ai"), WithHTTPClient(&http.Client{Transport: rt}))
 	m := p.ImageModel("flux-pro-1.1").(*imageModel)
