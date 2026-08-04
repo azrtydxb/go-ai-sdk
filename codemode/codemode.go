@@ -176,7 +176,7 @@ func (t *codeTool) InputCallbacks() ai.ToolInputCallbacks { return ai.ToolInputC
 // Execute implements ai.Tool. It decodes {"code": string}, runs it in the
 // sandbox with a CallTool binding that dispatches to the wrapped tools by
 // name, and returns the sandbox's Result rendered as a single string
-// (Output, truncated to MaxOutputBytes, followed by any Logs). Sandbox
+// (Output + Logs, combined and truncated to MaxOutputBytes). Sandbox
 // errors are returned as-is (not wrapped) so the ai tool loop's usual
 // *ai.ToolExecutionError wrapping applies exactly once.
 func (t *codeTool) Execute(ctx context.Context, args json.RawMessage) (any, error) {
@@ -185,23 +185,36 @@ func (t *codeTool) Execute(ctx context.Context, args json.RawMessage) (any, erro
 		return nil, &ai.InvalidToolArgumentsError{ToolName: t.Name(), Args: args, Cause: err}
 	}
 
+	// Reject empty or whitespace-only code argument.
+	if strings.TrimSpace(a.Code) == "" {
+		return nil, &ai.InvalidToolArgumentsError{
+			ToolName: t.Name(),
+			Args:     args,
+			Cause:    fmt.Errorf("code argument is required and cannot be empty"),
+		}
+	}
+
 	env := Env{CallTool: t.dispatch}
 	result, err := t.sandbox.Execute(ctx, a.Code, env)
 	if err != nil {
 		return nil, err
 	}
 
-	output := result.Output
-	if len(output) > t.maxOutputBytes {
-		output = truncateOutput(output, t.maxOutputBytes) + "\n[truncated]"
-	}
+	// Assemble the full output: Output followed by Logs.
 	var b strings.Builder
-	b.WriteString(output)
+	b.WriteString(result.Output)
 	for _, line := range result.Logs {
 		b.WriteString("\nlog: ")
 		b.WriteString(line)
 	}
-	return b.String(), nil
+	fullOutput := b.String()
+
+	// Apply the byte budget to the FULLY ASSEMBLED output string.
+	if len(fullOutput) > t.maxOutputBytes {
+		fullOutput = truncateOutput(fullOutput, t.maxOutputBytes) + "\n[truncated]"
+	}
+
+	return fullOutput, nil
 }
 
 // truncateOutput cuts s to at most n bytes, backing the cut point up to the

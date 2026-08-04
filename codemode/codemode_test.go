@@ -441,3 +441,64 @@ func TestEndToEndThroughGenerateText(t *testing.T) {
 		t.Fatalf("tool result part = %+v, want it to contain %q", trp, "echoed: world")
 	}
 }
+
+// TestOutputBudgetIncludesLogs pins finding 11: Logs must be included in
+// the MaxOutputBytes budget. The combined Output + formatted Logs must not
+// exceed MaxOutputBytes in the returned string.
+func TestOutputBudgetIncludesLogs(t *testing.T) {
+	// Large output + logs that together exceed the budget
+	sb := &fakeSandbox{result: &Result{
+		Output: "out_1234567890",                               // 13 bytes
+		Logs:   []string{"log1_1234567890", "log2_1234567890"}, // ~40 bytes when formatted
+	}}
+	tool := Tool(sb, nil, &Options{MaxOutputBytes: 20})
+
+	got, err := tool.Execute(t.Context(), json.RawMessage(`{"code":"x"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := got.(string)
+
+	// The combined result must be <= 20 bytes + "[truncated]" suffix
+	if len(result) > 20+len("\n[truncated]") {
+		t.Fatalf("combined output+logs exceeds budget: got %d bytes (limit 20), result: %q", len(result)-len("\n[truncated]"), result)
+	}
+	if !strings.Contains(result, "[truncated]") {
+		t.Fatalf("expected truncation suffix in: %q", result)
+	}
+	if !utf8.ValidString(result) {
+		t.Fatalf("truncated output is not valid UTF-8: %q", result)
+	}
+}
+
+// TestEmptyCodeArgumentRejected pins finding 12: an empty or whitespace-only
+// "code" argument must return *ai.InvalidToolArgumentsError, not silently
+// run an empty program.
+func TestEmptyCodeArgumentRejected(t *testing.T) {
+	tool := Tool(&fakeSandbox{}, nil, nil)
+
+	// Test with empty string
+	_, err := tool.Execute(t.Context(), json.RawMessage(`{"code":""}`))
+	if err == nil {
+		t.Fatal("want error for empty code argument")
+	}
+	var iae *ai.InvalidToolArgumentsError
+	if !errors.As(err, &iae) {
+		t.Fatalf("empty code: err = %v (%T), want *ai.InvalidToolArgumentsError", err, err)
+	}
+	if iae.ToolName != "run_code" {
+		t.Fatalf("empty code: ToolName = %q, want run_code", iae.ToolName)
+	}
+
+	// Test with whitespace-only
+	_, err = tool.Execute(t.Context(), json.RawMessage(`{"code":"  \n\t  "}`))
+	if err == nil {
+		t.Fatal("want error for whitespace-only code argument")
+	}
+	if !errors.As(err, &iae) {
+		t.Fatalf("whitespace code: err = %v (%T), want *ai.InvalidToolArgumentsError", err, err)
+	}
+	if iae.ToolName != "run_code" {
+		t.Fatalf("whitespace code: ToolName = %q, want run_code", iae.ToolName)
+	}
+}
