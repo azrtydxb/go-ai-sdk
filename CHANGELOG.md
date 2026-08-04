@@ -8,6 +8,32 @@ once it reaches 1.0.
 
 ## [Unreleased]
 
+## [0.2.3] — 2026-08-04
+
+A documentation-only release ahead of announcing the module. No code, no
+public API, and no behavior changed — every change below is doc comments,
+example tests, and the LICENSE copyright line.
+
+### Added
+
+- **Runnable examples on `ai` and `agent`.** Ten `Example` functions, which
+  render inline (with a Run button) on pkg.go.dev and execute as tests in
+  CI: `GenerateText`, `StreamText`, `GenerateObject`, `NewTool`,
+  `StepCountIs`, `Embed`, `EmbedMany`, `CosineSimilarity`, `Agent`, and
+  `AsTool`. All are built on `aitest.MockModel`/`aitest.MockEmbedder`, so
+  they run offline and deterministically against `// Output:` blocks and
+  will fail the build if the API they demonstrate drifts.
+- **A module-root `doc.go`** (`package goaisdk`), so
+  `pkg.go.dev/github.com/azrtydxb/go-ai-sdk` opens on an orientation page —
+  what the module is, how `ai`/`provider`/`providers/*`/`agent`/`mcp`/
+  `codemode` layer, a quickstart, and where the `docs/` guide set lives —
+  rather than a bare directory listing.
+
+### Changed
+
+- **`LICENSE`**: filled in the Apache-2.0 appendix's
+  `Copyright [yyyy] [name of copyright owner]` placeholder.
+
 ## [0.2.2] — 2026-08-04
 
 A follow-up sweep closing every deferred/documented-not-fixed item left by
@@ -838,7 +864,8 @@ smoke-tested against live APIs yet (see the
 - [Migrating from the Vercel AI SDK](docs/migrating-from-vercel-ai-sdk.md)
   and [Architecture](docs/architecture.md).
 
-[Unreleased]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.1.0...v0.2.0
