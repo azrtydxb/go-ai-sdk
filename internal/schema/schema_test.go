@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 type inner struct {
@@ -326,6 +327,91 @@ func TestForType_NonStructError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "struct") {
 		t.Fatalf("error should mention struct requirement: %v", err)
+	}
+}
+
+// --- []byte and time.Time wire-shape tests ---
+
+type withBytesAndTime struct {
+	Data      []byte    `json:"data"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+func TestForType_ByteSliceIsString(t *testing.T) {
+	raw, err := For[withBytesAndTime]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s map[string]any
+	if err := json.Unmarshal(raw, &s); err != nil {
+		t.Fatal(err)
+	}
+	props := s["properties"].(map[string]any)
+	data := props["data"].(map[string]any)
+	if data["type"] != "string" {
+		t.Fatalf("[]byte schema type = %v, want string (encoding/json marshals []byte as base64 string)", data["type"])
+	}
+	if _, hasItems := data["items"]; hasItems {
+		t.Fatalf("[]byte schema must not have array 'items': %v", data)
+	}
+}
+
+func TestForType_TimeTimeIsStringDateTime(t *testing.T) {
+	raw, err := For[withBytesAndTime]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s map[string]any
+	if err := json.Unmarshal(raw, &s); err != nil {
+		t.Fatal(err)
+	}
+	props := s["properties"].(map[string]any)
+	createdAt := props["createdAt"].(map[string]any)
+	if createdAt["type"] != "string" {
+		t.Fatalf("time.Time schema type = %v, want string", createdAt["type"])
+	}
+	if createdAt["format"] != "date-time" {
+		t.Fatalf("time.Time schema format = %v, want date-time", createdAt["format"])
+	}
+	if _, hasProps := createdAt["properties"]; hasProps {
+		t.Fatalf("time.Time schema must not be expanded structurally: %v", createdAt)
+	}
+}
+
+// TestForType_ByteSliceAndTimeRoundTrip verifies that a JSON value shaped
+// per the generated schema (base64 string for []byte, RFC3339 string for
+// time.Time) actually unmarshals into the struct -- the wire shape the
+// schema advertises must match what encoding/json expects.
+func TestForType_ByteSliceAndTimeRoundTrip(t *testing.T) {
+	want := withBytesAndTime{
+		Data:      []byte("hello world"),
+		CreatedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
+	}
+	marshaled, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var s map[string]any
+	if err := json.Unmarshal(marshaled, &s); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s["data"].(string); !ok {
+		t.Fatalf("marshaled data = %v (%T), want string", s["data"], s["data"])
+	}
+	if _, ok := s["createdAt"].(string); !ok {
+		t.Fatalf("marshaled createdAt = %v (%T), want string", s["createdAt"], s["createdAt"])
+	}
+
+	var got withBytesAndTime
+	if err := json.Unmarshal(marshaled, &got); err != nil {
+		t.Fatalf("unmarshal into struct: %v", err)
+	}
+	if string(got.Data) != string(want.Data) {
+		t.Fatalf("Data = %q, want %q", got.Data, want.Data)
+	}
+	if !got.CreatedAt.Equal(want.CreatedAt) {
+		t.Fatalf("CreatedAt = %v, want %v", got.CreatedAt, want.CreatedAt)
 	}
 }
 

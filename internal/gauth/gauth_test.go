@@ -21,6 +21,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/azrtydxb/go-ai-sdk/internal/retry"
 )
 
 // ---- test helpers ----
@@ -288,8 +290,67 @@ func TestServiceAccountTokenSource_TokenEndpointError(t *testing.T) {
 	defer srv.Close()
 	ts.SetTokenURL(srv.URL)
 
-	if _, err := ts.Token(context.Background()); err == nil {
+	_, err = ts.Token(context.Background())
+	if err == nil {
 		t.Fatal("want error for non-2xx token endpoint response, got nil")
+	}
+	var tee *TokenEndpointError
+	if !errors.As(err, &tee) {
+		t.Fatalf("err = %v, want *TokenEndpointError", err)
+	}
+	if tee.StatusCode != 401 {
+		t.Errorf("StatusCode = %d, want 401", tee.StatusCode)
+	}
+	if tee.IsRetryable() {
+		t.Error("401 should not be classified retryable")
+	}
+}
+
+// TestServiceAccountTokenSource_TokenEndpoint5xxIsRetryable verifies that a
+// transient (5xx) failure from the token endpoint is classified retryable
+// by internal/retry.Do's own mechanism: retry.Do detects retryability via
+// errors.As against the retry.Retryable interface (IsRetryable() bool), not
+// via any concrete *ai.APICallError type, so a gauth-local error type
+// implementing that method is sufficient -- no import of ai is required.
+func TestServiceAccountTokenSource_TokenEndpoint5xxIsRetryable(t *testing.T) {
+	_, pemStr := generateTestKey(t)
+	ts, err := NewServiceAccountTokenSource(serviceAccountJSON(t, "sa@example.com", pemStr, ""))
+	if err != nil {
+		t.Fatalf("NewServiceAccountTokenSource: %v", err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte(`{"error":"unavailable"}`))
+	}))
+	defer srv.Close()
+	ts.SetTokenURL(srv.URL)
+
+	_, err = ts.Token(context.Background())
+	if err == nil {
+		t.Fatal("want error for 503 token endpoint response, got nil")
+	}
+
+	var tee *TokenEndpointError
+	if !errors.As(err, &tee) {
+		t.Fatalf("err = %v, want *TokenEndpointError", err)
+	}
+	if !tee.IsRetryable() {
+		t.Error("503 should be classified retryable")
+	}
+
+	// End-to-end: retry.Do must actually retry it.
+	calls := 0
+	_, retryErr := retry.Do(context.Background(), 2, func() (string, error) {
+		calls++
+		return ts.Token(context.Background())
+	})
+	if calls != 3 {
+		t.Fatalf("calls = %d, want 3 (retry.Do should retry a retryable TokenEndpointError)", calls)
+	}
+	var ex *retry.ExhaustedError
+	if !errors.As(retryErr, &ex) {
+		t.Fatalf("retryErr = %v, want *retry.ExhaustedError", retryErr)
 	}
 }
 

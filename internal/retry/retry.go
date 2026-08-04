@@ -76,13 +76,15 @@ func Do[T any](ctx context.Context, maxRetries int, fn func() (T, error)) (T, er
 		// Calculate backoff delay
 		delay := calculateBackoff(attempt)
 
-		// Wait with context awareness, using NewTimer to ensure cleanup
+		// Wait with context awareness, using NewTimer to ensure cleanup.
+		// The timer is stopped explicitly on every path (not deferred) so
+		// timers don't accumulate across loop iterations until Do returns.
 		timer := time.NewTimer(delay)
-		defer timer.Stop()
 		select {
 		case <-timer.C:
 			// Continue to next attempt
 		case <-ctx.Done():
+			timer.Stop()
 			var zero T
 			return zero, ctx.Err()
 		}
@@ -112,6 +114,12 @@ func calculateBackoff(attempt int) time.Duration {
 			break
 		}
 		baseDelay *= 2
+	}
+
+	// rand.Int63n panics for n <= 0; BaseDelay is an exported var that tests
+	// may set to 0 (or less) to speed up backoff, so guard rather than panic.
+	if baseDelay <= 0 {
+		return 0
 	}
 
 	// Full jitter: random value between 0 and baseDelay

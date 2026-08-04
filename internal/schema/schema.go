@@ -10,9 +10,14 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
-var rawMessageType = reflect.TypeOf(json.RawMessage{})
+var (
+	rawMessageType = reflect.TypeOf(json.RawMessage{})
+	byteSliceType  = reflect.TypeOf([]byte(nil))
+	timeType       = reflect.TypeOf(time.Time{})
+)
 
 // For reflects T (which must be a struct type) into a JSON Schema object.
 func For[T any]() (json.RawMessage, error) {
@@ -176,6 +181,32 @@ func typeSchema(t reflect.Type, visiting map[reflect.Type]bool) (map[string]any,
 	if t == rawMessageType {
 		// json.RawMessage represents an arbitrary JSON value: {} (any).
 		return map[string]any{}, nil
+	}
+
+	// []byte marshals via encoding/json as a base64-encoded JSON string, not
+	// as an array of integers, so the generic slice/array handling below
+	// (which would produce {"type":"array","items":{"type":"integer"}} and
+	// lie about the wire shape) must not see it.
+	if t == byteSliceType {
+		return map[string]any{
+			"type":        "string",
+			"description": "base64-encoded bytes (as produced by encoding/json for []byte)",
+		}, nil
+	}
+
+	// time.Time implements json.Marshaler and marshals to an RFC 3339
+	// string, not to the structural object the generic struct handling
+	// below would otherwise produce. This special-case is intentionally
+	// narrow: it does not attempt to detect json.Marshaler generically for
+	// arbitrary types, since not every Marshaler marshals to a JSON string
+	// (e.g. one could marshal to a number, array, or object), so a correct
+	// generic rule isn't a simple "always treat as string." Types that
+	// implement json.Marshaler other than time.Time will still be expanded
+	// structurally by reflection, which is wrong for such types too --
+	// callers with custom Marshaler types should special-case them the
+	// same way if they hit this.
+	if t == timeType {
+		return map[string]any{"type": "string", "format": "date-time"}, nil
 	}
 
 	switch t.Kind() {

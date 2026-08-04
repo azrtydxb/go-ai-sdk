@@ -108,6 +108,61 @@ func TestDoWrapsRetryableErrors(t *testing.T) {
 	}
 }
 
+func TestCalculateBackoffZeroBaseDelayNoPanic(t *testing.T) {
+	originalDelay := BaseDelay
+	t.Cleanup(func() { BaseDelay = originalDelay })
+	BaseDelay = 0
+
+	delay := calculateBackoff(0)
+	if delay != 0 {
+		t.Fatalf("delay = %v, want 0", delay)
+	}
+}
+
+func TestCalculateBackoffNegativeBaseDelayNoPanic(t *testing.T) {
+	originalDelay := BaseDelay
+	t.Cleanup(func() { BaseDelay = originalDelay })
+	BaseDelay = -1
+
+	delay := calculateBackoff(3)
+	if delay != 0 {
+		t.Fatalf("delay = %v, want 0", delay)
+	}
+}
+
+func TestDoManyRetriesDoesNotAccumulateTimers(t *testing.T) {
+	// Regression test for the defer-in-loop footgun: with many retries, Do
+	// must not leak/accumulate running timers across iterations (each
+	// iteration's timer.Stop must run per-iteration, not pile up as
+	// deferred calls until Do returns). Attempt count is kept low enough
+	// that calculateBackoff's exponential growth doesn't hit the 8s cap
+	// (which would make this a slow, flaky wall-clock test); the point
+	// here is simply that Do completes promptly and correctly across many
+	// iterations, not to measure backoff timing precisely.
+	originalDelay := BaseDelay
+	t.Cleanup(func() { BaseDelay = originalDelay })
+	BaseDelay = time.Microsecond
+
+	calls := 0
+	start := time.Now()
+	_, err := Do(t.Context(), 10, func() (int, error) {
+		calls++
+		return 0, &retryableErr{true}
+	})
+	elapsed := time.Since(start)
+
+	if calls != 11 {
+		t.Fatalf("calls = %d, want 11", calls)
+	}
+	var ex *ExhaustedError
+	if !errors.As(err, &ex) {
+		t.Fatalf("err = %v, want ExhaustedError", err)
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("elapsed = %v, too slow for 10 retries at ~microsecond backoff", elapsed)
+	}
+}
+
 func TestCalculateBackoffHighAttempt(t *testing.T) {
 	// Test that calculateBackoff doesn't panic or overflow for large attempt numbers.
 	originalDelay := BaseDelay

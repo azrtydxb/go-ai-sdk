@@ -6,6 +6,7 @@ package gauth
 import (
 	"context"
 	"crypto"
+	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
@@ -175,12 +176,47 @@ func (s *ServiceAccountTokenSource) buildJWT(now time.Time, aud string) (string,
 
 	signingInput := b64URL(headerJSON) + "." + b64URL(claimsJSON)
 	hashed := sha256.Sum256([]byte(signingInput))
-	sig, err := rsa.SignPKCS1v15(nil, s.privateKey, crypto.SHA256, hashed[:])
+	// Pass crypto/rand.Reader (not nil) so PKCS#1 v1.5 signing gets blinding,
+	// which mitigates timing side-channels against the service-account
+	// private key; a nil RNG disables that protection.
+	sig, err := rsa.SignPKCS1v15(rand.Reader, s.privateKey, crypto.SHA256, hashed[:])
 	if err != nil {
 		return "", fmt.Errorf("sign JWT: %w", err)
 	}
 
 	return signingInput + "." + b64URL(sig), nil
+}
+
+// TokenEndpointError is returned when Google's OAuth2 token endpoint
+// responds with a non-2xx status. It implements IsRetryable() bool so that
+// callers using internal/retry.Do (which checks for that method via
+// errors.As against the retry.Retryable interface, not any concrete error
+// type) correctly retry transient failures such as 5xx, 429, or 408
+// responses from the token endpoint.
+//
+// gauth deliberately does not import the ai package to build an
+// *ai.APICallError here: ai already imports internal/retry, and gauth is
+// imported by providers/vertex, which imports ai -- so ai importing gauth
+// back would risk introducing a cycle for no benefit. Since retry.Do only
+// requires the IsRetryable() bool method (structural typing via
+// errors.As), a small gauth-local error type is the cleanest cycle-free
+// way to make token-endpoint failures classify correctly.
+type TokenEndpointError struct {
+	StatusCode int
+	URL        string
+	Body       string
+}
+
+// Error implements the error interface.
+func (e *TokenEndpointError) Error() string {
+	return fmt.Sprintf("gauth: token endpoint %s returned status %d: %s", e.URL, e.StatusCode, e.Body)
+}
+
+// IsRetryable reports whether the failure is likely transient. This
+// mirrors ai.NewAPICallError's classification: 429, 408, and 5xx are
+// retryable.
+func (e *TokenEndpointError) IsRetryable() bool {
+	return e.StatusCode == 429 || e.StatusCode == 408 || e.StatusCode >= 500
 }
 
 type tokenEndpointResponse struct {
@@ -237,7 +273,7 @@ func (s *ServiceAccountTokenSource) Token(ctx context.Context) (string, error) {
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("gauth: token endpoint returned status %d: %s", resp.StatusCode, string(body))
+		return "", &TokenEndpointError{StatusCode: resp.StatusCode, URL: tokenURL, Body: string(body)}
 	}
 
 	var tr tokenEndpointResponse
