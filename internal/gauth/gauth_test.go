@@ -369,6 +369,33 @@ func TestServiceAccountTokenSource_ContextCancellation(t *testing.T) {
 	}
 }
 
+func TestNewServiceAccountTokenSource_TokenURIHTTPRejected(t *testing.T) {
+	_, pemStr := generateTestKey(t)
+	_, err := NewServiceAccountTokenSource(serviceAccountJSON(t, "sa@example.com", pemStr, "http://oauth2.example.com/token"))
+	if err == nil {
+		t.Fatal("want error for http:// token_uri, got nil")
+	}
+}
+
+func TestNewServiceAccountTokenSource_TokenURIRelativeRejected(t *testing.T) {
+	_, pemStr := generateTestKey(t)
+	_, err := NewServiceAccountTokenSource(serviceAccountJSON(t, "sa@example.com", pemStr, "/token"))
+	if err == nil {
+		t.Fatal("want error for relative token_uri, got nil")
+	}
+}
+
+func TestNewServiceAccountTokenSource_TokenURIHTTPSAccepted(t *testing.T) {
+	_, pemStr := generateTestKey(t)
+	ts, err := NewServiceAccountTokenSource(serviceAccountJSON(t, "sa@example.com", pemStr, "https://oauth2.example.com/token"))
+	if err != nil {
+		t.Fatalf("NewServiceAccountTokenSource: %v", err)
+	}
+	if got := ts.tokenURL; got != "https://oauth2.example.com/token" {
+		t.Errorf("tokenURL = %q, want %q", got, "https://oauth2.example.com/token")
+	}
+}
+
 func TestServiceAccountTokenSource_DefaultTokenURL(t *testing.T) {
 	_, pemStr := generateTestKey(t)
 	ts, err := NewServiceAccountTokenSource(serviceAccountJSON(t, "sa@example.com", pemStr, ""))

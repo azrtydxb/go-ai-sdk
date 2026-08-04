@@ -13,7 +13,7 @@ import (
 )
 
 func init() {
-	retry.BaseDelay = time.Millisecond
+	retry.SetBaseDelayForTest(time.Millisecond)
 }
 
 // TestEmbedManyBatchesAndReassembles from the brief

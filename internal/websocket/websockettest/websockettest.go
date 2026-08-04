@@ -29,6 +29,14 @@ import (
 
 const wsMagic = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
+// maxFrameLength caps the declared payload length ReadMessageBuf will
+// allocate for. Without a cap, a misbehaving (or adversarial) client
+// fixture could declare an arbitrarily large frame length and make the
+// test server allocate that much memory before ever reading the bytes,
+// OOMing the test process. 8 MiB comfortably covers any legitimate test
+// fixture payload.
+const maxFrameLength = 8 << 20
+
 // WebSocket opcodes, RFC 6455 §11.8.
 const (
 	OpContinuation = 0x0
@@ -163,6 +171,10 @@ func ReadMessageBuf(br *bufio.Reader) (opcode int, payload []byte, err error) {
 			return 0, nil, err
 		}
 		length = binary.BigEndian.Uint64(ext[:])
+	}
+
+	if length > maxFrameLength {
+		return 0, nil, fmt.Errorf("websockettest: declared frame length %d exceeds cap of %d bytes", length, maxFrameLength)
 	}
 
 	var maskKey [4]byte

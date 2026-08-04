@@ -8,8 +8,24 @@ import (
 	"time"
 )
 
-// BaseDelay is the base delay for exponential backoff. Can be modified for testing.
-var BaseDelay = 500 * time.Millisecond
+// baseDelay is the base delay for exponential backoff. It is a
+// package-private test-tuning knob: mutating it concurrently with an
+// in-flight retry would be a data race, so production code must never write
+// it. Tests that need a faster backoff call SetBaseDelayForTest instead of
+// assigning to it directly.
+var baseDelay = 500 * time.Millisecond
+
+// SetBaseDelayForTest overrides the base delay used by calculateBackoff and
+// returns a function that restores the previous value. It exists so tests
+// (in this package and others, e.g. package ai) can speed up backoff during
+// retry tests without a data race on a mutable exported global. Test-only;
+// not safe for concurrent use, and callers must not mutate baseDelay while
+// a retry.Do call is in flight elsewhere.
+func SetBaseDelayForTest(d time.Duration) (restore func()) {
+	prev := baseDelay
+	baseDelay = d
+	return func() { baseDelay = prev }
+}
 
 // Retryable is an interface for errors that can be checked for retryability.
 type Retryable interface {
@@ -99,30 +115,31 @@ func Do[T any](ctx context.Context, maxRetries int, fn func() (T, error)) (T, er
 // Uses exponential backoff (base 500ms, doubling) with full jitter and 8s cap.
 func calculateBackoff(attempt int) time.Duration {
 	maxDelay := 8 * time.Second
-	baseDelay := BaseDelay
+	delay := baseDelay
 
 	// Exponentially increase delay, but stop before overflow and cap at maxDelay.
 	// For each attempt, double the delay, but bail to maxDelay once we reach or exceed it.
 	for i := 0; i < attempt; i++ {
-		if baseDelay >= maxDelay {
-			baseDelay = maxDelay
+		if delay >= maxDelay {
+			delay = maxDelay
 			break
 		}
 		// Double the delay, but cap to maxDelay to prevent overflow
-		if baseDelay > maxDelay/2 {
-			baseDelay = maxDelay
+		if delay > maxDelay/2 {
+			delay = maxDelay
 			break
 		}
-		baseDelay *= 2
+		delay *= 2
 	}
 
-	// rand.Int63n panics for n <= 0; BaseDelay is an exported var that tests
-	// may set to 0 (or less) to speed up backoff, so guard rather than panic.
-	if baseDelay <= 0 {
+	// rand.Int63n panics for n <= 0; baseDelay is a test-tuning knob that may
+	// be set to 0 (or less) via SetBaseDelayForTest to speed up backoff, so
+	// guard rather than panic.
+	if delay <= 0 {
 		return 0
 	}
 
-	// Full jitter: random value between 0 and baseDelay
-	jitter := time.Duration(rand.Int63n(baseDelay.Nanoseconds())) * time.Nanosecond
+	// Full jitter: random value between 0 and delay
+	jitter := time.Duration(rand.Int63n(delay.Nanoseconds())) * time.Nanosecond
 	return jitter
 }

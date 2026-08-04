@@ -97,6 +97,8 @@ func NewServiceAccountTokenSource(keyJSON []byte) (*ServiceAccountTokenSource, e
 	tokenURL := key.TokenURI
 	if tokenURL == "" {
 		tokenURL = defaultTokenURL
+	} else if err := validateTokenURL(tokenURL); err != nil {
+		return nil, fmt.Errorf("gauth: %w", err)
 	}
 
 	return &ServiceAccountTokenSource{
@@ -105,6 +107,24 @@ func NewServiceAccountTokenSource(keyJSON []byte) (*ServiceAccountTokenSource, e
 		httpClient: http.DefaultClient,
 		tokenURL:   tokenURL,
 	}, nil
+}
+
+// validateTokenURL rejects any token_uri that is not an absolute https://
+// URL. The token endpoint URL comes straight from the (untrusted) service
+// -account key JSON and is used both as the POST target for the JWT bearer
+// grant and as the JWT's "aud" claim; a tampered key with an http://,
+// relative, or empty token_uri could redirect the signed assertion to an
+// arbitrary or plaintext host. Real Google-issued keys always carry an
+// https token_uri, so this rejects only malformed/tampered input.
+func validateTokenURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid token_uri %q: %w", raw, err)
+	}
+	if u.Scheme != "https" || u.Host == "" {
+		return fmt.Errorf("token_uri must be an absolute https:// URL, got %q", raw)
+	}
+	return nil
 }
 
 // NewServiceAccountTokenSourceFromFile reads and parses a service-account

@@ -61,9 +61,7 @@ func TestDoHonorsContext(t *testing.T) {
 
 func TestBackoffWithFastDelay(t *testing.T) {
 	// Save original and restore in cleanup
-	originalDelay := BaseDelay
-	t.Cleanup(func() { BaseDelay = originalDelay })
-	BaseDelay = time.Millisecond
+	t.Cleanup(SetBaseDelayForTest(time.Millisecond))
 
 	start := time.Now()
 	calls := 0
@@ -83,9 +81,7 @@ func TestBackoffWithFastDelay(t *testing.T) {
 
 func TestDoWrapsRetryableErrors(t *testing.T) {
 	// Verify that errors.As detects wrapped Retryable errors.
-	originalDelay := BaseDelay
-	t.Cleanup(func() { BaseDelay = originalDelay })
-	BaseDelay = time.Microsecond
+	t.Cleanup(SetBaseDelayForTest(time.Microsecond))
 
 	baseErr := &retryableErr{true}
 	wrappedErr := fmt.Errorf("wrapped: %w", baseErr)
@@ -109,9 +105,7 @@ func TestDoWrapsRetryableErrors(t *testing.T) {
 }
 
 func TestCalculateBackoffZeroBaseDelayNoPanic(t *testing.T) {
-	originalDelay := BaseDelay
-	t.Cleanup(func() { BaseDelay = originalDelay })
-	BaseDelay = 0
+	t.Cleanup(SetBaseDelayForTest(0))
 
 	delay := calculateBackoff(0)
 	if delay != 0 {
@@ -120,9 +114,7 @@ func TestCalculateBackoffZeroBaseDelayNoPanic(t *testing.T) {
 }
 
 func TestCalculateBackoffNegativeBaseDelayNoPanic(t *testing.T) {
-	originalDelay := BaseDelay
-	t.Cleanup(func() { BaseDelay = originalDelay })
-	BaseDelay = -1
+	t.Cleanup(SetBaseDelayForTest(-1))
 
 	delay := calculateBackoff(3)
 	if delay != 0 {
@@ -139,9 +131,7 @@ func TestDoManyRetriesDoesNotAccumulateTimers(t *testing.T) {
 	// (which would make this a slow, flaky wall-clock test); the point
 	// here is simply that Do completes promptly and correctly across many
 	// iterations, not to measure backoff timing precisely.
-	originalDelay := BaseDelay
-	t.Cleanup(func() { BaseDelay = originalDelay })
-	BaseDelay = time.Microsecond
+	t.Cleanup(SetBaseDelayForTest(time.Microsecond))
 
 	calls := 0
 	start := time.Now()
@@ -165,9 +155,7 @@ func TestDoManyRetriesDoesNotAccumulateTimers(t *testing.T) {
 
 func TestCalculateBackoffHighAttempt(t *testing.T) {
 	// Test that calculateBackoff doesn't panic or overflow for large attempt numbers.
-	originalDelay := BaseDelay
-	t.Cleanup(func() { BaseDelay = originalDelay })
-	BaseDelay = time.Millisecond
+	t.Cleanup(SetBaseDelayForTest(time.Millisecond))
 
 	// Test high attempt count (40+) that would overflow with bit shift.
 	delay := calculateBackoff(40)

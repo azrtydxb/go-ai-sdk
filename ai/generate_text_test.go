@@ -12,7 +12,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	retry.BaseDelay = time.Millisecond
+	retry.SetBaseDelayForTest(time.Millisecond)
 	m.Run()
 }
 
