@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/websocket"
+	"github.com/azrtydxb/go-ai-sdk/internal/wsstream"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -65,33 +66,21 @@ func (m *streamingTranscriptionModel) StreamTranscribe(ctx context.Context, call
 		return nil, fmt.Errorf("openai: send transcription_session.update: %w", err)
 	}
 
-	s := &realtimeStream{
-		ctx:          ctx,
-		conn:         conn,
-		events:       make(chan provider.TranscriptEvent, 32),
-		closeCh:      make(chan struct{}),
-		readLoopDone: make(chan struct{}),
-	}
-	go s.readLoop()
-	return s, nil
+	ws := wsstream.New(wsstream.Config[provider.TranscriptEvent]{
+		Ctx:    ctx,
+		Conn:   conn,
+		Decode: decodeRealtimeTranscriptionMessage,
+	})
+	return &realtimeStream{stream: ws, readLoopDone: ws.Done()}, nil
 }
 
 // realtimeDialURL derives the wss:// (or ws://, for test fixtures) URL for
 // OpenAI's Realtime endpoint in transcription-intent mode from baseURL.
 func realtimeDialURL(baseURL string) (string, error) {
-	u, err := url.Parse(baseURL)
+	u, err := wsstream.DialURL(baseURL, "/realtime")
 	if err != nil {
-		return "", fmt.Errorf("openai: parse base URL: %w", err)
+		return "", fmt.Errorf("openai: %w", err)
 	}
-	switch u.Scheme {
-	case "http":
-		u.Scheme = "ws"
-	case "https":
-		u.Scheme = "wss"
-	default:
-		return "", fmt.Errorf("openai: unsupported base URL scheme %q", u.Scheme)
-	}
-	u.Path = strings.TrimRight(u.Path, "/") + "/realtime"
 	q := url.Values{}
 	q.Set("intent", "transcription")
 	u.RawQuery = q.Encode()
@@ -152,28 +141,22 @@ func audioFormatFor(mediaType string) string {
 }
 
 // realtimeStream implements provider.TranscriptionStream against an open
-// OpenAI Realtime WebSocket connection in transcription mode.
+// OpenAI Realtime WebSocket connection in transcription mode, as a thin
+// wrapper over the shared wsstream machinery
+// (dial/readLoop/Close/Err/Events).
 type realtimeStream struct {
-	ctx    context.Context // governs the reader goroutine's Read calls
-	conn   *websocket.Conn
-	events chan provider.TranscriptEvent
+	stream *wsstream.Stream[provider.TranscriptEvent]
 
-	// closeCh is closed exactly once, by Close(), to unblock readLoop if
-	// it's parked trying to send a buffered event to a consumer that has
-	// already stopped ranging over Events() without cancelling ctx.
-	closeCh chan struct{}
-	// readLoopDone is closed when readLoop returns, after events is
-	// closed. Not part of the public interface; exists so tests (and
-	// Close, defensively) can observe that the reader goroutine has
-	// actually exited rather than just that events was closed.
-	readLoopDone chan struct{}
-
-	writeMu       sync.Mutex // serializes Send/CloseSend/Close (conn write contract)
-	closed        bool
+	// writeMu serializes the closeSendSent guard below against concurrent
+	// Send/CloseSend calls; the underlying conn write itself is separately
+	// serialized against Close inside stream.Send.
+	writeMu       sync.Mutex
 	closeSendSent bool
 
-	errMu sync.Mutex
-	err   error
+	// readLoopDone mirrors stream.Done(): not part of the public
+	// interface, but tests observe it directly to confirm the reader
+	// goroutine has actually exited, not just that Events() stopped.
+	readLoopDone <-chan struct{}
 }
 
 // Send implements provider.TranscriptionStream by base64-encoding audio
@@ -181,7 +164,7 @@ type realtimeStream struct {
 func (s *realtimeStream) Send(ctx context.Context, audio []byte) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	if s.closed {
+	if s.stream.Closed() {
 		return errors.New("openai: Send called after Close")
 	}
 	if s.closeSendSent {
@@ -194,7 +177,7 @@ func (s *realtimeStream) Send(ctx context.Context, audio []byte) error {
 	if err != nil {
 		return fmt.Errorf("openai: encode input_audio_buffer.append: %w", err)
 	}
-	return s.conn.WriteText(ctx, msg)
+	return s.stream.Send(ctx, websocket.TextMessage, msg)
 }
 
 // CloseSend implements provider.TranscriptionStream by sending
@@ -202,11 +185,11 @@ func (s *realtimeStream) Send(ctx context.Context, audio []byte) error {
 func (s *realtimeStream) CloseSend(ctx context.Context) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	if s.closed || s.closeSendSent {
+	if s.stream.Closed() || s.closeSendSent {
 		return nil
 	}
 	s.closeSendSent = true
-	return s.conn.WriteText(ctx, []byte(`{"type":"input_audio_buffer.commit"}`))
+	return s.stream.Send(ctx, websocket.TextMessage, []byte(`{"type":"input_audio_buffer.commit"}`))
 }
 
 // Close implements provider.TranscriptionStream by aborting the connection
@@ -216,102 +199,19 @@ func (s *realtimeStream) CloseSend(ctx context.Context) error {
 // (matching a peer-initiated clean close) rather than surfacing whatever
 // error the now-closed connection produces on its next Read.
 func (s *realtimeStream) Close() error {
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	if s.closed {
-		return nil
-	}
-	s.closed = true
-	close(s.closeCh)
-	return s.conn.Close(websocket.CloseNormal, "")
-}
-
-func (s *realtimeStream) isClosed() bool {
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	return s.closed
+	return s.stream.Close()
 }
 
 // Events implements provider.TranscriptionStream. Single use: it ranges
 // over the channel the reader goroutine populates, which is closed exactly
 // once when the stream ends.
 func (s *realtimeStream) Events() iter.Seq[provider.TranscriptEvent] {
-	return func(yield func(provider.TranscriptEvent) bool) {
-		for e := range s.events {
-			if !yield(e) {
-				return
-			}
-		}
-	}
+	return s.stream.Events()
 }
 
 // Err implements provider.TranscriptionStream.
 func (s *realtimeStream) Err() error {
-	s.errMu.Lock()
-	defer s.errMu.Unlock()
-	return s.err
-}
-
-func (s *realtimeStream) setErr(err error) {
-	s.errMu.Lock()
-	if s.err == nil {
-		s.err = err
-	}
-	s.errMu.Unlock()
-}
-
-// readLoop pumps conn.Read into s.events until the stream ends, then closes
-// s.events. It runs in its own goroutine, started by StreamTranscribe.
-func (s *realtimeStream) readLoop() {
-	defer close(s.readLoopDone)
-	defer close(s.events)
-	// On a clean non-socket end (an "error" event, or a decode/error
-	// terminal) the underlying conn is still open until something closes
-	// it. Without this, the TCP connection lingers until the caller
-	// eventually calls Close() (if ever) instead of being torn down as
-	// soon as the stream logically ends. Conn.Close is idempotent, so this
-	// is a no-op on the paths that already shut the conn down themselves
-	// (a *websocket.CloseError or an abnormal closure).
-	defer s.conn.Close(websocket.CloseNormal, "")
-	for {
-		mt, data, err := s.conn.Read(s.ctx)
-		if err != nil {
-			if !s.isClosed() {
-				var ce *websocket.CloseError
-				if !errors.As(err, &ce) {
-					s.setErr(err)
-				}
-				// *CloseError (server-initiated close) and a locally
-				// initiated Close() both end the stream cleanly (nil
-				// Err()); any other error (network failure, ctx
-				// cancellation) is reported via Err().
-			}
-			return
-		}
-		if mt != websocket.TextMessage {
-			continue // the Realtime API only sends JSON text messages
-		}
-
-		events, perr := parseRealtimeMessage(data)
-		for _, e := range events {
-			select {
-			case s.events <- e:
-			case <-s.ctx.Done():
-				s.setErr(s.ctx.Err())
-				return
-			case <-s.closeCh:
-				// Close() was called while an event was pending delivery
-				// to a consumer that has stopped (or never started)
-				// ranging over Events() — without this case, this send
-				// would block forever, leaking the goroutine.
-				return
-			}
-		}
-		if perr != nil {
-			s.setErr(perr)
-			return
-		}
-	}
+	return s.stream.Err()
 }
 
 // oaWireMessage matches the OpenAI Realtime API event shapes relevant to
@@ -327,26 +227,34 @@ type oaWireMessage struct {
 	} `json:"error"`
 }
 
-// parseRealtimeMessage decodes one OpenAI Realtime API event, returning any
-// TranscriptEvents it produced and a terminal error (for "error" events, or
-// a decode failure).
-func parseRealtimeMessage(data []byte) (events []provider.TranscriptEvent, err error) {
+// decodeRealtimeTranscriptionMessage is the wsstream.Config.Decode callback
+// for an OpenAI Realtime transcription connection: it ignores non-text
+// messages (the Realtime API only sends JSON text messages) and otherwise
+// decodes one event, returning any TranscriptEvents it produced. It never
+// reports terminal=true: an "error" event (or a decode failure) ends the
+// stream via the returned error instead, matching prior behavior where
+// nothing about this stream type had a clean-terminal signal distinct from
+// an error.
+func decodeRealtimeTranscriptionMessage(messageType int, data []byte) (events []provider.TranscriptEvent, terminal bool, err error) {
+	if messageType != websocket.TextMessage {
+		return nil, false, nil
+	}
 	var msg oaWireMessage
 	if err := json.Unmarshal(data, &msg); err != nil {
-		return nil, fmt.Errorf("openai: decode realtime message: %w", err)
+		return nil, false, fmt.Errorf("openai: decode realtime message: %w", err)
 	}
 
 	switch msg.Type {
 	case "conversation.item.input_audio_transcription.delta":
 		if msg.Delta == "" {
-			return nil, nil
+			return nil, false, nil
 		}
-		return []provider.TranscriptEvent{{Text: msg.Delta, Final: false}}, nil
+		return []provider.TranscriptEvent{{Text: msg.Delta, Final: false}}, false, nil
 	case "conversation.item.input_audio_transcription.completed":
-		return []provider.TranscriptEvent{{Text: msg.Transcript, Final: true}}, nil
+		return []provider.TranscriptEvent{{Text: msg.Transcript, Final: true}}, false, nil
 	case "error":
-		return nil, fmt.Errorf("openai: realtime error: %s", msg.Error.Message)
+		return nil, false, fmt.Errorf("openai: realtime error: %s", msg.Error.Message)
 	default:
-		return nil, nil
+		return nil, false, nil
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/websocket"
+	"github.com/azrtydxb/go-ai-sdk/internal/wsstream"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -56,15 +57,12 @@ func (m *streamingTranscriptionModel) StreamTranscribe(ctx context.Context, call
 		return nil, fmt.Errorf("deepgram: dial live transcription: %w", err)
 	}
 
-	s := &liveStream{
-		ctx:          ctx,
-		conn:         conn,
-		events:       make(chan provider.TranscriptEvent, 32),
-		closeCh:      make(chan struct{}),
-		readLoopDone: make(chan struct{}),
-	}
-	go s.readLoop()
-	return s, nil
+	ws := wsstream.New(wsstream.Config[provider.TranscriptEvent]{
+		Ctx:    ctx,
+		Conn:   conn,
+		Decode: decodeDeepgramMessage,
+	})
+	return &liveStream{stream: ws, readLoopDone: ws.Done()}, nil
 }
 
 // buildDialURL derives the wss:// (or ws://, for test fixtures) URL for
@@ -73,19 +71,10 @@ func (m *streamingTranscriptionModel) StreamTranscribe(ctx context.Context, call
 // merging call.ProviderOptions["deepgram"] as extra query params (same
 // convention as the REST Transcribe path).
 func buildDialURL(baseURL, modelID string, call provider.StreamTranscriptionCall) (string, error) {
-	u, err := url.Parse(baseURL)
+	u, err := wsstream.DialURL(baseURL, "/v1/listen")
 	if err != nil {
-		return "", fmt.Errorf("deepgram: parse base URL: %w", err)
+		return "", fmt.Errorf("deepgram: %w", err)
 	}
-	switch u.Scheme {
-	case "http":
-		u.Scheme = "ws"
-	case "https":
-		u.Scheme = "wss"
-	default:
-		return "", fmt.Errorf("deepgram: unsupported base URL scheme %q", u.Scheme)
-	}
-	u.Path = strings.TrimRight(u.Path, "/") + "/v1/listen"
 
 	q := url.Values{}
 	q.Set("model", modelID)
@@ -190,28 +179,21 @@ func addOptionsQuery(q url.Values, opts map[string]any) {
 const closeStreamMessage = `{"type":"CloseStream"}`
 
 // liveStream implements provider.TranscriptionStream against an open
-// Deepgram live-transcription WebSocket connection.
+// Deepgram live-transcription WebSocket connection, as a thin wrapper over
+// the shared wsstream machinery (dial/readLoop/Close/Err/Events).
 type liveStream struct {
-	ctx    context.Context // governs the reader goroutine's Read calls
-	conn   *websocket.Conn
-	events chan provider.TranscriptEvent
+	stream *wsstream.Stream[provider.TranscriptEvent]
 
-	// closeCh is closed exactly once, by Close(), to unblock readLoop if
-	// it's parked trying to send a buffered event to a consumer that has
-	// already stopped ranging over Events() without cancelling ctx.
-	closeCh chan struct{}
-	// readLoopDone is closed when readLoop returns, after events is
-	// closed. Not part of the public interface; exists so tests (and
-	// Close, defensively) can observe that the reader goroutine has
-	// actually exited rather than just that events was closed.
-	readLoopDone chan struct{}
-
-	writeMu       sync.Mutex // serializes Send/CloseSend/Close (conn write contract)
-	closed        bool
+	// writeMu serializes the closeSendSent guard below against concurrent
+	// Send/CloseSend calls; the underlying conn write itself is separately
+	// serialized against Close inside stream.Send.
+	writeMu       sync.Mutex
 	closeSendSent bool
 
-	errMu sync.Mutex
-	err   error
+	// readLoopDone mirrors stream.Done(): not part of the public
+	// interface, but tests observe it directly to confirm the reader
+	// goroutine has actually exited, not just that Events() stopped.
+	readLoopDone <-chan struct{}
 }
 
 // Send implements provider.TranscriptionStream by writing audio as a binary
@@ -219,13 +201,13 @@ type liveStream struct {
 func (s *liveStream) Send(ctx context.Context, audio []byte) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	if s.closed {
+	if s.stream.Closed() {
 		return errors.New("deepgram: Send called after Close")
 	}
 	if s.closeSendSent {
 		return errors.New("deepgram: Send called after CloseSend")
 	}
-	return s.conn.WriteBinary(ctx, audio)
+	return s.stream.Send(ctx, websocket.BinaryMessage, audio)
 }
 
 // CloseSend implements provider.TranscriptionStream by sending Deepgram's
@@ -233,11 +215,11 @@ func (s *liveStream) Send(ctx context.Context, audio []byte) error {
 func (s *liveStream) CloseSend(ctx context.Context) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	if s.closed || s.closeSendSent {
+	if s.stream.Closed() || s.closeSendSent {
 		return nil
 	}
 	s.closeSendSent = true
-	return s.conn.WriteText(ctx, []byte(closeStreamMessage))
+	return s.stream.Send(ctx, websocket.TextMessage, []byte(closeStreamMessage))
 }
 
 // Close implements provider.TranscriptionStream by aborting the connection
@@ -247,105 +229,19 @@ func (s *liveStream) CloseSend(ctx context.Context) error {
 // (matching a peer-initiated clean close) rather than surfacing whatever
 // error the now-closed connection produces on its next Read.
 func (s *liveStream) Close() error {
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	if s.closed {
-		return nil
-	}
-	s.closed = true
-	close(s.closeCh)
-	return s.conn.Close(websocket.CloseNormal, "")
-}
-
-func (s *liveStream) isClosed() bool {
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	return s.closed
+	return s.stream.Close()
 }
 
 // Events implements provider.TranscriptionStream. Single use: it ranges
 // over the channel the reader goroutine populates, which is closed exactly
 // once when the stream ends.
 func (s *liveStream) Events() iter.Seq[provider.TranscriptEvent] {
-	return func(yield func(provider.TranscriptEvent) bool) {
-		for e := range s.events {
-			if !yield(e) {
-				return
-			}
-		}
-	}
+	return s.stream.Events()
 }
 
 // Err implements provider.TranscriptionStream.
 func (s *liveStream) Err() error {
-	s.errMu.Lock()
-	defer s.errMu.Unlock()
-	return s.err
-}
-
-func (s *liveStream) setErr(err error) {
-	s.errMu.Lock()
-	if s.err == nil {
-		s.err = err
-	}
-	s.errMu.Unlock()
-}
-
-// readLoop pumps conn.Read into s.events until the stream ends, then closes
-// s.events. It runs in its own goroutine, started by StreamTranscribe.
-func (s *liveStream) readLoop() {
-	defer close(s.readLoopDone)
-	defer close(s.events)
-	// On a clean non-socket end (a "Metadata" message, or a decode/error
-	// terminal) the underlying conn is still open until something closes
-	// it. Without this, the TCP connection lingers until the caller
-	// eventually calls Close() (if ever) instead of being torn down as
-	// soon as the stream logically ends. Conn.Close is idempotent, so this
-	// is a no-op on the paths that already shut the conn down themselves
-	// (a *websocket.CloseError or an abnormal closure).
-	defer s.conn.Close(websocket.CloseNormal, "")
-	for {
-		mt, data, err := s.conn.Read(s.ctx)
-		if err != nil {
-			if !s.isClosed() {
-				var ce *websocket.CloseError
-				if !errors.As(err, &ce) {
-					s.setErr(err)
-				}
-				// *CloseError (server-initiated close) and a locally
-				// initiated Close() both end the stream cleanly (nil
-				// Err()); any other error (network failure, ctx
-				// cancellation) is reported via Err().
-			}
-			return
-		}
-		if mt != websocket.TextMessage {
-			continue // Deepgram only sends JSON text messages
-		}
-
-		events, terminal, perr := parseDeepgramMessage(data)
-		for _, e := range events {
-			select {
-			case s.events <- e:
-			case <-s.ctx.Done():
-				s.setErr(s.ctx.Err())
-				return
-			case <-s.closeCh:
-				// Close() was called while an event was pending delivery
-				// to a consumer that has stopped (or never started)
-				// ranging over Events() — without this case, this send
-				// would block forever, leaking the goroutine.
-				return
-			}
-		}
-		if perr != nil {
-			s.setErr(perr)
-			return
-		}
-		if terminal {
-			return
-		}
-	}
+	return s.stream.Err()
 }
 
 // dgWireMessage matches Deepgram's live-transcription message shapes: a
@@ -364,10 +260,15 @@ type dgWireMessage struct {
 	Duration float64 `json:"duration"`
 }
 
-// parseDeepgramMessage decodes one Deepgram live-transcription message,
-// returning any TranscriptEvents it produced, whether it marks a clean end
-// of stream (a "Metadata" message), and a decode error if any.
-func parseDeepgramMessage(data []byte) (events []provider.TranscriptEvent, terminal bool, err error) {
+// decodeDeepgramMessage is the wsstream.Config.Decode callback for a
+// Deepgram live-transcription connection: it ignores non-text messages
+// (Deepgram only sends JSON text messages) and otherwise decodes one
+// message, returning any TranscriptEvents it produced, whether it marks a
+// clean end of stream (a "Metadata" message), and a decode error if any.
+func decodeDeepgramMessage(messageType int, data []byte) (events []provider.TranscriptEvent, terminal bool, err error) {
+	if messageType != websocket.TextMessage {
+		return nil, false, nil
+	}
 	var msg dgWireMessage
 	if err := json.Unmarshal(data, &msg); err != nil {
 		return nil, false, fmt.Errorf("deepgram: decode stream message: %w", err)
