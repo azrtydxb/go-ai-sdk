@@ -78,13 +78,14 @@ exists — the SDK's public API is implemented and documented end-to-end (see
 
 ## Versioning
 
-`go-ai-sdk` is pre-1.0 (current release: `v0.2.0`): the
-public API described throughout this tree is implemented and tested
-end-to-end, but may still change before `v1.0.0`. Once the project reaches
-1.0, it follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-[`CHANGELOG.md`](../CHANGELOG.md) tracks every notable change, release or
-not — check it for the current status and any breaking changes between
-versions. `v0.2.0` carries one breaking change: `ai.Telemetry.OnSpanStart`
+`go-ai-sdk` is pre-1.0: the public API described throughout this tree is
+implemented and tested end-to-end, but may still change before `v1.0.0`.
+Once the project reaches 1.0, it follows
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html). For the current
+release and every notable change — release or not —
+see [`CHANGELOG.md`](../CHANGELOG.md) and the
+[GitHub releases](https://github.com/azrtydxb/go-ai-sdk/releases). The only
+breaking change to date landed in `v0.2.0`: `ai.Telemetry.OnSpanStart`
 gained a leading `ctx` parameter (see
 [Telemetry](core/telemetry.md#telemetry-and-spaninfo)).
 

@@ -62,7 +62,7 @@ env var table. A few providers need more than a bare API key:
 
 If a request fails with an auth-shaped error, it surfaces as
 `*ai.APICallError` — check `StatusCode` and the provider's raw response
-body (see [Errors and retries](core/errors-and-retries.md#apicallerror)).
+body (see [Errors and retries](core/errors-and-retries.md#aiapicallerror)).
 
 ## NoObjectGeneratedError (structured output)
 

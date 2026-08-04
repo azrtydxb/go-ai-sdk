@@ -14,23 +14,22 @@ zero-dependency: importing `contrib/otel` pulls in
 for consumers that actually want OTel integration. Anyone who doesn't use
 this bridge never sees those dependencies show up in their build.
 
-`contrib/otel/go.mod` has a `replace github.com/azrtydxb/go-ai-sdk =>
-../..` directive so it builds against the local root module during
-development. This replace is dev-only and is meant to be dropped (or at
-least made irrelevant) once both modules are tagged together: on this
-branch, `contrib/otel/go.mod` still requires root
-`github.com/azrtydxb/go-ai-sdk v0.1.0`, a version that predates this
-wave's `OnSpanStart(ctx, ...)`/`CorrelationID` additions this bridge
-depends on. Until `contrib/otel/go.mod`'s require line is bumped to
-`v0.2.0` **and** a matching `contrib/otel/v0.2.0` tag is cut — see
-[the v6 parity final audit's release procedure](../../docs/superpowers/specs/2026-08-03-v6-parity-final-audit.md#release-procedure-root-v020--contribotel-v020)
-for the exact steps and ordering — an external consumer running `go get
-.../contrib/otel` resolves root `v0.1.0` and fails to compile. Until that
-bump-and-tag lands, external consumers must either add their own
-`replace github.com/azrtydxb/go-ai-sdk` directive (pinned to `v0.2.0` or
-later, or a local checkout) or depend on a post-bump commit pseudo-version
-of `contrib/otel` directly. In short: this module targets root `v0.2.0+`,
-but that isn't resolvable through normal tagged-module resolution yet.
+`contrib/otel/go.mod` requires root `github.com/azrtydxb/go-ai-sdk v0.2.0`
+(the release that introduced the `OnSpanStart(ctx, ...)` /
+`SpanInfo.CorrelationID` API this bridge depends on) and is published as
+the tagged nested module `contrib/otel/v0.2.0`, so external consumers can
+`go get github.com/azrtydxb/go-ai-sdk/contrib/otel` and have it resolve
+through normal tagged-module resolution — no `replace` directive needed.
+Root releases after `v0.2.0` are API-compatible for this bridge, so the
+pinned `v0.2.0` require continues to work against them.
+
+When developing against an unreleased local root (e.g. iterating on both
+modules together), add a dev-only `replace github.com/azrtydxb/go-ai-sdk
+=> ../..` to `contrib/otel/go.mod` so it builds against your working tree;
+drop it before tagging. The release procedure for cutting a new
+`contrib/otel` tag against a new root version (tag root first, then bump
+the require and tag the nested module) is recorded in
+[the v6 parity final audit](../../docs/superpowers/specs/2026-08-03-v6-parity-final-audit.md#release-procedure-root-v020--contribotel-v020).
 
 ## Usage
 
