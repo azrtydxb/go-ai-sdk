@@ -692,6 +692,11 @@ func (t *httpTransport) getSessionID() string {
 	return t.sessionID
 }
 
+// setSessionID is safe under concurrent Send (mu-guarded), but if the server
+// rotates the session mid-flight, concurrent responses can race here and the
+// last write wins arbitrarily — a benign, pre-existing race window that
+// SelfSerializes' removal of Client's write lock does not change the nature
+// of (session id was never ordered against Send in the first place).
 func (t *httpTransport) setSessionID(id string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()

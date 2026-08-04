@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -339,6 +340,152 @@ func TestBusyReplyDropsWithoutWedgingRecvLoop(t *testing.T) {
 	close(release)
 	for i := 0; i < maxConcurrentServerDispatch; i++ {
 		recvServerResponse(t, server)
+	}
+}
+
+// concurrencyTrackingTransport is a minimal in-memory Transport whose Send
+// records how many goroutines are inside it at once (via an atomic
+// increment-sleep-decrement around the body), tracking the maximum observed
+// concurrency. It does not implement selfSerializingTransport, so a Client
+// built on it must serialize Send itself if the sendSem gating in
+// Client.call is doing its job. Used by
+// TestClientSerializesSendForNonSelfSerializingTransport and (wrapped by
+// selfSerializingConcurrencyTransport) by
+// TestClientDoesNotSerializeSendForSelfSerializingTransport — together they
+// pin the actual branch behavior of the `!c.selfSerializes` gate, which
+// framedTransport-over-io.Pipe cannot: framedTransport has its own internal
+// writeMu that would serialize writes regardless of whether Client holds
+// sendSem, so a test built only on framedTransport can't distinguish
+// "Client serialized it" from "the transport would have serialized it
+// anyway."
+type concurrencyTrackingTransport struct {
+	recv chan json.RawMessage
+
+	cur int32
+	max int32
+}
+
+func newConcurrencyTrackingTransport() *concurrencyTrackingTransport {
+	return &concurrencyTrackingTransport{recv: make(chan json.RawMessage, 64)}
+}
+
+func (t *concurrencyTrackingTransport) Send(ctx context.Context, msg json.RawMessage) error {
+	n := atomic.AddInt32(&t.cur, 1)
+	for {
+		old := atomic.LoadInt32(&t.max)
+		if n <= old || atomic.CompareAndSwapInt32(&t.max, old, n) {
+			break
+		}
+	}
+	// Hold the "in Send" window open long enough that concurrent Send calls,
+	// if the Client allowed them, would reliably overlap here rather than
+	// racing past each other before either goroutine records its entry.
+	time.Sleep(20 * time.Millisecond)
+	atomic.AddInt32(&t.cur, -1)
+
+	var req struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(msg, &req); err != nil {
+		return err
+	}
+	resp := json.RawMessage(fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":{}}`, req.ID))
+	select {
+	case t.recv <- resp:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (t *concurrencyTrackingTransport) Receive(ctx context.Context) (json.RawMessage, error) {
+	select {
+	case m := <-t.recv:
+		return m, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (t *concurrencyTrackingTransport) Close() error { return nil }
+
+// selfSerializingConcurrencyTransport wraps concurrencyTrackingTransport and
+// additionally implements selfSerializingTransport, reporting true — the
+// control case proving the gate in Client.call actually branches on the
+// capability rather than e.g. always serializing regardless of it.
+type selfSerializingConcurrencyTransport struct {
+	*concurrencyTrackingTransport
+}
+
+func (t *selfSerializingConcurrencyTransport) SelfSerializes() bool { return true }
+
+// runConcurrentCalls fires n Client.call invocations from n goroutines,
+// released together via a shared start barrier so they race Send as
+// closely to simultaneously as goroutine scheduling allows, then waits for
+// all of them to complete.
+func runConcurrentCalls(t *testing.T, c *Client, n int) {
+	t.Helper()
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+			defer cancel()
+			if _, err := c.call(ctx, fmt.Sprintf("m-%d", i), nil); err != nil {
+				t.Errorf("call %d: %v", i, err)
+			}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+}
+
+// TestClientSerializesSendForNonSelfSerializingTransport pins the load-
+// bearing half of the sendSem gate in Client.call: for a Transport that does
+// NOT implement selfSerializingTransport (the exported Transport interface's
+// documented at-most-one-writer contract for third-party transports, which
+// stdio's framedTransport also relies on), Client must never have more than
+// one Send in flight at a time, regardless of how many concurrent calls are
+// made. A regression that dropped or misapplied the `!c.selfSerializes`
+// guard would let this fail (max observed concurrency > 1).
+func TestClientSerializesSendForNonSelfSerializingTransport(t *testing.T) {
+	tr := newConcurrencyTrackingTransport()
+	c := NewClient(tr)
+	defer c.Close()
+	if c.selfSerializes {
+		t.Fatal("Client.selfSerializes = true for a transport that doesn't implement selfSerializingTransport")
+	}
+
+	runConcurrentCalls(t, c, 10)
+
+	if max := atomic.LoadInt32(&tr.max); max != 1 {
+		t.Fatalf("max observed concurrent Send = %d, want 1 (Client must serialize Send for a non-self-serializing transport)", max)
+	}
+}
+
+// TestClientDoesNotSerializeSendForSelfSerializingTransport is the control
+// for the test above: with the same underlying transport but wrapped to
+// report SelfSerializes() == true, Client must NOT hold sendSem across
+// Send, so concurrent calls really do overlap inside Send. Without this
+// control, a version of Client.call that (incorrectly) always serializes
+// regardless of c.selfSerializes would still pass the non-self-serializing
+// test above for the wrong reason.
+func TestClientDoesNotSerializeSendForSelfSerializingTransport(t *testing.T) {
+	inner := newConcurrencyTrackingTransport()
+	tr := &selfSerializingConcurrencyTransport{inner}
+	c := NewClient(tr)
+	defer c.Close()
+	if !c.selfSerializes {
+		t.Fatal("Client.selfSerializes = false for a transport implementing selfSerializingTransport that returns true")
+	}
+
+	runConcurrentCalls(t, c, 10)
+
+	if max := atomic.LoadInt32(&inner.max); max <= 1 {
+		t.Fatalf("max observed concurrent Send = %d, want > 1 (Client must NOT serialize Send for a self-serializing transport)", max)
 	}
 }
 
