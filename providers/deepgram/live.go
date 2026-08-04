@@ -198,28 +198,52 @@ type liveStream struct {
 
 // Send implements provider.TranscriptionStream by writing audio as a binary
 // frame.
+//
+// It does not pre-check s.stream.Closed(): that check and the write below
+// would be two independent acquisitions of the underlying wsstream.Stream's
+// own lock, and a Close() landing in the gap between them would make the
+// write below observe closed=true and return wsstream.ErrClosed --
+// surfacing wsstream's own "wsstream: send called after close" instead of
+// this method's documented error. Relying solely on the error
+// stream.Send itself returns keeps the closed-check and the write atomic
+// (both happen under the same, single lock acquisition inside
+// stream.Send), so there is no such window.
 func (s *liveStream) Send(ctx context.Context, audio []byte) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	if s.stream.Closed() {
-		return errors.New("deepgram: Send called after Close")
-	}
 	if s.closeSendSent {
 		return errors.New("deepgram: Send called after CloseSend")
 	}
-	return s.stream.Send(ctx, websocket.BinaryMessage, audio)
+	if err := s.stream.Send(ctx, websocket.BinaryMessage, audio); err != nil {
+		if errors.Is(err, wsstream.ErrClosed) {
+			return errors.New("deepgram: Send called after Close")
+		}
+		return err
+	}
+	return nil
 }
 
 // CloseSend implements provider.TranscriptionStream by sending Deepgram's
-// {"type":"CloseStream"} text frame. Idempotent.
+// {"type":"CloseStream"} text frame. Idempotent, including when the stream
+// was already ended via Close (matching the pre-wsstream-migration
+// contract): a wsstream.ErrClosed from the send below -- whether because
+// CloseSend genuinely raced a concurrent Close, or because Close had
+// already happened before this call -- is treated as the no-op success
+// case, not surfaced as an error.
 func (s *liveStream) CloseSend(ctx context.Context) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	if s.stream.Closed() || s.closeSendSent {
+	if s.closeSendSent {
 		return nil
 	}
 	s.closeSendSent = true
-	return s.stream.Send(ctx, websocket.TextMessage, []byte(closeStreamMessage))
+	if err := s.stream.Send(ctx, websocket.TextMessage, []byte(closeStreamMessage)); err != nil {
+		if errors.Is(err, wsstream.ErrClosed) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // Close implements provider.TranscriptionStream by aborting the connection

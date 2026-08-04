@@ -720,15 +720,23 @@ func TestRealtimeSession_SendAfterCloseReturnsError(t *testing.T) {
 
 	if err := session.SendAudio(context.Background(), []byte("x")); err == nil {
 		t.Fatal("SendAudio after Close: want error, got nil")
+	} else if got, want := err.Error(), "openai: SendAudio called after Close"; got != want {
+		t.Errorf("SendAudio after Close error = %q, want %q", got, want)
 	}
 	if err := session.CommitAudio(context.Background()); err == nil {
 		t.Fatal("CommitAudio after Close: want error, got nil")
+	} else if got, want := err.Error(), "openai: CommitAudio called after Close"; got != want {
+		t.Errorf("CommitAudio after Close error = %q, want %q", got, want)
 	}
 	if err := session.SendText(context.Background(), "x"); err == nil {
 		t.Fatal("SendText after Close: want error, got nil")
+	} else if got, want := err.Error(), "openai: SendText called after Close"; got != want {
+		t.Errorf("SendText after Close error = %q, want %q", got, want)
 	}
 	if err := session.CreateResponse(context.Background()); err == nil {
 		t.Fatal("CreateResponse after Close: want error, got nil")
+	} else if got, want := err.Error(), "openai: CreateResponse called after Close"; got != want {
+		t.Errorf("CreateResponse after Close error = %q, want %q", got, want)
 	}
 
 	for range session.Events() {

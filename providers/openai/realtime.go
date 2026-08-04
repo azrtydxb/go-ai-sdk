@@ -147,12 +147,32 @@ func buildRealtimeSessionUpdate(cfg RealtimeConfig) ([]byte, error) {
 	return data, nil
 }
 
+// mapSendClosed maps a wsstream.ErrClosed returned by s.stream.Send back to
+// this session's own documented "openai: <method> called after Close"
+// error, and passes any other error (nil included) through unchanged.
+//
+// The Send-family methods below don't pre-check s.stream.Closed(): that
+// check and the write itself would be two independent acquisitions of the
+// underlying wsstream.Stream's own lock, and a Close() landing in the gap
+// between them would make the write observe closed=true and return
+// wsstream.ErrClosed -- surfacing wsstream's own "wsstream: send called
+// after close" instead of the method-specific error below. Mapping solely
+// off the error stream.Send itself returns keeps the closed-check and the
+// write atomic (both happen under the same, single lock acquisition inside
+// stream.Send), so there is no such window.
+func mapSendClosed(err error, method string) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, wsstream.ErrClosed) {
+		return fmt.Errorf("openai: %s called after Close", method)
+	}
+	return err
+}
+
 // SendAudio appends audio to the input buffer via
 // input_audio_buffer.append, base64-encoding it first.
 func (s *RealtimeSession) SendAudio(ctx context.Context, audio []byte) error {
-	if s.stream.Closed() {
-		return errors.New("openai: SendAudio called after Close")
-	}
 	msg, err := json.Marshal(map[string]any{
 		"type":  "input_audio_buffer.append",
 		"audio": base64.StdEncoding.EncodeToString(audio),
@@ -160,23 +180,17 @@ func (s *RealtimeSession) SendAudio(ctx context.Context, audio []byte) error {
 	if err != nil {
 		return fmt.Errorf("openai: encode input_audio_buffer.append: %w", err)
 	}
-	return s.stream.Send(ctx, websocket.TextMessage, msg)
+	return mapSendClosed(s.stream.Send(ctx, websocket.TextMessage, msg), "SendAudio")
 }
 
 // CommitAudio commits the input audio buffer via
 // input_audio_buffer.commit.
 func (s *RealtimeSession) CommitAudio(ctx context.Context) error {
-	if s.stream.Closed() {
-		return errors.New("openai: CommitAudio called after Close")
-	}
-	return s.stream.Send(ctx, websocket.TextMessage, []byte(`{"type":"input_audio_buffer.commit"}`))
+	return mapSendClosed(s.stream.Send(ctx, websocket.TextMessage, []byte(`{"type":"input_audio_buffer.commit"}`)), "CommitAudio")
 }
 
 // SendText sends a user text message via conversation.item.create.
 func (s *RealtimeSession) SendText(ctx context.Context, text string) error {
-	if s.stream.Closed() {
-		return errors.New("openai: SendText called after Close")
-	}
 	msg, err := json.Marshal(map[string]any{
 		"type": "conversation.item.create",
 		"item": map[string]any{
@@ -190,15 +204,12 @@ func (s *RealtimeSession) SendText(ctx context.Context, text string) error {
 	if err != nil {
 		return fmt.Errorf("openai: encode conversation.item.create: %w", err)
 	}
-	return s.stream.Send(ctx, websocket.TextMessage, msg)
+	return mapSendClosed(s.stream.Send(ctx, websocket.TextMessage, msg), "SendText")
 }
 
 // CreateResponse requests a model response via response.create.
 func (s *RealtimeSession) CreateResponse(ctx context.Context) error {
-	if s.stream.Closed() {
-		return errors.New("openai: CreateResponse called after Close")
-	}
-	return s.stream.Send(ctx, websocket.TextMessage, []byte(`{"type":"response.create"}`))
+	return mapSendClosed(s.stream.Send(ctx, websocket.TextMessage, []byte(`{"type":"response.create"}`)), "CreateResponse")
 }
 
 // Close aborts the connection without flushing, without waiting for

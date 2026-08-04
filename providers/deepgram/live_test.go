@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -601,6 +603,145 @@ func TestStreamTranscribe_SendAfterCloseSend(t *testing.T) {
 	}
 	if err := stream.Send(context.Background(), []byte("late")); err == nil {
 		t.Fatal("Send after CloseSend: want error, got nil")
+	}
+
+	for range stream.Events() {
+	}
+}
+
+// TestStreamTranscribe_SendAfterCloseErrorMessage pins the exact,
+// provider-specific error message a Send after Close must return: the
+// wsstream migration must not let wsstream's own "wsstream: send called
+// after close" leak through in place of "deepgram: Send called after
+// Close".
+func TestStreamTranscribe_SendAfterCloseErrorMessage(t *testing.T) {
+	l, baseURL := listenerBaseURL(t)
+
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		websockettest.Upgrade(conn)
+	}()
+
+	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
+	m := p.StreamingTranscriptionModel("nova-3")
+	stream, err := m.StreamTranscribe(context.Background(), provider.StreamTranscriptionCall{})
+	if err != nil {
+		t.Fatalf("StreamTranscribe: %v", err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	err = stream.Send(context.Background(), []byte("late"))
+	if err == nil {
+		t.Fatal("Send after Close: want error, got nil")
+	}
+	if got, want := err.Error(), "deepgram: Send called after Close"; got != want {
+		t.Fatalf("Send after Close error = %q, want %q", got, want)
+	}
+
+	for range stream.Events() {
+	}
+}
+
+// TestStreamTranscribe_CloseSendIdempotentAfterClose pins the old,
+// pre-wsstream-migration contract: CloseSend on a stream that's already
+// been Close()d is idempotent and returns nil, not
+// wsstream.ErrClosed's raw "wsstream: send called after close" (or any
+// other error).
+func TestStreamTranscribe_CloseSendIdempotentAfterClose(t *testing.T) {
+	l, baseURL := listenerBaseURL(t)
+
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		websockettest.Upgrade(conn)
+		websockettest.ReadMessage(conn)
+	}()
+
+	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
+	m := p.StreamingTranscriptionModel("nova-3")
+	stream, err := m.StreamTranscribe(context.Background(), provider.StreamTranscriptionCall{})
+	if err != nil {
+		t.Fatalf("StreamTranscribe: %v", err)
+	}
+
+	if err := stream.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := stream.CloseSend(context.Background()); err != nil {
+		t.Fatalf("CloseSend after Close: want nil (idempotent), got %v", err)
+	}
+
+	for range stream.Events() {
+	}
+}
+
+// TestStreamTranscribe_SendCloseRaceNeverLeaksWsstreamError pins a
+// regression from the migration to internal/wsstream: liveStream.Send used
+// to check s.stream.Closed() and then, separately, call s.stream.Send --
+// two independent lock acquisitions on the underlying wsstream.Stream's
+// own mutex, not serialized against this wrapper's writeMu (Close doesn't
+// take writeMu at all). A Close racing in between made the underlying Send
+// return wsstream.ErrClosed ("wsstream: send called after close") instead
+// of this provider's documented "deepgram: Send called after Close". Fire
+// many concurrent Sends against a concurrent Close and assert the provider
+// error string is the only one ever observed. Run under -race.
+func TestStreamTranscribe_SendCloseRaceNeverLeaksWsstreamError(t *testing.T) {
+	l, baseURL := listenerBaseURL(t)
+
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		if err := websockettest.Upgrade(conn); err != nil {
+			return
+		}
+		for {
+			if _, _, err := websockettest.ReadMessage(conn); err != nil {
+				return
+			}
+		}
+	}()
+
+	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
+	m := p.StreamingTranscriptionModel("nova-3")
+	streamIface, err := m.StreamTranscribe(context.Background(), provider.StreamTranscriptionCall{})
+	if err != nil {
+		t.Fatalf("StreamTranscribe: %v", err)
+	}
+	stream := streamIface.(*liveStream)
+
+	const n = 200
+	var wg sync.WaitGroup
+	errCh := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errCh <- stream.Send(context.Background(), []byte("x"))
+		}()
+	}
+	go stream.Close()
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		if err == nil {
+			continue
+		}
+		if strings.Contains(err.Error(), "wsstream:") {
+			t.Fatalf("Send leaked the internal wsstream error instead of the provider-specific one: %v", err)
+		}
 	}
 
 	for range stream.Events() {

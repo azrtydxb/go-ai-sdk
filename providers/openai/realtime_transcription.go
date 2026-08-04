@@ -161,12 +161,19 @@ type realtimeStream struct {
 
 // Send implements provider.TranscriptionStream by base64-encoding audio
 // into an input_audio_buffer.append event.
+//
+// It does not pre-check s.stream.Closed(): that check and the write below
+// would be two independent acquisitions of the underlying wsstream.Stream's
+// own lock, and a Close() landing in the gap between them would make the
+// write below observe closed=true and return wsstream.ErrClosed --
+// surfacing wsstream's own "wsstream: send called after close" instead of
+// this method's documented error. Relying solely on the error stream.Send
+// itself returns keeps the closed-check and the write atomic (both happen
+// under the same, single lock acquisition inside stream.Send), so there is
+// no such window.
 func (s *realtimeStream) Send(ctx context.Context, audio []byte) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	if s.stream.Closed() {
-		return errors.New("openai: Send called after Close")
-	}
 	if s.closeSendSent {
 		return errors.New("openai: Send called after CloseSend")
 	}
@@ -177,19 +184,33 @@ func (s *realtimeStream) Send(ctx context.Context, audio []byte) error {
 	if err != nil {
 		return fmt.Errorf("openai: encode input_audio_buffer.append: %w", err)
 	}
-	return s.stream.Send(ctx, websocket.TextMessage, msg)
+	if err := s.stream.Send(ctx, websocket.TextMessage, msg); err != nil {
+		if errors.Is(err, wsstream.ErrClosed) {
+			return errors.New("openai: Send called after Close")
+		}
+		return err
+	}
+	return nil
 }
 
 // CloseSend implements provider.TranscriptionStream by sending
-// input_audio_buffer.commit. Idempotent.
+// input_audio_buffer.commit. Idempotent, including when the stream was
+// already ended via Close: a wsstream.ErrClosed from the send below is
+// treated as the no-op success case, not surfaced as an error.
 func (s *realtimeStream) CloseSend(ctx context.Context) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	if s.stream.Closed() || s.closeSendSent {
+	if s.closeSendSent {
 		return nil
 	}
 	s.closeSendSent = true
-	return s.stream.Send(ctx, websocket.TextMessage, []byte(`{"type":"input_audio_buffer.commit"}`))
+	if err := s.stream.Send(ctx, websocket.TextMessage, []byte(`{"type":"input_audio_buffer.commit"}`)); err != nil {
+		if errors.Is(err, wsstream.ErrClosed) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // Close implements provider.TranscriptionStream by aborting the connection

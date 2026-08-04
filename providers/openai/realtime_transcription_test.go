@@ -579,3 +579,77 @@ func TestStreamTranscribe_SendAfterCloseSend(t *testing.T) {
 	for range stream.Events() {
 	}
 }
+
+// TestStreamTranscribe_SendAfterCloseErrorMessage pins the exact,
+// provider-specific error message a Send after Close must return: the
+// wsstream migration must not let wsstream's own "wsstream: send called
+// after close" leak through in place of "openai: Send called after
+// Close".
+func TestStreamTranscribe_SendAfterCloseErrorMessage(t *testing.T) {
+	l, baseURL := listenerBaseURL(t)
+
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		websockettest.Upgrade(conn)
+		websockettest.ReadMessage(conn) // session update
+	}()
+
+	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
+	m := p.StreamingTranscriptionModel("gpt-4o-transcribe")
+	stream, err := m.StreamTranscribe(context.Background(), provider.StreamTranscriptionCall{})
+	if err != nil {
+		t.Fatalf("StreamTranscribe: %v", err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	err = stream.Send(context.Background(), []byte("late"))
+	if err == nil {
+		t.Fatal("Send after Close: want error, got nil")
+	}
+	if got, want := err.Error(), "openai: Send called after Close"; got != want {
+		t.Fatalf("Send after Close error = %q, want %q", got, want)
+	}
+
+	for range stream.Events() {
+	}
+}
+
+// TestStreamTranscribe_CloseSendAfterCloseNoWsstreamLeak pins that
+// CloseSend after Close never surfaces wsstream's own raw error string in
+// place of whatever this provider documents.
+func TestStreamTranscribe_CloseSendAfterCloseNoWsstreamLeak(t *testing.T) {
+	l, baseURL := listenerBaseURL(t)
+
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		websockettest.Upgrade(conn)
+		websockettest.ReadMessage(conn) // session update
+	}()
+
+	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
+	m := p.StreamingTranscriptionModel("gpt-4o-transcribe")
+	stream, err := m.StreamTranscribe(context.Background(), provider.StreamTranscriptionCall{})
+	if err != nil {
+		t.Fatalf("StreamTranscribe: %v", err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	if err := stream.CloseSend(context.Background()); err != nil {
+		t.Fatalf("CloseSend after Close: want nil, got %v", err)
+	}
+
+	for range stream.Events() {
+	}
+}
