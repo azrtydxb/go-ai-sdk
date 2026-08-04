@@ -621,3 +621,150 @@ func TestHTTPTransportSuccessBodyUnderCapWorks(t *testing.T) {
 		t.Fatalf("msg = %s", msg)
 	}
 }
+
+// TestHTTPTransportSelfSerializes pins that httpTransport opts into the
+// selfSerializingTransport capability (see transport.go), and that a Client
+// built on it picks that up at NewClient time.
+func TestHTTPTransportSelfSerializes(t *testing.T) {
+	tr := NewStreamableHTTPTransport("http://example.invalid/mcp", nil)
+	defer tr.Close()
+
+	ss, ok := tr.(selfSerializingTransport)
+	if !ok {
+		t.Fatal("httpTransport must implement selfSerializingTransport")
+	}
+	if !ss.SelfSerializes() {
+		t.Fatal("httpTransport.SelfSerializes() = false, want true")
+	}
+
+	c := NewClient(tr)
+	defer c.Close()
+	if !c.selfSerializes {
+		t.Fatal("Client.selfSerializes = false for an httpTransport, want true")
+	}
+}
+
+// slowRetryRoundTripper fakes an HTTP round trip without any real network
+// I/O: it inspects the JSON-RPC "method" field of each request body and, for
+// method == slowMethod, fails the first slowFailures attempts with a plain
+// 429 (no Retry-After header, so httpTransport falls back to its default
+// capped-exponential backoff — see backoffDelay) before succeeding; every
+// other method succeeds immediately on the first attempt. This lets the test
+// control retry timing precisely and deterministically, with no real
+// network or wall-clock-sensitive HTTP server involved.
+type slowRetryRoundTripper struct {
+	slowMethod   string
+	slowFailures int
+
+	mu      sync.Mutex
+	attempt int
+}
+
+func (rt *slowRetryRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	var msg struct {
+		ID     int64  `json:"id"`
+		Method string `json:"method"`
+	}
+	if err := json.Unmarshal(body, &msg); err != nil {
+		return nil, err
+	}
+
+	if msg.Method == rt.slowMethod {
+		rt.mu.Lock()
+		rt.attempt++
+		n := rt.attempt
+		rt.mu.Unlock()
+		if n <= rt.slowFailures {
+			return &http.Response{
+				StatusCode: http.StatusTooManyRequests,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("")),
+			}, nil
+		}
+	}
+
+	h := make(http.Header)
+	h.Set("Content-Type", "application/json")
+	respBody := fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":{"ok":true}}`, msg.ID)
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     h,
+		Body:       io.NopCloser(strings.NewReader(respBody)),
+	}, nil
+}
+
+// TestHTTPRetryDoesNotHeadOfLineBlockConcurrentCalls is the core TDD case
+// for Task 1: N concurrent Client.call invocations, one of which
+// slow-retries behind 429s, must not serialize behind the slow one on the
+// HTTP transport. Before the fix, Client held sendMu for the full duration
+// of transport.Send (including retry backoff sleeps), so every other
+// concurrent call — and every server-request reply — on the same Client
+// would block behind that backoff. After the fix (httpTransport
+// self-serializes, so Client does not hold sendSem across its Send), the
+// fast calls must complete quickly regardless of the slow call's backoff.
+func TestHTTPRetryDoesNotHeadOfLineBlockConcurrentCalls(t *testing.T) {
+	rt := &slowRetryRoundTripper{slowMethod: "slow", slowFailures: 2}
+	tr := NewStreamableHTTPTransportWithOptions(
+		"http://example.invalid/mcp",
+		WithHTTPRetry(3),
+		WithHTTPClientOpt(&http.Client{Transport: rt}),
+	)
+	defer tr.Close()
+
+	c := NewClient(tr)
+	defer c.Close()
+
+	// backoffDelay(0) + backoffDelay(1) with the default 200ms base ==
+	// 200ms + 400ms == 600ms minimum before the slow call's 3rd attempt
+	// (which succeeds) even starts.
+	const minSlowDuration = 550 * time.Millisecond
+	const maxFastDuration = 400 * time.Millisecond
+
+	slowDone := make(chan time.Duration, 1)
+	go func() {
+		start := time.Now()
+		if _, err := c.call(context.Background(), "slow", nil); err != nil {
+			t.Errorf("slow call: %v", err)
+		}
+		slowDone <- time.Since(start)
+	}()
+
+	// Give the slow call a head start into its first (failing) attempt so
+	// it's genuinely in backoff before the fast calls race it.
+	time.Sleep(20 * time.Millisecond)
+
+	const numFast = 5
+	var wg sync.WaitGroup
+	fastDurations := make([]time.Duration, numFast)
+	for i := 0; i < numFast; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			start := time.Now()
+			if _, err := c.call(context.Background(), fmt.Sprintf("fast-%d", i), nil); err != nil {
+				t.Errorf("fast call %d: %v", i, err)
+			}
+			fastDurations[i] = time.Since(start)
+		}(i)
+	}
+	wg.Wait()
+
+	for i, d := range fastDurations {
+		if d > maxFastDuration {
+			t.Fatalf("fast call %d took %v, want < %v (it should not be blocked behind the slow call's retry backoff)", i, d, maxFastDuration)
+		}
+	}
+
+	select {
+	case slowDuration := <-slowDone:
+		if slowDuration < minSlowDuration {
+			t.Fatalf("slow call took only %v, want >= %v (retries/backoff should have actually happened)", slowDuration, minSlowDuration)
+		}
+	case <-time.After(testTimeout):
+		t.Fatal("slow call did not finish")
+	}
+}

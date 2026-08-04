@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -449,5 +451,113 @@ func TestNewStdioTransportSubprocess(t *testing.T) {
 
 	if err := tr.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
+	}
+}
+
+// chunkedWriteCloser wraps an io.WriteCloser and deliberately splits every
+// Write into two separate underlying Write calls with a short sleep between
+// them. It exists to make a framing race easy to observe: if two goroutines
+// ever call Write concurrently without external serialization, the sleep
+// between the two halves of one message maximizes the odds that another
+// goroutine's write lands in between them, corrupting the newline framing.
+// It is intentionally not internally synchronized (nothing here should ever
+// be called concurrently if the layers above it — framedTransport's
+// writeMu, and Client's sendSem for non-self-serializing transports — are
+// doing their job).
+type chunkedWriteCloser struct {
+	w io.WriteCloser
+}
+
+func (c *chunkedWriteCloser) Write(p []byte) (int, error) {
+	if len(p) <= 4 {
+		return c.w.Write(p)
+	}
+	mid := len(p) / 2
+	n1, err := c.w.Write(p[:mid])
+	if err != nil {
+		return n1, err
+	}
+	time.Sleep(3 * time.Millisecond)
+	n2, err := c.w.Write(p[mid:])
+	return n1 + n2, err
+}
+
+func (c *chunkedWriteCloser) Close() error { return c.w.Close() }
+
+// TestStdioClientConcurrentCallsStaySerialized is the explicit
+// concurrency-framing regression test: the stdio framedTransport does not
+// implement selfSerializingTransport (see transport.go), so a Client
+// wrapping it must still serialize writes (via sendSem) even though the
+// self-serializing HTTP path no longer holds that same lock across Send.
+// Many goroutines calling Client.call concurrently over stdio must never
+// interleave their writes and corrupt the newline framing — every line the
+// fake "server" side observes must be exactly one complete, valid JSON-RPC
+// request.
+func TestStdioClientConcurrentCallsStaySerialized(t *testing.T) {
+	aR, bW := io.Pipe()
+	bR, aW := io.Pipe()
+
+	clientTr := newFramedTransport(aR, &chunkedWriteCloser{w: &nopWriteCloser{Writer: aW}}, nil)
+	serverTr := newFramedTransport(bR, &nopWriteCloser{Writer: bW}, nil)
+	defer clientTr.Close()
+	defer serverTr.Close()
+
+	if _, ok := any(clientTr).(selfSerializingTransport); ok {
+		t.Fatal("framedTransport must not implement selfSerializingTransport")
+	}
+
+	c := NewClient(clientTr)
+	defer c.Close()
+	if c.selfSerializes {
+		t.Fatal("Client.selfSerializes must be false for the stdio transport")
+	}
+
+	const n = 20
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		for i := 0; i < n; i++ {
+			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+			raw, err := serverTr.Receive(ctx)
+			cancel()
+			if err != nil {
+				t.Errorf("server receive %d: %v", i, err)
+				return
+			}
+			var req struct {
+				ID     int64  `json:"id"`
+				Method string `json:"method"`
+			}
+			if err := json.Unmarshal(raw, &req); err != nil {
+				t.Errorf("server received a corrupted/unparseable line: %v (raw=%q)", err, raw)
+				continue
+			}
+			resp := json.RawMessage(fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":{}}`, req.ID))
+			sendCtx, sendCancel := context.WithTimeout(context.Background(), testTimeout)
+			if err := serverTr.Send(sendCtx, resp); err != nil {
+				t.Errorf("server send %d: %v", i, err)
+			}
+			sendCancel()
+		}
+	}()
+
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+			defer cancel()
+			if _, err := c.call(ctx, fmt.Sprintf("method-%d", i), nil); err != nil {
+				t.Errorf("call %d: %v", i, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	select {
+	case <-serverDone:
+	case <-time.After(testTimeout):
+		t.Fatal("server loop did not finish processing all requests")
 	}
 }

@@ -46,6 +46,46 @@ const maxConcurrentServerDispatch = 8
 // is simply dropped and the server is left to time out its own request.
 const busyReplyTimeout = 200 * time.Millisecond
 
+// sendSem is a 1-slot channel-based binary semaphore backing Client's write
+// serialization for transports that need it (see Client.selfSerializes and
+// selfSerializingTransport in transport.go). A channel, rather than
+// sync.Mutex, is used because it lets every acquisition site select on a
+// ctx deadline uniformly via TryLockContext: sync.Mutex.Lock has no way to
+// time out or observe ctx cancellation while waiting. That's what lets the
+// saturated-dispatch "server busy" reply path (recvLoop, via
+// sendServerResponse — see busyReplyTimeout) bound its acquisition to
+// ~200ms and drop the reply if it can't get the slot in time, instead of
+// letting a stuck stdio write wedge recvLoop indefinitely.
+type sendSem chan struct{}
+
+// newSendSem returns a sendSem with its single slot available.
+func newSendSem() sendSem {
+	s := make(sendSem, 1)
+	s <- struct{}{}
+	return s
+}
+
+// Lock blocks until the slot is acquired. Pair with a deferred Unlock,
+// exactly like sync.Mutex.
+func (s sendSem) Lock() { <-s }
+
+// Unlock releases the slot. Must be called exactly once per successful Lock
+// or successful (true-returning) TryLockContext call.
+func (s sendSem) Unlock() { s <- struct{}{} }
+
+// TryLockContext attempts to acquire the slot, blocking until it succeeds
+// or ctx is done, whichever comes first. It returns false if ctx finished
+// first — in which case the slot was NOT acquired and Unlock must not be
+// called.
+func (s sendSem) TryLockContext(ctx context.Context) bool {
+	select {
+	case <-s:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
 // closeDrainGrace bounds how long Client.Close waits for in-flight
 // server-request dispatch goroutines (dispatchWG) to finish before
 // returning anyway. ElicitationHandler implementations are documented to
@@ -174,10 +214,25 @@ type Client struct {
 	// possibly calls transport.Send after the transport is closed.
 	dispatchWG sync.WaitGroup
 
-	// sendMu serializes writes to the transport: Transport only guarantees
+	// sendSem serializes writes to the transport: Transport only guarantees
 	// safety for one concurrent writer, but Client.call may be invoked by
-	// multiple goroutines at once (concurrent in-flight RPC calls).
-	sendMu sync.Mutex
+	// multiple goroutines at once (concurrent in-flight RPC calls). It is
+	// only actually acquired when !selfSerializes — see that field's doc.
+	sendSem sendSem
+
+	// selfSerializes is true when transport implements
+	// selfSerializingTransport and reports SelfSerializes() == true (e.g.
+	// httpTransport). Determined once at NewClient and never modified after,
+	// so every Send site can branch on it directly with no per-call type
+	// assertion. When true, sendSem is not acquired around transport.Send:
+	// the transport is already safe for concurrent Send, and holding a
+	// client-wide lock across it would head-of-line-block every other
+	// concurrent call (and server-request reply) behind e.g. one call's HTTP
+	// retry backoff for no correctness reason. When false (the stdio
+	// framedTransport, and any transport that doesn't opt in), sendSem is
+	// held exactly as before: interleaved concurrent writes would corrupt
+	// stdio's newline framing.
+	selfSerializes bool
 
 	closeOnce sync.Once
 	closeCh   chan struct{}
@@ -202,6 +257,10 @@ func NewClient(t Transport) *Client {
 		closeCh:     make(chan struct{}),
 		loopDone:    make(chan struct{}),
 		dispatchSem: make(chan struct{}, maxConcurrentServerDispatch),
+		sendSem:     newSendSem(),
+	}
+	if ss, ok := t.(selfSerializingTransport); ok {
+		c.selfSerializes = ss.SelfSerializes()
 	}
 	go c.recvLoop()
 	return c
@@ -338,9 +397,14 @@ func (c *Client) call(ctx context.Context, method string, params any) (json.RawM
 		return nil, fmt.Errorf("mcp: encode request: %w", err)
 	}
 
-	c.sendMu.Lock()
-	err = c.transport.Send(ctx, b)
-	c.sendMu.Unlock()
+	if c.selfSerializes {
+		err = c.transport.Send(ctx, b)
+	} else if c.sendSem.TryLockContext(ctx) {
+		err = c.transport.Send(ctx, b)
+		c.sendSem.Unlock()
+	} else {
+		err = ctx.Err()
+	}
 	if err != nil {
 		c.removePending(id)
 		return nil, err
@@ -379,18 +443,31 @@ type serverResponseWire struct {
 }
 
 // sendServerResponse marshals and writes resp (a reply to a server-initiated
-// request), serialized via sendMu like any other write. ctx bounds only this
-// write; callers that don't need a tighter bound than the client's lifetime
-// pass c.ctx (see respondServerResult/respondServerError), while the
-// saturated-dispatch "server busy" path in recvLoop passes a short-deadline
-// ctx instead (see busyReplyTimeout).
+// request), serialized via sendSem like any other write on a transport that
+// doesn't self-serialize. ctx bounds both the sendSem acquisition and the
+// write itself; callers that don't need a tighter bound than the client's
+// lifetime pass c.ctx (see respondServerResult/respondServerError — this
+// behaves like an ordinary blocking acquire, since c.ctx is only cancelled
+// by Close), while the saturated-dispatch "server busy" path in recvLoop
+// passes a short-deadline ctx instead (see busyReplyTimeout): if sendSem
+// can't be acquired within that deadline — e.g. a stuck stdio write is
+// holding it — the reply is dropped rather than letting recvLoop (which
+// calls this synchronously, not from a spawned goroutine) block
+// indefinitely. A dropped busy-reply just means the server times out that
+// request on its own.
 func (c *Client) sendServerResponse(ctx context.Context, resp serverResponseWire) {
 	b, err := json.Marshal(resp)
 	if err != nil {
 		return
 	}
-	c.sendMu.Lock()
-	defer c.sendMu.Unlock()
+	if c.selfSerializes {
+		_ = c.transport.Send(ctx, b)
+		return
+	}
+	if !c.sendSem.TryLockContext(ctx) {
+		return
+	}
+	defer c.sendSem.Unlock()
 	_ = c.transport.Send(ctx, b)
 }
 
@@ -413,8 +490,13 @@ func (c *Client) notify(ctx context.Context, method string, params any) error {
 	if err != nil {
 		return fmt.Errorf("mcp: encode notification: %w", err)
 	}
-	c.sendMu.Lock()
-	defer c.sendMu.Unlock()
+	if c.selfSerializes {
+		return c.transport.Send(ctx, b)
+	}
+	if !c.sendSem.TryLockContext(ctx) {
+		return ctx.Err()
+	}
+	defer c.sendSem.Unlock()
 	return c.transport.Send(ctx, b)
 }
 

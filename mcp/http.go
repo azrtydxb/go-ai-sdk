@@ -32,6 +32,11 @@ const defaultRetryMaxDelay = 10 * time.Second
 // case the raw token is sent under that header instead. A TokenProvider
 // overrides any static Authorization header configured via headers/
 // NewStreamableHTTPTransport.
+//
+// Because httpTransport self-serializes (see SelfSerializes), Client does
+// not hold a client-wide lock across Send, so a TokenProvider backing an
+// httpTransport used by a Client with multiple concurrent in-flight calls
+// must support Token being called concurrently by more than one goroutine.
 type TokenProvider interface {
 	Token(ctx context.Context) (string, error)
 }
@@ -86,15 +91,12 @@ func WithAuthHeader(name string) HTTPOption {
 // transport does not retry 401s itself; refreshing credentials on auth
 // failure is the TokenProvider's job.
 //
-// Head-of-line blocking: Client serializes all Sends on one client under a
-// single mutex (sendMu), held for the full duration of Send — including
-// any retry backoff sleeps here. With retries enabled, one call's backoff
-// (up to ~10s per attempt, capped by defaultRetryMaxDelay) therefore blocks
-// every other concurrent call, and every server-initiated request reply,
-// on the same Client until it completes. If that head-of-line blocking
-// matters for your workload, wrap your own idempotency-aware retry logic
-// around the *http.Client via WithHTTPClientOpt instead of using this
-// option.
+// No head-of-line blocking: httpTransport self-serializes (see
+// SelfSerializes), so Client does not hold its write-serialization slot
+// across Send. A call's retry backoff here (up to ~10s per attempt, capped
+// by defaultRetryMaxDelay) therefore does NOT block any other concurrent
+// call, or any server-initiated request reply, on the same Client — each
+// Send (including its retries) runs fully independently.
 func WithHTTPRetry(maxRetries int) HTTPOption {
 	return func(t *httpTransport) { t.maxRetries = maxRetries }
 }
@@ -653,6 +655,36 @@ func (t *httpTransport) Close() error {
 	t.drainWG.Wait()
 	return nil
 }
+
+// SelfSerializes implements the optional selfSerializingTransport interface
+// (see transport.go): httpTransport does not need Client's sendSem to
+// serialize Send calls, because concurrent Send is already safe here.
+//
+// Walking through everything a concurrent Send touches:
+//   - Each call builds its own *http.Request from msg, t.url, and t.headers;
+//     t.headers is populated only by options at construction time (before
+//     any Send can run) and never mutated afterwards, so concurrent reads of
+//     it are safe.
+//   - applyAuth reads t.tokenProvider/t.authHeader, both set-once at
+//     construction; TokenProvider.Token(ctx) is called fresh per attempt and,
+//     per that interface's doc, is expected to support being called
+//     concurrently by a Client with in-flight concurrent calls.
+//   - getSessionID/setSessionID are both guarded by t.mu.
+//   - t.client.Do is documented by net/http as safe for concurrent use by
+//     multiple goroutines.
+//   - Response bodies are read into t.recvCh (a buffered channel — safe for
+//     concurrent sends) via readTrackedBody/enqueue; trackBody/untrackBody
+//     and the openBodies map are guarded by t.mu; drainWG is a sync.WaitGroup
+//     (safe for concurrent Add/Done from different goroutines as long as Add
+//     happens-before the matching Wait, which trackBody's mu-guarded
+//     Add — see its doc — guarantees relative to Close's Wait).
+//
+// There is no shared mutable state written outside of t.mu or a channel, so
+// N concurrent Send calls (including N concurrent retry/backoff loops) run
+// fully in parallel: one call's retry backoff no longer head-of-line-blocks
+// any other call or server-request reply on the same Client (see
+// WithHTTPRetry's doc for the problem this fixes).
+func (t *httpTransport) SelfSerializes() bool { return true }
 
 func (t *httpTransport) getSessionID() string {
 	t.mu.Lock()

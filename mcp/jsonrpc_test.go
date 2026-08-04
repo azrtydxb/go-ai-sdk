@@ -267,6 +267,81 @@ func TestCloseReturnsWithinGraceWhenHandlerIgnoresCtx(t *testing.T) {
 	}
 }
 
+// TestBusyReplyDropsWithoutWedgingRecvLoop pins the busy-reply bound: when
+// the saturated-dispatch "server busy" reply (respondServerError, called
+// synchronously from recvLoop — see busyReplyTimeout) can't acquire sendSem
+// within ~busyReplyTimeout (simulating a stuck write on a non-self-serializing
+// transport holding it, e.g. a hung stdio child), it must give up and drop
+// the reply rather than block recvLoop indefinitely. pipeTransport does not
+// implement selfSerializingTransport, so this exercises exactly the
+// sendSem-gated path stdio uses.
+func TestBusyReplyDropsWithoutWedgingRecvLoop(t *testing.T) {
+	client, server := newPipePair()
+	c := NewClient(client)
+	defer c.Close()
+	if c.selfSerializes {
+		t.Fatal("Client.selfSerializes must be false for pipeTransport")
+	}
+
+	release := make(chan struct{})
+	c.SetElicitationHandler(func(ctx context.Context, req ElicitationRequest) (ElicitationResult, error) {
+		<-release
+		return ElicitationResult{Action: "decline"}, nil
+	})
+
+	initializeWithCaps(t, client, server, c, map[string]any{"elicitation": map[string]any{}})
+
+	// Saturate the dispatch bound so the next server request hits recvLoop's
+	// "busy" branch.
+	for i := 0; i < maxConcurrentServerDispatch; i++ {
+		sendServerRequest(t, server, int64(i), "elicitation/create", map[string]any{"message": "x"})
+	}
+	// Give recvLoop a moment to actually acquire all dispatchSem slots
+	// before the overflow request is sent.
+	time.Sleep(50 * time.Millisecond)
+
+	// Simulate a stuck write (e.g. a wedged stdio child that isn't draining
+	// stdin) by holding sendSem ourselves — exactly what an in-progress Send
+	// would do — and deliberately never releasing it in this phase of the
+	// test.
+	c.sendSem.Lock()
+
+	sendServerRequest(t, server, 1000, "elicitation/create", map[string]any{"message": "overflow-1"})
+
+	// No busy reply should arrive quickly: its sendSem acquisition is
+	// bounded to ~busyReplyTimeout, well short of "block forever", so
+	// nothing shows up yet.
+	tooSoonCtx, cancel := context.WithTimeout(context.Background(), busyReplyTimeout/2)
+	if _, err := server.Receive(tooSoonCtx); err == nil {
+		cancel()
+		t.Fatal("busy reply arrived before the sendSem timeout elapsed")
+	}
+	cancel()
+
+	// Wait past busyReplyTimeout: the dropped-reply attempt must have given
+	// up by now. Prove recvLoop itself kept looping (was not wedged trying
+	// to send that first reply) by releasing the semaphore and sending a
+	// second overflow request — if recvLoop were stuck, this would never
+	// even be read off the transport, let alone answered.
+	time.Sleep(busyReplyTimeout + 100*time.Millisecond)
+	c.sendSem.Unlock()
+
+	start := time.Now()
+	sendServerRequest(t, server, 1001, "elicitation/create", map[string]any{"message": "overflow-2"})
+	resp := recvServerResponse(t, server)
+	if resp.Error == nil || resp.Error.Code != rpcInternalError {
+		t.Fatalf("second overflow request: got %+v, want a prompt -32603 busy reply proving recvLoop kept looping", resp)
+	}
+	if elapsed := time.Since(start); elapsed > testTimeout {
+		t.Fatalf("recvLoop took %v to answer after recovering, want it prompt", elapsed)
+	}
+
+	close(release)
+	for i := 0; i < maxConcurrentServerDispatch; i++ {
+		recvServerResponse(t, server)
+	}
+}
+
 // TestNextIDIsAtomicInt64 is a light sanity check that concurrent calls
 // each get a unique, monotonically-assigned id via atomic.Int64 (fix #5) —
 // mostly a compile-time/API check (the alignment issue it fixes is a

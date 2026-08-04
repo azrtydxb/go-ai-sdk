@@ -66,7 +66,8 @@ const rpcInvalidParams = -32602
 // having both an id and a method) and sends the matching response back to
 // the server. It runs on its own goroutine (spawned by recvLoop) so a slow
 // handler cannot block further reads; the response write itself goes
-// through sendMu like any other transport write.
+// through sendSem like any other transport write on a transport that
+// doesn't self-serialize (see selfSerializingTransport in transport.go).
 func (c *Client) dispatchServerRequest(req serverRequest) {
 	switch req.Method {
 	case "elicitation/create":

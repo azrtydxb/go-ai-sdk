@@ -118,7 +118,9 @@ func (t *framedTransport) readLoop() {
 // Send is ctx-aware even while blocked inside the underlying write: a
 // child process that stops reading its stdin (a full pipe buffer) would
 // otherwise block Write forever regardless of ctx, and because Client.call
-// holds sendMu for the duration of Send, that would wedge every other
+// holds sendSem for the duration of Send (the stdio framedTransport does
+// not implement selfSerializingTransport — see transport.go — so its writes
+// are still serialized), that would wedge every other
 // concurrent RPC on this client too, not just the caller who chose to time
 // out. See writeCtx for how the interruption is implemented and why an
 // interrupted write abandons the transport.
