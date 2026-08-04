@@ -20,6 +20,7 @@ import (
 	"net/netip"
 	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
 )
@@ -248,17 +249,48 @@ func isBlockedAddr(addr netip.Addr) bool {
 // http.Transport.DialContext.
 type dialContextFunc func(ctx context.Context, network, addr string) (net.Conn, error)
 
+// pinnedTransportCache memoizes PinnedTransport's result keyed by the base
+// RoundTripper passed in, so repeated Fetch calls against the same caller
+// *http.Client (which is what supplies base, via client.Transport) reuse
+// the SAME wrapped *http.Transport -- and therefore the same idle-connection
+// pool -- instead of getting a fresh Clone() (and a fresh, empty pool) on
+// every call. Without this, every media fetch built and immediately
+// discarded its own transport, so connections were never reused across
+// fetches and idle conns just lingered to IdleConnTimeout -- socket churn
+// under any kind of fetch burst.
+//
+// The cache is process-lifetime with no eviction: entries are keyed by
+// RoundTripper identity, and in practice there are only a handful of
+// distinct base RoundTripper values in a process (http.DefaultClient's, and
+// one per provider client an application constructs) -- not one per
+// request -- so unbounded growth isn't a real concern.
+//
+// This is safe to share across callers: PinnedTransport's Transport only
+// carries dial-time SSRF pinning (no per-call state), and everything that IS
+// per-call -- CheckRedirect, the caller's Jar/Timeout -- lives on the
+// *http.Client built fresh in fetch(), not on the Transport. Caching the
+// Transport therefore doesn't leak state between calls.
+var pinnedTransportCache sync.Map // map[any]http.RoundTripper
+
+// pinnedTransportNilKey is the sync.Map key used when base is nil, so every
+// nil (unset client.Transport) caller shares one cached pinned transport
+// wrapping a clone of http.DefaultTransport, rather than each nil value
+// being treated as its own cache entry (nil, being comparable, would
+// actually collide fine as a map key too, but a distinct sentinel type
+// keeps the intent explicit and avoids relying on that subtlety).
+type pinnedTransportNilKey struct{}
+
 // PinnedTransport returns an http.RoundTripper that defends against
 // DNS-rebind SSRF: base's own DialContext (if any, or a fresh net.Dialer
 // otherwise) is wrapped so that, at the moment of the actual TCP dial, the
 // target host is re-resolved, every resolved IP is checked against
-// isBlockedAddr, and the dial proceeds against one specific vetted IP
-// literal -- guaranteeing the IP that was checked is the IP that gets
-// connected to, unlike a pre-connect-only check (ValidateURL) which can be
+// isBlockedAddr, and the dial proceeds against one of the specific vetted IP
+// literals -- guaranteeing every IP that gets connected to is one that was
+// checked, unlike a pre-connect-only check (ValidateURL) which can be
 // defeated by a resolver that answers differently between the validation
 // lookup and the transport's own (later, independent) lookup.
 //
-// If base is an *http.Transport, the returned transport is base.Clone()
+// If base is an *http.Transport, the returned transport wraps base.Clone()
 // with DialContext wrapped as above. If base is nil, a clone of
 // http.DefaultTransport is used (matching what an *http.Client with a nil
 // Transport does internally). If base is some other, custom
@@ -266,7 +298,20 @@ type dialContextFunc func(ctx context.Context, network, addr string) (net.Conn, 
 // how it dials -- base is returned unchanged, and callers get only
 // ValidateURL's pre-connect protection (not rebind-safe) for that
 // transport. PinnedTransport never mutates base.
+//
+// The result is memoized per distinct base (see pinnedTransportCache): the
+// first call for a given base builds and caches the wrapped transport;
+// every subsequent call with an equal base returns that same instance, so
+// its connection pool is reused rather than rebuilt from scratch.
 func PinnedTransport(base http.RoundTripper) http.RoundTripper {
+	var key any = base
+	if base == nil {
+		key = pinnedTransportNilKey{}
+	}
+	if cached, ok := pinnedTransportCache.Load(key); ok {
+		return cached.(http.RoundTripper)
+	}
+
 	var t *http.Transport
 	switch bt := base.(type) {
 	case *http.Transport:
@@ -274,7 +319,10 @@ func PinnedTransport(base http.RoundTripper) http.RoundTripper {
 	case nil:
 		t = http.DefaultTransport.(*http.Transport).Clone()
 	default:
-		return base
+		// Not an *http.Transport: dial-time pinning isn't possible, so
+		// return (and cache) base unchanged.
+		actual, _ := pinnedTransportCache.LoadOrStore(key, base)
+		return actual.(http.RoundTripper)
 	}
 
 	innerDial := t.DialContext
@@ -282,7 +330,13 @@ func PinnedTransport(base http.RoundTripper) http.RoundTripper {
 		innerDial = (&net.Dialer{}).DialContext
 	}
 	t.DialContext = pinnedDialContext(innerDial)
-	return t
+
+	// LoadOrStore, not Store: if two goroutines race to build the transport
+	// for the same base (both missed the Load above), keep only the first
+	// one built so every caller ends up sharing a single connection pool
+	// rather than each racer getting -- and using -- its own.
+	actual, _ := pinnedTransportCache.LoadOrStore(key, http.RoundTripper(t))
+	return actual.(http.RoundTripper)
 }
 
 // pinnedDialContext wraps dial so that, for every connection it's asked to
@@ -312,8 +366,13 @@ func pinnedDialContext(dial dialContextFunc) dialContextFunc {
 			return nil, fmt.Errorf("dial %s: host %s has no resolved addresses", addr, host)
 		}
 
-		var vetted netip.Addr
-		found := false
+		// Vet every resolved IP before dialing any of them: if ANY resolved
+		// IP is blocked, reject the whole host outright rather than dialing
+		// only the subset that passed -- a host that resolves to both a
+		// public IP and (e.g. via a compromised or misconfigured DNS
+		// record) the metadata address must not be reachable at all through
+		// this path, even on its "safe" record.
+		vetted := make([]netip.Addr, 0, len(ips))
 		for _, ip := range ips {
 			resolved, ok := netip.AddrFromSlice(ip.IP)
 			if !ok {
@@ -323,21 +382,27 @@ func pinnedDialContext(dial dialContextFunc) dialContextFunc {
 			if isBlockedAddr(resolved) {
 				return nil, fmt.Errorf("dial %s: host %s resolves to blocked address %s", addr, host, resolved)
 			}
-			if !found {
-				vetted, found = resolved, true
-			}
+			vetted = append(vetted, resolved)
 		}
-		if !found {
+		if len(vetted) == 0 {
 			return nil, fmt.Errorf("dial %s: host %s has no usable resolved addresses", addr, host)
 		}
 
-		// Dial the first vetted address literally, so the IP that was
-		// SSRF-checked is exactly the one connected (no second, unchecked
-		// resolution — the DNS-rebind defense). Trade-off: this forgoes
-		// multi-record failover / happy-eyeballs; a host whose first
-		// resolved address is unreachable fails here rather than falling
-		// through to the next record.
-		return dial(ctx, network, net.JoinHostPort(vetted.String(), port))
+		// Try each vetted address in resolved order, returning the first
+		// successful connection. Every dial target here is one of the
+		// literals just vetted above (no second, unchecked resolution — the
+		// DNS-rebind defense is preserved), so failing over across records
+		// is safe: a host whose first resolved address is unreachable falls
+		// through to the next vetted record instead of failing outright.
+		var lastErr error
+		for _, v := range vetted {
+			conn, err := dial(ctx, network, net.JoinHostPort(v.String(), port))
+			if err == nil {
+				return conn, nil
+			}
+			lastErr = err
+		}
+		return nil, fmt.Errorf("dial %s: all %d vetted address(es) for host %s failed, last error: %w", addr, len(vetted), host, lastErr)
 	}
 }
 

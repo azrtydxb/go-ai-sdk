@@ -354,6 +354,223 @@ func TestSameOrigin(t *testing.T) {
 	}
 }
 
+// TestPinnedTransportReusedAcrossFetches covers the connection-reuse fix:
+// repeated Fetch calls against the same caller *http.Client must share one
+// pinned transport (and thus its connection pool) rather than each call
+// building and discarding its own via http.Transport.Clone().
+func TestPinnedTransportReusedAcrossFetches(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	client := &http.Client{}
+
+	for i := 0; i < 3; i++ {
+		if _, _, err := Fetch(context.Background(), client, srv.URL, "test", 0); err != nil {
+			t.Fatalf("Fetch #%d: %v", i, err)
+		}
+	}
+
+	first := PinnedTransport(client.Transport)
+	second := PinnedTransport(client.Transport)
+	if first != second {
+		t.Errorf("PinnedTransport returned different instances for the same base client.Transport (%v, %v); want the cached instance reused", first, second)
+	}
+}
+
+// TestPinnedTransportSharesConnectionPool observes connection reuse
+// directly: with a counting/recording DialContext installed on the base
+// transport, three Fetches to the same keep-alive server should dial far
+// fewer than 3 times because the underlying *http.Transport (and its idle
+// conn pool) is shared across calls.
+func TestPinnedTransportSharesConnectionPool(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	var dials int32
+	dialer := &net.Dialer{}
+	base := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			atomic.AddInt32(&dials, 1)
+			return dialer.DialContext(ctx, network, addr)
+		},
+	}
+	client := &http.Client{Transport: base}
+
+	for i := 0; i < 5; i++ {
+		if _, _, err := Fetch(context.Background(), client, srv.URL, "test", 0); err != nil {
+			t.Fatalf("Fetch #%d: %v", i, err)
+		}
+	}
+
+	if got := atomic.LoadInt32(&dials); got >= 5 {
+		t.Errorf("dials = %d, want < 5 (fewer than one per fetch, via a shared/reused connection pool)", got)
+	}
+}
+
+// TestPinnedTransportDistinctBasesGetDistinctInstances ensures the cache is
+// keyed by base RoundTripper: two different caller clients (with different
+// base Transports) must NOT share a pinned transport/connection pool.
+func TestPinnedTransportDistinctBasesGetDistinctInstances(t *testing.T) {
+	base1 := &http.Transport{}
+	base2 := &http.Transport{}
+
+	t1 := PinnedTransport(base1)
+	t2 := PinnedTransport(base2)
+	if t1 == t2 {
+		t.Error("PinnedTransport returned the same instance for two distinct base transports")
+	}
+
+	// Calling again with the same bases must return the same (already
+	// cached) instances as before.
+	if again := PinnedTransport(base1); again != t1 {
+		t.Error("PinnedTransport(base1) changed identity across calls")
+	}
+	if again := PinnedTransport(base2); again != t2 {
+		t.Error("PinnedTransport(base2) changed identity across calls")
+	}
+}
+
+// TestPinnedTransportNilBaseShared ensures every nil-Transport caller (the
+// common case: an *http.Client with Transport left unset) shares a single
+// cached pinned transport, wrapping http.DefaultTransport.
+func TestPinnedTransportNilBaseShared(t *testing.T) {
+	t1 := PinnedTransport(nil)
+	t2 := PinnedTransport(nil)
+	if t1 != t2 {
+		t.Error("PinnedTransport(nil) returned different instances across calls; want a shared cached instance")
+	}
+}
+
+// TestPinnedTransportDoesNotMutateCallerTransport guards against a caching
+// bug where the returned wrapped transport is (or aliases fields of) the
+// caller's own base *http.Transport: base.DialContext must remain nil (its
+// original value) after PinnedTransport wraps it, and the returned pointer
+// must be a distinct object.
+func TestPinnedTransportDoesNotMutateCallerTransport(t *testing.T) {
+	base := &http.Transport{}
+	wrapped := PinnedTransport(base)
+
+	wt, ok := wrapped.(*http.Transport)
+	if !ok {
+		t.Fatalf("PinnedTransport(base) = %T, want *http.Transport", wrapped)
+	}
+	if wt == base {
+		t.Fatal("PinnedTransport returned the caller's own base Transport pointer instead of a wrapping clone")
+	}
+	if base.DialContext != nil {
+		t.Error("PinnedTransport mutated the caller's base Transport's DialContext")
+	}
+	if wt.DialContext == nil {
+		t.Error("wrapped transport's DialContext is nil; want the pinning wrapper installed")
+	}
+}
+
+// TestPinnedDialContextFailsOverToNextVettedIP covers the multi-IP failover
+// fix: when a host resolves to multiple IPs and all are vetted (none
+// blocked), the dial must try them in resolved order and succeed on the
+// first one that connects, rather than giving up after the first (dead)
+// address.
+func TestPinnedDialContextFailsOverToNextVettedIP(t *testing.T) {
+	restore := SetLookupIPAddrForTest(func(ctx context.Context, host string) ([]net.IPAddr, error) {
+		// Two public, non-blocked IPs. Neither is dialed for real -- the
+		// fake dial below intercepts both -- so these don't need to be
+		// reachable.
+		return []net.IPAddr{
+			{IP: net.ParseIP("203.0.113.1")}, // dead: fake dial refuses this one
+			{IP: net.ParseIP("203.0.113.2")}, // good: fake dial accepts this one
+		}, nil
+	})
+	defer restore()
+
+	var dialedAddrs []string
+	fakeDial := dialContextFunc(func(ctx context.Context, network, addr string) (net.Conn, error) {
+		dialedAddrs = append(dialedAddrs, addr)
+		host, _, _ := net.SplitHostPort(addr)
+		if host == "203.0.113.1" {
+			return nil, errors.New("connection refused")
+		}
+		clientConn, serverConn := net.Pipe()
+		serverConn.Close()
+		return clientConn, nil
+	})
+
+	conn, err := pinnedDialContext(fakeDial)(context.Background(), "tcp", "failover.fetchmedia.test:443")
+	if err != nil {
+		t.Fatalf("pinnedDialContext: %v, want success via failover to the second vetted IP", err)
+	}
+	conn.Close()
+
+	want := []string{"203.0.113.1:443", "203.0.113.2:443"}
+	if len(dialedAddrs) != len(want) {
+		t.Fatalf("dialedAddrs = %v, want %v", dialedAddrs, want)
+	}
+	for i := range want {
+		if dialedAddrs[i] != want[i] {
+			t.Errorf("dialedAddrs[%d] = %q, want %q", i, dialedAddrs[i], want[i])
+		}
+	}
+}
+
+// TestPinnedDialContextAllVettedIPsFail ensures a host whose every resolved
+// (vetted) IP fails to dial surfaces an error, rather than looping forever
+// or silently succeeding.
+func TestPinnedDialContextAllVettedIPsFail(t *testing.T) {
+	restore := SetLookupIPAddrForTest(func(ctx context.Context, host string) ([]net.IPAddr, error) {
+		return []net.IPAddr{
+			{IP: net.ParseIP("203.0.113.1")},
+			{IP: net.ParseIP("203.0.113.2")},
+		}, nil
+	})
+	defer restore()
+
+	fakeDial := dialContextFunc(func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return nil, errors.New("connection refused")
+	})
+
+	_, err := pinnedDialContext(fakeDial)(context.Background(), "tcp", "alldead.fetchmedia.test:443")
+	if err == nil {
+		t.Fatal("expected error when every vetted IP fails to dial")
+	}
+}
+
+// TestPinnedDialContextRejectsHostWithAnyBlockedIP is the "unchanged"
+// regression case for the failover fix: a host that resolves to a mix of a
+// public IP and a blocked IP must still be rejected outright -- the good
+// record must NOT be dialed as a fallback -- matching the pre-failover
+// "reject if any resolved IP is blocked" policy.
+func TestPinnedDialContextRejectsHostWithAnyBlockedIP(t *testing.T) {
+	restore := SetLookupIPAddrForTest(func(ctx context.Context, host string) ([]net.IPAddr, error) {
+		return []net.IPAddr{
+			{IP: net.ParseIP("203.0.113.1")},     // public, fine on its own
+			{IP: net.ParseIP("169.254.169.254")}, // blocked
+		}, nil
+	})
+	defer restore()
+
+	var dialed bool
+	fakeDial := dialContextFunc(func(ctx context.Context, network, addr string) (net.Conn, error) {
+		dialed = true
+		return nil, errors.New("should not be called")
+	})
+
+	_, err := pinnedDialContext(fakeDial)(context.Background(), "tcp", "mixed.fetchmedia.test:443")
+	if err == nil {
+		t.Fatal("expected error: host resolves to a blocked address among others")
+	}
+	if !strings.Contains(err.Error(), "blocked") {
+		t.Errorf("error = %v, want it to mention the blocked address", err)
+	}
+	if dialed {
+		t.Error("dial was called despite one resolved IP being blocked; must reject the whole host pre-dial")
+	}
+}
+
 // recordingRoundTripper records how many times RoundTrip was called,
 // letting a test assert that a request was never even attempted (e.g.
 // because a pre-request SSRF check rejected the URL).
