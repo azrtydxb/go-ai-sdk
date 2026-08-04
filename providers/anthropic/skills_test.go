@@ -188,3 +188,62 @@ func TestDeleteSkillErrorStatus(t *testing.T) {
 		t.Fatal("DeleteSkill: want error for 404 response")
 	}
 }
+
+// --- Security: multipart CRLF/quote injection guard ---
+//
+// mime/multipart.Writer writes MIME headers verbatim with no CRLF
+// validation (unlike net/http), so a caller-supplied DisplayName or
+// ProviderOptions key/value containing "\r\n" could otherwise forge extra
+// multipart headers or parts. These tests confirm such values are
+// rejected before anything is sent to the server.
+
+func TestUploadSkillDisplayNameCRLFRejected(t *testing.T) {
+	var hit bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/skills", func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		w.WriteHeader(http.StatusOK)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
+
+	_, err := p.UploadSkill(context.Background(), UploadSkillCall{
+		Zip:         []byte("z"),
+		DisplayName: "My Skill\r\nX-Injected: 1",
+	})
+	if err == nil {
+		t.Fatal("UploadSkill: want error for DisplayName containing CRLF")
+	}
+	if hit {
+		t.Error("UploadSkill: request was sent despite invalid DisplayName")
+	}
+}
+
+func TestUploadSkillProviderOptionKeyNewlineRejected(t *testing.T) {
+	var hit bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/skills", func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		w.WriteHeader(http.StatusOK)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
+
+	_, err := p.UploadSkill(context.Background(), UploadSkillCall{
+		Zip:         []byte("z"),
+		DisplayName: "s",
+		ProviderOptions: map[string]any{
+			"anthropic": map[string]any{
+				"evil\nX-Injected: 1": "v",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("UploadSkill: want error for ProviderOptions key containing LF")
+	}
+	if hit {
+		t.Error("UploadSkill: request was sent despite invalid provider option key")
+	}
+}

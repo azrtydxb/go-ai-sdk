@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/multipartutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -36,6 +37,13 @@ type wireWord struct {
 }
 
 func (m *transcriptionModel) Transcribe(ctx context.Context, call provider.TranscriptionCall) (*provider.TranscriptionResponse, error) {
+	if err := multipartutil.ValidField("media type", call.MediaType); err != nil {
+		return nil, fmt.Errorf("elevenlabs: %w", err)
+	}
+	if err := multipartutil.ValidField("language", call.Language); err != nil {
+		return nil, fmt.Errorf("elevenlabs: %w", err)
+	}
+
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 

@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/multipartutil"
 	"github.com/azrtydxb/go-ai-sdk/internal/transcribeutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -120,6 +121,10 @@ func (m *transcriptionModel) createJob(ctx context.Context, call provider.Transc
 	optsBody, err := buildJobOptions(call)
 	if err != nil {
 		return "", fmt.Errorf("revai: build job options: %w", err)
+	}
+
+	if err := multipartutil.ValidField("media type", call.MediaType); err != nil {
+		return "", fmt.Errorf("revai: %w", err)
 	}
 
 	var buf bytes.Buffer

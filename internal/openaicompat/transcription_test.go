@@ -11,6 +11,8 @@ import (
 	"io"
 	"mime"
 	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/openaicompat/compattest"
@@ -215,5 +217,60 @@ func TestTranscriptionAuthHeader(t *testing.T) {
 	}
 	if got := srv.HeaderValues("Authorization"); len(got) != 1 || got[0] != "" {
 		t.Errorf("Authorization header = %v, want [\"\"]", got)
+	}
+}
+
+// --- Security: multipart CRLF/quote injection guard ---
+//
+// mime/multipart.Writer writes MIME headers verbatim with no CRLF
+// validation (unlike net/http), so a caller-supplied MediaType or
+// ProviderOptions key/value containing "\r\n" could otherwise forge extra
+// multipart headers or parts. These tests confirm such values are
+// rejected before anything is sent to the server.
+
+func TestTranscriptionMediaTypeCRLFRejected(t *testing.T) {
+	var hit bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	model := NewTranscriptionModel(Config{Name: "test", APIKey: "k", BaseURL: srv.URL}, "whisper-1")
+	_, err := model.Transcribe(context.Background(), provider.TranscriptionCall{
+		Audio:     []byte("x"),
+		MediaType: "audio/mpeg\r\nX-Injected: 1",
+	})
+	if err == nil {
+		t.Fatal("Transcribe: want error for MediaType containing CRLF")
+	}
+	if hit {
+		t.Error("Transcribe: request was sent despite invalid MediaType")
+	}
+}
+
+func TestTranscriptionProviderOptionKeyNewlineRejected(t *testing.T) {
+	var hit bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	model := NewTranscriptionModel(Config{Name: "test", APIKey: "k", BaseURL: srv.URL}, "whisper-1")
+	_, err := model.Transcribe(context.Background(), provider.TranscriptionCall{
+		Audio:     []byte("x"),
+		MediaType: "audio/mpeg",
+		ProviderOptions: map[string]any{
+			"test": map[string]any{
+				"evil\nX-Injected: 1": "v",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("Transcribe: want error for ProviderOptions key containing LF")
+	}
+	if hit {
+		t.Error("Transcribe: request was sent despite invalid provider option key")
 	}
 }

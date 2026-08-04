@@ -411,3 +411,34 @@ func TestTranscribe_PromptIgnored(t *testing.T) {
 		t.Errorf("prompt should not be sent, got %v", createBody()["prompt"])
 	}
 }
+
+// --- Security: multipart CRLF/quote injection guard ---
+//
+// mime/multipart.Writer writes MIME headers verbatim with no CRLF
+// validation (unlike net/http), so a caller-supplied MediaType could
+// otherwise forge extra multipart headers or parts via the "audio" part's
+// Content-Type. This test confirms such a value is rejected before
+// anything is sent to the server.
+
+func TestTranscribe_MediaTypeCRLFRejected(t *testing.T) {
+	var hit bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
+	model := p.TranscriptionModel("solaria-1")
+
+	_, err := model.Transcribe(context.Background(), provider.TranscriptionCall{
+		Audio:     []byte("audio"),
+		MediaType: "audio/mpeg\r\nX-Injected: 1",
+	})
+	if err == nil {
+		t.Fatal("Transcribe: want error for MediaType containing CRLF")
+	}
+	if hit {
+		t.Error("Transcribe: request was sent despite invalid MediaType")
+	}
+}

@@ -247,3 +247,61 @@ func TestTranscribe_ContextCancellation(t *testing.T) {
 		t.Fatal("expected error from cancelled context")
 	}
 }
+
+// --- Security: multipart CRLF/quote injection guard ---
+//
+// mime/multipart.Writer writes MIME headers verbatim with no CRLF
+// validation (unlike net/http), so a caller-supplied MediaType or
+// ProviderOptions key/value containing "\r\n" could otherwise forge extra
+// multipart headers or parts. These tests confirm such values are
+// rejected before anything is sent to the server.
+
+func TestTranscribe_MediaTypeCRLFRejected(t *testing.T) {
+	var hit bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
+	model := p.TranscriptionModel("scribe_v1")
+
+	_, err := model.Transcribe(context.Background(), provider.TranscriptionCall{
+		Audio:     []byte("audio"),
+		MediaType: "audio/mpeg\r\nX-Injected: 1",
+	})
+	if err == nil {
+		t.Fatal("Transcribe: want error for MediaType containing CRLF")
+	}
+	if hit {
+		t.Error("Transcribe: request was sent despite invalid MediaType")
+	}
+}
+
+func TestTranscribe_ProviderOptionKeyNewlineRejected(t *testing.T) {
+	var hit bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
+	model := p.TranscriptionModel("scribe_v1")
+
+	_, err := model.Transcribe(context.Background(), provider.TranscriptionCall{
+		Audio: []byte("audio"),
+		ProviderOptions: map[string]any{
+			"elevenlabs": map[string]any{
+				"evil\nX-Injected: 1": "v",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("Transcribe: want error for ProviderOptions key containing LF")
+	}
+	if hit {
+		t.Error("Transcribe: request was sent despite invalid provider option key")
+	}
+}

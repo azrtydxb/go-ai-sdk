@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/multipartutil"
 	"github.com/azrtydxb/go-ai-sdk/internal/transcribeutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -43,6 +44,12 @@ func (m *translationModel) Translate(ctx context.Context, call provider.Translat
 	if m.cfg.BaseURL == "" {
 		return nil, fmt.Errorf("%s: base URL not configured", m.cfg.Name)
 	}
+	if err := multipartutil.ValidField("media type", call.MediaType); err != nil {
+		return nil, fmt.Errorf("openaicompat: %w", err)
+	}
+	// call.Prompt is intentionally not guarded here — see the matching
+	// comment in transcription.go: it only ever reaches a multipart field
+	// value, never a header.
 
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/textproto"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/multipartutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -46,6 +47,12 @@ type fileWireResponse struct {
 // call.FileUploadCall.MediaType's information dropped, matching prior
 // behavior for callers that don't set MediaType.
 func createFilePart(mw *multipart.Writer, filename, mediaType string) (io.Writer, error) {
+	if err := multipartutil.ValidField("filename", filename); err != nil {
+		return nil, err
+	}
+	if err := multipartutil.ValidField("media type", mediaType); err != nil {
+		return nil, err
+	}
 	if mediaType == "" {
 		return mw.CreateFormFile("file", filename)
 	}
@@ -76,7 +83,14 @@ func (s *fileStore) UploadFile(ctx context.Context, call provider.FileUploadCall
 
 	if opts, ok := call.ProviderOptions["anthropic"].(map[string]any); ok {
 		for k, v := range opts {
-			if err := mw.WriteField(k, fmt.Sprint(v)); err != nil {
+			if err := multipartutil.ValidField("provider option field name", k); err != nil {
+				return nil, fmt.Errorf("anthropic: %w", err)
+			}
+			sv := fmt.Sprint(v)
+			if err := multipartutil.ValidField("provider option field value", sv); err != nil {
+				return nil, fmt.Errorf("anthropic: %w", err)
+			}
+			if err := mw.WriteField(k, sv); err != nil {
 				return nil, fmt.Errorf("anthropic: write provider option field %q: %w", k, err)
 			}
 		}

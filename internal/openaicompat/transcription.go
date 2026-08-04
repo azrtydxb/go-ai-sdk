@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/multipartutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -73,6 +74,17 @@ func (m *transcriptionModel) Transcribe(ctx context.Context, call provider.Trans
 	if m.cfg.BaseURL == "" {
 		return nil, fmt.Errorf("%s: base URL not configured", m.cfg.Name)
 	}
+	if err := multipartutil.ValidField("media type", call.MediaType); err != nil {
+		return nil, fmt.Errorf("openaicompat: %w", err)
+	}
+	if err := multipartutil.ValidField("language", call.Language); err != nil {
+		return nil, fmt.Errorf("openaicompat: %w", err)
+	}
+	// call.Prompt is intentionally not guarded: it's a free-text
+	// transcription hint (may legitimately contain quotes/newlines) that
+	// only ever reaches a multipart field *value*, never a header — unlike
+	// MediaType/Filename/field-name, its content cannot forge a header or
+	// a new part.
 
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)

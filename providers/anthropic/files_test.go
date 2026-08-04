@@ -213,6 +213,117 @@ func TestFilesProviderName(t *testing.T) {
 	}
 }
 
+// --- Security: multipart CRLF/quote injection guard ---
+//
+// mime/multipart.Writer writes MIME headers verbatim with no CRLF
+// validation (unlike net/http), so a caller-supplied MediaType, Filename,
+// or ProviderOptions key/value containing "\r\n" could otherwise forge
+// extra multipart headers or parts. These tests confirm such values are
+// rejected before anything is sent to the server.
+
+func TestFilesUploadFileMediaTypeCRLFRejected(t *testing.T) {
+	var hit bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/files", func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		w.WriteHeader(http.StatusOK)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	store := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Files()
+
+	_, err := store.UploadFile(context.Background(), provider.FileUploadCall{
+		Data:      []byte("data"),
+		Filename:  "a.pdf",
+		MediaType: "application/pdf\r\nX-Injected: 1",
+	})
+	if err == nil {
+		t.Fatal("UploadFile: want error for MediaType containing CRLF")
+	}
+	if hit {
+		t.Error("UploadFile: request was sent despite invalid MediaType")
+	}
+}
+
+func TestFilesUploadFileFilenameQuoteRejected(t *testing.T) {
+	var hit bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/files", func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		w.WriteHeader(http.StatusOK)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	store := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Files()
+
+	_, err := store.UploadFile(context.Background(), provider.FileUploadCall{
+		Data:     []byte("data"),
+		Filename: `a"; injected="x`,
+	})
+	if err == nil {
+		t.Fatal("UploadFile: want error for Filename containing a quote")
+	}
+	if hit {
+		t.Error("UploadFile: request was sent despite invalid Filename")
+	}
+}
+
+func TestFilesUploadFileProviderOptionKeyNewlineRejected(t *testing.T) {
+	var hit bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/files", func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		w.WriteHeader(http.StatusOK)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	store := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Files()
+
+	_, err := store.UploadFile(context.Background(), provider.FileUploadCall{
+		Data:     []byte("data"),
+		Filename: "a",
+		ProviderOptions: map[string]any{
+			"anthropic": map[string]any{
+				"evil\nX-Injected: 1": "v",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("UploadFile: want error for ProviderOptions key containing LF")
+	}
+	if hit {
+		t.Error("UploadFile: request was sent despite invalid provider option key")
+	}
+}
+
+func TestFilesUploadFileProviderOptionValueCRLFRejected(t *testing.T) {
+	var hit bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/files", func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		w.WriteHeader(http.StatusOK)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	store := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Files()
+
+	_, err := store.UploadFile(context.Background(), provider.FileUploadCall{
+		Data:     []byte("data"),
+		Filename: "a",
+		ProviderOptions: map[string]any{
+			"anthropic": map[string]any{
+				"note": "hi\r\n--boundary",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("UploadFile: want error for ProviderOptions value containing CRLF")
+	}
+	if hit {
+		t.Error("UploadFile: request was sent despite invalid provider option value")
+	}
+}
+
 // TestFilesBetaHeaderNotOnLanguageModelPath verifies the anthropic-beta
 // header used by the Files API is never sent on the shared
 // language-model path.

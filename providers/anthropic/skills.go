@@ -13,6 +13,8 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+
+	"github.com/azrtydxb/go-ai-sdk/internal/multipartutil"
 )
 
 // skillsBetaHeader is the anthropic-beta header value required by the
@@ -62,13 +64,23 @@ func (p *Provider) UploadSkill(ctx context.Context, call UploadSkillCall) (*Skil
 		return nil, fmt.Errorf("anthropic: write skill file part: %w", err)
 	}
 
+	if err := multipartutil.ValidField("display_name", call.DisplayName); err != nil {
+		return nil, fmt.Errorf("anthropic: %w", err)
+	}
 	if err := mw.WriteField("display_name", call.DisplayName); err != nil {
 		return nil, fmt.Errorf("anthropic: write display_name field: %w", err)
 	}
 
 	if opts, ok := call.ProviderOptions["anthropic"].(map[string]any); ok {
 		for k, v := range opts {
-			if err := mw.WriteField(k, fmt.Sprint(v)); err != nil {
+			if err := multipartutil.ValidField("provider option field name", k); err != nil {
+				return nil, fmt.Errorf("anthropic: %w", err)
+			}
+			sv := fmt.Sprint(v)
+			if err := multipartutil.ValidField("provider option field value", sv); err != nil {
+				return nil, fmt.Errorf("anthropic: %w", err)
+			}
+			if err := mw.WriteField(k, sv); err != nil {
 				return nil, fmt.Errorf("anthropic: write provider option field %q: %w", k, err)
 			}
 		}

@@ -12,6 +12,7 @@ import (
 	"os"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
+	"github.com/azrtydxb/go-ai-sdk/internal/multipartutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -144,7 +145,14 @@ func applyProviderOptions(reqBytes []byte, providerOptions map[string]any) ([]by
 func applyProviderOptionsForm(mw *multipart.Writer, providerOptions map[string]any) error {
 	opts, _ := providerOptions["elevenlabs"].(map[string]any)
 	for k, v := range opts {
-		if err := mw.WriteField(k, fmt.Sprint(v)); err != nil {
+		if err := multipartutil.ValidField("provider option field name", k); err != nil {
+			return err
+		}
+		sv := fmt.Sprint(v)
+		if err := multipartutil.ValidField("provider option field value", sv); err != nil {
+			return err
+		}
+		if err := mw.WriteField(k, sv); err != nil {
 			return err
 		}
 	}

@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/multipartutil"
 	"github.com/azrtydxb/go-ai-sdk/internal/transcribeutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -127,6 +128,10 @@ func (m *transcriptionModel) Transcribe(ctx context.Context, call provider.Trans
 // upload sends the raw audio bytes to Gladia's /v2/upload endpoint as a
 // multipart "audio" field, returning the resulting audio_url.
 func (m *transcriptionModel) upload(ctx context.Context, call provider.TranscriptionCall) (string, error) {
+	if err := multipartutil.ValidField("media type", call.MediaType); err != nil {
+		return "", fmt.Errorf("gladia: %w", err)
+	}
+
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 

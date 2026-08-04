@@ -11,6 +11,7 @@ import (
 	"net/textproto"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
+	"github.com/azrtydxb/go-ai-sdk/internal/multipartutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -69,6 +70,12 @@ func fileAPIError(resp *http.Response, body []byte) error {
 // call.FileUploadCall.MediaType's information dropped, matching prior
 // behavior for callers that don't set MediaType.
 func createFilePart(mw *multipart.Writer, filename, mediaType string) (io.Writer, error) {
+	if err := multipartutil.ValidField("filename", filename); err != nil {
+		return nil, err
+	}
+	if err := multipartutil.ValidField("media type", mediaType); err != nil {
+		return nil, err
+	}
 	if mediaType == "" {
 		return mw.CreateFormFile("file", filename)
 	}
@@ -100,13 +107,23 @@ func (s *fileStore) UploadFile(ctx context.Context, call provider.FileUploadCall
 	if purpose == "" {
 		purpose = defaultFilePurpose
 	}
+	if err := multipartutil.ValidField("purpose", purpose); err != nil {
+		return nil, fmt.Errorf("openai: %w", err)
+	}
 	if err := mw.WriteField("purpose", purpose); err != nil {
 		return nil, fmt.Errorf("openai: write purpose field: %w", err)
 	}
 
 	if opts, ok := call.ProviderOptions["openai"].(map[string]any); ok {
 		for k, v := range opts {
-			if err := mw.WriteField(k, fmt.Sprint(v)); err != nil {
+			if err := multipartutil.ValidField("provider option field name", k); err != nil {
+				return nil, fmt.Errorf("openai: %w", err)
+			}
+			sv := fmt.Sprint(v)
+			if err := multipartutil.ValidField("provider option field value", sv); err != nil {
+				return nil, fmt.Errorf("openai: %w", err)
+			}
+			if err := mw.WriteField(k, sv); err != nil {
 				return nil, fmt.Errorf("openai: write provider option field %q: %w", k, err)
 			}
 		}

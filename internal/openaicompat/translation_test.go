@@ -216,3 +216,58 @@ func TestTranslationCtxCancel(t *testing.T) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 }
+
+// --- Security: multipart CRLF/quote injection guard ---
+//
+// mime/multipart.Writer writes MIME headers verbatim with no CRLF
+// validation (unlike net/http), so a caller-supplied MediaType or
+// ProviderOptions key/value containing "\r\n" could otherwise forge extra
+// multipart headers or parts. These tests confirm such values are
+// rejected before anything is sent to the server.
+
+func TestTranslationMediaTypeCRLFRejected(t *testing.T) {
+	var hit bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	model := NewTranslationModel(Config{Name: "test", APIKey: "k", BaseURL: srv.URL}, "whisper-1")
+	_, err := model.Translate(context.Background(), provider.TranslationCall{
+		Audio:     []byte("x"),
+		MediaType: "audio/mpeg\r\nX-Injected: 1",
+	})
+	if err == nil {
+		t.Fatal("Translate: want error for MediaType containing CRLF")
+	}
+	if hit {
+		t.Error("Translate: request was sent despite invalid MediaType")
+	}
+}
+
+func TestTranslationProviderOptionKeyNewlineRejected(t *testing.T) {
+	var hit bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	model := NewTranslationModel(Config{Name: "test", APIKey: "k", BaseURL: srv.URL}, "whisper-1")
+	_, err := model.Translate(context.Background(), provider.TranslationCall{
+		Audio:     []byte("x"),
+		MediaType: "audio/mpeg",
+		ProviderOptions: map[string]any{
+			"test": map[string]any{
+				"evil\nX-Injected: 1": "v",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("Translate: want error for ProviderOptions key containing LF")
+	}
+	if hit {
+		t.Error("Translate: request was sent despite invalid provider option key")
+	}
+}
