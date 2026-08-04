@@ -115,6 +115,13 @@ out under Changed.
   volume can't blow past the configured budget on its own; empty or
   whitespace-only generated code is now rejected with
   `*ai.InvalidToolArgumentsError` before the sandbox is ever invoked.
+- **WebSocket control-frame writes carry a bounded deadline** — an
+  automatic pong reply to a peer that pings then stops reading can no
+  longer wedge `Read`/`Close` indefinitely.
+- **OpenAI realtime voice: a corrupt base64 audio delta is surfaced, not
+  swallowed** — the event is still delivered with its raw payload intact
+  (`AudioDelta` nil) instead of being silently indistinguishable from an
+  empty delta.
 - **`aitest` mock providers are now concurrency-safe** — a per-mock
   `sync.Mutex` guards every record-append and response-index computation,
   fixing a data race under concurrent test use; `Recorded*` snapshot
@@ -159,6 +166,12 @@ out under Changed.
 - **Middleware constructors taking a `nil` wrapped `Model` now panic at
   construction time** (see Fixed above) instead of deferring the failure
   to first use.
+- **MCP `tools/list` and `tools/call` are now capability-gated.** Matching
+  the existing resources/prompts/completions behavior, `ListTools`/`CallTool`
+  return an `*mcp.CapabilityError` without sending a request when the server
+  did not advertise the `tools` capability in its `initialize` response
+  (previously the request was always sent). Conforming tool-serving servers
+  advertise the capability, so this only affects servers that omit it.
 
 ## [0.2.0] — 2026-08-03
 

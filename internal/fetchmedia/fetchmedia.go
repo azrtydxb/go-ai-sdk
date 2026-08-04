@@ -331,6 +331,12 @@ func pinnedDialContext(dial dialContextFunc) dialContextFunc {
 			return nil, fmt.Errorf("dial %s: host %s has no usable resolved addresses", addr, host)
 		}
 
+		// Dial the first vetted address literally, so the IP that was
+		// SSRF-checked is exactly the one connected (no second, unchecked
+		// resolution — the DNS-rebind defense). Trade-off: this forgoes
+		// multi-record failover / happy-eyeballs; a host whose first
+		// resolved address is unreachable fails here rather than falling
+		// through to the next record.
 		return dial(ctx, network, net.JoinHostPort(vetted.String(), port))
 	}
 }
