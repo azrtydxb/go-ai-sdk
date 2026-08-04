@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -347,27 +348,29 @@ func TestHTTPTransportNoRetryMidSSEStream(t *testing.T) {
 	}
 }
 
-// TestHTTPTransportRetryOnConnectionError asserts a connection error (the
-// server closing the connection outright) is retried like a 429/503.
-func TestHTTPTransportRetryOnConnectionError(t *testing.T) {
+// TestHTTPTransportNoRetryOnMidFlightConnectionError asserts a connection
+// error that happens *after* the server received the request (here: the
+// server hijacks the connection and closes it outright, without writing a
+// response) is NOT retried. Such an error is consistent with the server
+// having already processed the request (e.g. a side-effecting tools/call)
+// before the connection dropped, so retrying it risks executing a
+// non-idempotent call twice — see WithHTTPRetry's doc and
+// isNotDeliveredErr. This supersedes an earlier version of this test that
+// asserted the opposite (blanket retry-on-any-connection-error), which is
+// exactly the double-execution hazard this fix closes.
+func TestHTTPTransportNoRetryOnMidFlightConnectionError(t *testing.T) {
 	var attempts int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := atomic.AddInt32(&attempts, 1)
-		if n == 1 {
-			hj, ok := w.(http.Hijacker)
-			if !ok {
-				t.Fatal("ResponseWriter does not support Hijack")
-			}
-			conn, _, err := hj.Hijack()
-			if err != nil {
-				t.Fatalf("Hijack: %v", err)
-			}
-			conn.Close() // simulate a connection error
-			return
+		atomic.AddInt32(&attempts, 1)
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Fatal("ResponseWriter does not support Hijack")
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
+		conn, _, err := hj.Hijack()
+		if err != nil {
+			t.Fatalf("Hijack: %v", err)
+		}
+		conn.Close() // simulate a connection error after the request was received
 	}))
 	defer srv.Close()
 
@@ -377,14 +380,43 @@ func TestHTTPTransportRetryOnConnectionError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	if err := tr.Send(ctx, json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"a"}`)); err != nil {
-		t.Fatalf("Send: %v", err)
+	if err := tr.Send(ctx, json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"a"}`)); err == nil {
+		t.Fatal("Send: want error for a mid-flight connection error, got nil")
 	}
-	if _, err := tr.Receive(ctx); err != nil {
-		t.Fatalf("Receive: %v", err)
+	if atomic.LoadInt32(&attempts) != 1 {
+		t.Fatalf("attempts = %d, want 1 (no retry)", attempts)
 	}
-	if atomic.LoadInt32(&attempts) != 2 {
-		t.Fatalf("attempts = %d, want 2", attempts)
+}
+
+// TestHTTPTransportRetryOnConnectionRefused asserts a connection-refused
+// error (nothing listening on the target port — proof the request was
+// never delivered anywhere) IS retried like a 429/503.
+func TestHTTPTransportRetryOnConnectionRefused(t *testing.T) {
+	// Bind a listener, learn its address, then close it immediately: the
+	// port is very likely to still refuse connections for the duration of
+	// this test (nothing else should grab it in that window), giving a
+	// reliable ECONNREFUSED without relying on a specific unused port.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	if err := ln.Close(); err != nil {
+		t.Fatalf("Close listener: %v", err)
+	}
+
+	tr := NewStreamableHTTPTransportWithOptions("http://"+addr, WithHTTPRetry(2))
+	setRetryBaseDelay(tr, time.Millisecond)
+	defer tr.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	err = tr.Send(ctx, json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"a"}`))
+	if err == nil {
+		t.Fatal("Send: want error (nothing listening after all retries), got nil")
+	}
+	if !isNotDeliveredErr(err) {
+		t.Fatalf("Send err = %v, want a not-delivered error (connection refused)", err)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -266,6 +267,90 @@ func TestFramedTransportRepeatedTimeoutThenMessage(t *testing.T) {
 	}
 	if string(msg) != `{"hello":"world"}` {
 		t.Fatalf("msg = %q, want %q", msg, `{"hello":"world"}`)
+	}
+}
+
+// TestFramedTransportSendCtxCancelOnBlockedWrite pins fix #1: Send over a
+// real *os.File writer must be interrupted by ctx cancellation even while
+// blocked inside the underlying Write syscall (a full pipe buffer, nobody
+// reading the other end — the same situation as a hung child process that
+// stopped reading its stdin). Before the fix, Send only checked ctx.Err()
+// once up front and then called a bare blocking Write, so this would hang
+// forever; since Client.call holds sendMu for the whole Send, that would
+// also wedge every other concurrent RPC on the client, not just this one.
+func TestFramedTransportSendCtxCancelOnBlockedWrite(t *testing.T) {
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	defer pr.Close()
+
+	tr := newFramedTransport(strings.NewReader(""), pw, nil)
+	defer tr.Close()
+
+	// A message large enough to exceed any realistic OS pipe buffer size
+	// (typically 16-64KB), so the underlying Write blocks partway through
+	// since nothing ever reads from pr in this test.
+	big := bytes.Repeat([]byte("x"), 32<<20) // 32MB
+	msg := json.RawMessage(append(append([]byte{'"'}, big...), '"'))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	done := make(chan error, 1)
+	go func() { done <- tr.Send(ctx, msg) }()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("Send: want error from ctx cancellation on a blocked write, got nil")
+		}
+		if elapsed := time.Since(start); elapsed > testTimeout {
+			t.Fatalf("Send took %v to return after ctx cancellation, want well under %v", elapsed, testTimeout)
+		}
+	case <-time.After(testTimeout):
+		t.Fatal("Send did not return after ctx cancellation on a blocked write — the wedge fix #1 targets is still present")
+	}
+
+	// The interrupted write may have left a partial line on the wire, so
+	// the transport must now refuse further Sends (abandoned) rather than
+	// risk corrupting the framing further.
+	if err := tr.Send(context.Background(), json.RawMessage(`{"a":1}`)); err == nil {
+		t.Fatal("Send after an interrupted write: want error (transport abandoned), got nil")
+	}
+}
+
+// TestFramedTransportSendSubprocessRoundTripStillWorks is a companion to
+// the ctx-cancel-on-blocked-write test above: it asserts the ctx-aware
+// write path introduced by fix #1 doesn't break the common case of a
+// well-behaved peer that reads promptly, over a real subprocess (not just
+// the in-memory pipe transports used elsewhere in this file).
+func TestFramedTransportSendSubprocessRoundTripStillWorks(t *testing.T) {
+	if _, err := exec.LookPath("cat"); err != nil {
+		t.Skip("cat not available")
+	}
+	tr, err := NewStdioTransport([]string{"cat"}, nil)
+	if err != nil {
+		t.Fatalf("NewStdioTransport: %v", err)
+	}
+	defer tr.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	for i := 0; i < 5; i++ {
+		msg := json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"ping"}`)
+		if err := tr.Send(ctx, msg); err != nil {
+			t.Fatalf("Send %d: %v", i, err)
+		}
+		echoed, err := tr.Receive(ctx)
+		if err != nil {
+			t.Fatalf("Receive %d: %v", i, err)
+		}
+		if string(echoed) != string(msg) {
+			t.Fatalf("echoed %d = %q, want %q", i, echoed, msg)
+		}
 	}
 }
 

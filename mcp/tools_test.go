@@ -13,8 +13,7 @@ import (
 )
 
 func TestToolsSchemaPassthrough(t *testing.T) {
-	client, server := newPipePair()
-	c := NewClient(client)
+	c, server := withCap("tools")
 	defer c.Close()
 
 	wantSchema := json.RawMessage(`{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}`)
@@ -59,8 +58,7 @@ func TestToolsSchemaPassthrough(t *testing.T) {
 }
 
 func TestToolsExecuteHappyPath(t *testing.T) {
-	client, server := newPipePair()
-	c := NewClient(client)
+	c, server := withCap("tools")
 	defer c.Close()
 
 	results := make(chan struct {
@@ -128,8 +126,7 @@ func TestToolsExecuteHappyPath(t *testing.T) {
 }
 
 func TestToolsExecuteIsErrorBecomesGoError(t *testing.T) {
-	client, server := newPipePair()
-	c := NewClient(client)
+	c, server := withCap("tools")
 	defer c.Close()
 
 	results := make(chan []ai.Tool, 1)
@@ -181,8 +178,7 @@ func TestToolsExecuteIsErrorBecomesGoError(t *testing.T) {
 // mcp.Tools' adapter against a scripted MCP server, and the loop continues
 // with the result.
 func TestToolsIntegrationWithGenerateText(t *testing.T) {
-	client, server := newPipePair()
-	c := NewClient(client)
+	c, server := withCap("tools")
 	defer c.Close()
 
 	// Serve tools/list once, then tools/call once, on a background

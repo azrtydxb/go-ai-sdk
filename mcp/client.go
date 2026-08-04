@@ -91,14 +91,29 @@ func (c *Client) hasCapability(name string) bool {
 	return ok
 }
 
+// maxPaginatePages bounds the number of pages paginate will fetch, as a
+// backstop against a misbehaving server that never terminates pagination
+// (see paginate's repeat-cursor check for the primary guard).
+const maxPaginatePages = 10000
+
 // paginate drives cursor-based pagination shared by list-style MCP methods:
 // fetch is invoked with the cursor for each page ("" for the first) and
 // returns that page's items, the nextCursor (empty when there are no more
 // pages), or an error. Results are concatenated across pages in order.
+//
+// A server that returns the same nextCursor twice in a row (buggy, or
+// deliberately malicious) would otherwise make this loop forever making
+// identical requests; paginate detects that (next == cursor, with cursor
+// non-empty) and returns an error instead. maxPaginatePages is a second,
+// coarser backstop against a server whose cursor keeps changing but never
+// terminates.
 func paginate[T any](fetch func(cursor string) (items []T, nextCursor string, err error)) ([]T, error) {
 	var all []T
 	cursor := ""
-	for {
+	for page := 0; ; page++ {
+		if page >= maxPaginatePages {
+			return nil, fmt.Errorf("mcp: pagination exceeded %d pages without terminating", maxPaginatePages)
+		}
 		items, next, err := fetch(cursor)
 		if err != nil {
 			return nil, err
@@ -106,6 +121,9 @@ func paginate[T any](fetch func(cursor string) (items []T, nextCursor string, er
 		all = append(all, items...)
 		if next == "" {
 			break
+		}
+		if next == cursor {
+			return nil, fmt.Errorf("mcp: server returned the same cursor %q twice in a row; aborting to avoid looping forever", next)
 		}
 		cursor = next
 	}
@@ -135,8 +153,13 @@ type toolsListResult struct {
 }
 
 // ListTools issues tools/list, transparently paginating via nextCursor
-// until the server stops returning one.
+// until the server stops returning one. It returns a *CapabilityError
+// without sending any request if the server's "initialize" response didn't
+// advertise the "tools" capability.
 func (c *Client) ListTools(ctx context.Context) ([]ToolDef, error) {
+	if !c.hasCapability("tools") {
+		return nil, &CapabilityError{Capability: "tools"}
+	}
 	return paginate(func(cursor string) ([]ToolDef, string, error) {
 		raw, err := c.call(ctx, "tools/list", toolsListParams{Cursor: cursor})
 		if err != nil {
@@ -178,8 +201,12 @@ type toolsCallResult struct {
 // CallTool issues tools/call with the given arguments (a JSON object; a nil
 // args is sent as {}). Content parts of type "text" are concatenated in
 // order into ToolResult.Text; other content types (e.g. images) are ignored
-// in v1.
+// in v1. It returns a *CapabilityError without sending any request if the
+// server's "initialize" response didn't advertise the "tools" capability.
 func (c *Client) CallTool(ctx context.Context, name string, args json.RawMessage) (*ToolResult, error) {
+	if !c.hasCapability("tools") {
+		return nil, &CapabilityError{Capability: "tools"}
+	}
 	if len(args) == 0 {
 		args = json.RawMessage("{}")
 	}

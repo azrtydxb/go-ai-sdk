@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"net"
 	"net/http"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/sse"
@@ -59,15 +61,30 @@ func WithAuthHeader(name string) HTTPOption {
 }
 
 // WithHTTPRetry enables retrying Send on transient failures: HTTP 429/503
-// responses and connection errors. maxRetries is the number of retries
-// after the initial attempt (0, the default, disables retrying entirely).
-// Retries use capped exponential backoff, honoring a Retry-After response
-// header when present (seconds or an HTTP-date), and respect ctx
-// cancellation while backing off. 4xx responses other than 429, and any
-// failure once SSE response bytes have begun being consumed, are never
-// retried. Each retry attempt re-invokes the configured TokenProvider, if
-// any, for a fresh token — the transport does not retry 401s itself;
-// refreshing credentials on auth failure is the TokenProvider's job.
+// responses (always safe — the server either rejected or didn't process the
+// request) and a conservative allowlist of pre-delivery connection errors:
+// connection-refused and DNS resolution failures, plus any error surfaced
+// during the dial phase (a *net.OpError with Op == "dial"). These all prove
+// the request bytes never reached the server, so retrying cannot cause a
+// side-effecting call (e.g. tools/call) to run twice.
+//
+// A generic client.Do error that isn't on that allowlist (e.g. "connection
+// reset by peer" while reading the response, which can happen *after* the
+// server has already processed a POST) is deliberately NOT retried: the
+// transport cannot tell whether the server received and acted on the
+// request, and retrying could double-execute a non-idempotent tool call.
+// If your deployment needs broader retry coverage, wrap the *http.Client
+// (WithHTTPClientOpt) with your own idempotency-aware retry logic instead.
+//
+// maxRetries is the number of retries after the initial attempt (0, the
+// default, disables retrying entirely). Retries use capped exponential
+// backoff, honoring a Retry-After response header when present (seconds or
+// an HTTP-date), and respect ctx cancellation while backing off. 4xx
+// responses other than 429, and any failure once response bytes (JSON or
+// SSE) have begun being consumed, are never retried. Each retry attempt
+// re-invokes the configured TokenProvider, if any, for a fresh token — the
+// transport does not retry 401s itself; refreshing credentials on auth
+// failure is the TokenProvider's job.
 func WithHTTPRetry(maxRetries int) HTTPOption {
 	return func(t *httpTransport) { t.maxRetries = maxRetries }
 }
@@ -210,6 +227,39 @@ type retryableHTTPError struct {
 func (e *retryableHTTPError) Error() string { return e.err.Error() }
 func (e *retryableHTTPError) Unwrap() error { return e.err }
 
+// isNotDeliveredErr reports whether err proves the request was never
+// delivered to the server, making it safe to retry without risking a
+// double-execution of a non-idempotent call (see WithHTTPRetry's doc for
+// the rationale). It recognizes:
+//   - connection-refused (syscall.ECONNREFUSED, e.g. nothing listening on
+//     the target port),
+//   - DNS resolution failures (*net.DNSError, e.g. the host doesn't
+//     resolve),
+//   - any error surfaced during the dial phase (*net.OpError with
+//     Op == "dial") — dialing happens strictly before any request bytes are
+//     written, so a dial-phase failure by construction cannot have reached
+//     the server.
+//
+// Anything else — including a connection that was established and then
+// reset or timed out while the request or response was in flight — is NOT
+// in this allowlist, because such an error is consistent with the server
+// having already received (and, for a POST, possibly processed) the
+// request before the failure occurred.
+func isNotDeliveredErr(err error) bool {
+	if errors.Is(err, syscall.ECONNREFUSED) {
+		return true
+	}
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return true
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) && opErr.Op == "dial" {
+		return true
+	}
+	return false
+}
+
 // Send implements Transport. When WithHTTPRetry has configured
 // maxRetries > 0, Send retries a retryableHTTPError up to maxRetries times
 // with capped exponential backoff (honoring a Retry-After response header
@@ -289,7 +339,14 @@ func (t *httpTransport) sendOnce(ctx context.Context, msg json.RawMessage) error
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		return &retryableHTTPError{err: fmt.Errorf("mcp: http request: %w", err)}
+		if isNotDeliveredErr(err) {
+			return &retryableHTTPError{err: fmt.Errorf("mcp: http request: %w", err)}
+		}
+		// Not on the not-delivered allowlist: this error doesn't prove the
+		// request was never seen by the server (e.g. it could have reset
+		// the connection after processing a POST), so retrying here risks
+		// double-executing a non-idempotent call. See WithHTTPRetry's doc.
+		return fmt.Errorf("mcp: http request: %w", err)
 	}
 
 	if sid := resp.Header.Get("Mcp-Session-Id"); sid != "" {
@@ -341,6 +398,21 @@ func (t *httpTransport) sendOnce(ctx context.Context, msg json.RawMessage) error
 		go t.drainSSE(resp.Body)
 		return nil
 	default:
+		// Track this body in openBodies too (not just the SSE case above):
+		// otherwise a JSON body whose read stalls (e.g. a server that sends
+		// headers and a Content-Length but then never finishes the body) is
+		// not interrupted by Close, which only sweeps bodies it knows about.
+		// Same atomicity rationale as trackBody's doc: if the transport
+		// raced closed after the fast-path check at the top of Send, back
+		// off here too.
+		if !t.trackBody(resp.Body) {
+			resp.Body.Close()
+			return errors.New("mcp: transport closed")
+		}
+		defer func() {
+			t.untrackBody(resp.Body)
+			t.drainWG.Done()
+		}()
 		defer resp.Body.Close()
 		body, err := io.ReadAll(io.LimitReader(resp.Body, maxSuccessBodyBytes+1))
 		if err != nil {

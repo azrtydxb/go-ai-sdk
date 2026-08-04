@@ -198,8 +198,7 @@ func TestInitializeRejectsUnsupportedProtocolVersion(t *testing.T) {
 }
 
 func TestListToolsPagination(t *testing.T) {
-	client, server := newPipePair()
-	c := NewClient(client)
+	c, server := withCap("tools")
 	defer c.Close()
 
 	type toolWire struct {
@@ -271,9 +270,98 @@ func TestListToolsPagination(t *testing.T) {
 	}
 }
 
-func TestCallToolConcatenatesTextAndIgnoresOtherTypes(t *testing.T) {
+// TestPaginateRepeatedCursorErrors pins fix #7: a fetch function that keeps
+// returning the same non-empty nextCursor (a buggy or malicious server)
+// must not loop forever — paginate detects no progress and returns an
+// error instead.
+func TestPaginateRepeatedCursorErrors(t *testing.T) {
+	calls := 0
+	_, err := paginate(func(cursor string) ([]int, string, error) {
+		calls++
+		if calls > 3 {
+			t.Fatalf("fetch called %d times, want paginate to stop after detecting the repeated cursor", calls)
+		}
+		return []int{calls}, "same-cursor", nil
+	})
+	if err == nil {
+		t.Fatal("paginate: want error for a repeated cursor, got nil")
+	}
+}
+
+// TestPaginateStopsOnEmptyCursor is the normal-termination companion to the
+// repeated-cursor test: distinct cursors, then an empty one, must complete
+// normally without tripping the repeat-cursor guard.
+func TestPaginateStopsOnEmptyCursor(t *testing.T) {
+	pages := []string{"", "p1", "p2"}
+	i := 0
+	items, err := paginate(func(cursor string) ([]int, string, error) {
+		if cursor != pages[i] {
+			t.Fatalf("call %d: cursor = %q, want %q", i, cursor, pages[i])
+		}
+		i++
+		next := ""
+		if i < len(pages) {
+			next = pages[i]
+		}
+		return []int{i}, next, nil
+	})
+	if err != nil {
+		t.Fatalf("paginate: %v", err)
+	}
+	if len(items) != len(pages) {
+		t.Fatalf("got %d items, want %d", len(items), len(pages))
+	}
+}
+
+// TestListToolsRequiresCapability and TestCallToolRequiresCapability pin
+// fix #8: tools/list and tools/call must be gated on the "tools" server
+// capability the same way resources/prompts/completions already are,
+// returning *CapabilityError without sending any request.
+func TestListToolsRequiresCapability(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
+	defer c.Close()
+	// serverCaps left nil: as if Initialize's server never advertised "tools".
+
+	_, err := c.ListTools(context.Background())
+	var capErr *CapabilityError
+	if !errors.As(err, &capErr) {
+		t.Fatalf("err = %v, want *CapabilityError", err)
+	}
+	if capErr.Capability != "tools" {
+		t.Fatalf("capErr.Capability = %q, want tools", capErr.Capability)
+	}
+
+	shortCtx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := server.Receive(shortCtx); err == nil {
+		t.Fatal("server received a request despite the missing capability, want none")
+	}
+}
+
+func TestCallToolRequiresCapability(t *testing.T) {
+	client, server := newPipePair()
+	c := NewClient(client)
+	defer c.Close()
+
+	_, err := c.CallTool(context.Background(), "echo", nil)
+	var capErr *CapabilityError
+	if !errors.As(err, &capErr) {
+		t.Fatalf("err = %v, want *CapabilityError", err)
+	}
+	if capErr.Capability != "tools" {
+		t.Fatalf("capErr.Capability = %q, want tools", capErr.Capability)
+	}
+
+	shortCtx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := server.Receive(shortCtx); err == nil {
+		t.Fatal("server received a request despite the missing capability, want none")
+	}
+}
+
+func TestCallToolConcatenatesTextAndIgnoresOtherTypes(t *testing.T) {
+	c, server := withCap("tools")
 	defer c.Close()
 
 	type result struct {
@@ -323,8 +411,7 @@ func TestCallToolConcatenatesTextAndIgnoresOtherTypes(t *testing.T) {
 }
 
 func TestCallToolIsError(t *testing.T) {
-	client, server := newPipePair()
-	c := NewClient(client)
+	c, server := withCap("tools")
 	defer c.Close()
 
 	type result struct {
@@ -356,8 +443,7 @@ func TestCallToolIsError(t *testing.T) {
 }
 
 func TestRPCErrorSurfaces(t *testing.T) {
-	client, server := newPipePair()
-	c := NewClient(client)
+	c, server := withCap("tools")
 	defer c.Close()
 
 	results := make(chan error, 1)
@@ -383,9 +469,7 @@ func TestRPCErrorSurfaces(t *testing.T) {
 }
 
 func TestContextCancellationAbandonsCall(t *testing.T) {
-	client, server := newPipePair()
-	_ = server
-	c := NewClient(client)
+	c, server := withCap("tools")
 	defer c.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -420,9 +504,7 @@ func TestContextCancellationAbandonsCall(t *testing.T) {
 }
 
 func TestCloseUnblocksPendingCalls(t *testing.T) {
-	client, server := newPipePair()
-	_ = server
-	c := NewClient(client)
+	c, server := withCap("tools")
 
 	results := make(chan error, 1)
 	go func() {

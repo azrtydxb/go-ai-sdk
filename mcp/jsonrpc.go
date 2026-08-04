@@ -99,7 +99,7 @@ type Client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	nextID int64
+	nextID atomic.Int64
 
 	mu      sync.Mutex
 	pending map[int64]chan rpcResponse
@@ -121,6 +121,11 @@ type Client struct {
 	closeOnce sync.Once
 	closeCh   chan struct{}
 	closeErr  error
+
+	// transportCloseErr is the error, if any, returned by the transport.Close
+	// call made from inside closeWith (guarded by closeOnce, so it's safe to
+	// read after closeWith has returned — see Client.Close).
+	transportCloseErr error
 
 	loopDone chan struct{}
 }
@@ -193,30 +198,47 @@ func (c *Client) recvLoop() {
 	}
 }
 
-// closeWith marks the client closed with err and abandons all pending
-// calls, exactly once.
+// closeWith marks the client closed with err, abandons all pending calls,
+// and closes the underlying transport, exactly once. Closing the transport
+// here (not just from Client.Close) matters for the recvLoop error path: a
+// transport read error (e.g. the child process died, or the connection
+// dropped) reaches here via recvLoop, and without this the transport would
+// never be closed on that path — leaking a zombie child process and, for
+// the stdio transport, a readLoop goroutine parked forever waiting for a
+// Close that never comes. transport.Close is required to be idempotent, so
+// the later explicit call from Client.Close (the normal shutdown path) is
+// safe even after closeWith already closed it here.
 func (c *Client) closeWith(err error) {
 	c.closeOnce.Do(func() {
+		// closeErr and pending are set together under mu so that any call()
+		// which observes pending == nil is guaranteed (by mu's
+		// happens-before) to also observe the final closeErr, not a
+		// zero-value error from before this closeWith ran.
 		c.mu.Lock()
+		c.closeErr = err
 		c.pending = nil
 		c.mu.Unlock()
 
-		c.closeErr = err
 		close(c.closeCh)
 		c.cancel()
+		c.transportCloseErr = c.transport.Close()
 	})
 }
 
 // call issues a request and blocks for the matching response, honouring ctx
 // cancellation and client Close.
 func (c *Client) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
-	id := atomic.AddInt64(&c.nextID, 1)
+	id := c.nextID.Add(1)
 	ch := make(chan rpcResponse, 1)
 
 	c.mu.Lock()
 	if c.pending == nil {
+		err := c.closeErr
 		c.mu.Unlock()
-		return nil, errors.New(errClosedMsg)
+		if err == nil {
+			err = errors.New(errClosedMsg)
+		}
+		return nil, err
 	}
 	c.pending[id] = ch
 	c.mu.Unlock()
@@ -307,10 +329,10 @@ func (c *Client) notify(ctx context.Context, method string, params any) error {
 }
 
 // Close shuts down the receive loop, abandons any pending calls with a
-// "mcp: client closed" error, and closes the underlying transport.
+// "mcp: client closed" error, and closes the underlying transport (via
+// closeWith, which performs the actual transport.Close call — see its doc).
 func (c *Client) Close() error {
 	c.closeWith(errors.New(errClosedMsg))
-	err := c.transport.Close()
 	<-c.loopDone
-	return err
+	return c.transportCloseErr
 }

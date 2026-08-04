@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -43,8 +44,9 @@ type framedTransport struct {
 	scanner *bufio.Scanner
 	msgCh   chan framedResult
 
-	writeMu sync.Mutex
-	w       io.WriteCloser
+	writeMu   sync.Mutex
+	w         io.WriteCloser
+	abandoned bool // set once a write is interrupted mid-flight by ctx cancellation
 
 	closeOnce sync.Once
 	closed    chan struct{}
@@ -112,6 +114,14 @@ func (t *framedTransport) readLoop() {
 // messages. Per the MCP stdio transport spec, messages must not contain
 // embedded newlines; Send rejects any msg that does rather than silently
 // corrupting the framing.
+//
+// Send is ctx-aware even while blocked inside the underlying write: a
+// child process that stops reading its stdin (a full pipe buffer) would
+// otherwise block Write forever regardless of ctx, and because Client.call
+// holds sendMu for the duration of Send, that would wedge every other
+// concurrent RPC on this client too, not just the caller who chose to time
+// out. See writeCtx for how the interruption is implemented and why an
+// interrupted write abandons the transport.
 func (t *framedTransport) Send(ctx context.Context, msg json.RawMessage) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -125,8 +135,72 @@ func (t *framedTransport) Send(ctx context.Context, msg json.RawMessage) error {
 
 	t.writeMu.Lock()
 	defer t.writeMu.Unlock()
-	_, err := t.w.Write(line)
+
+	if t.abandoned {
+		return errors.New("mcp: transport abandoned: a previous write was interrupted by context cancellation, which may have left a partial line on the wire")
+	}
+
+	_, err := t.writeCtx(ctx, line)
 	return err
+}
+
+// writeCtx writes line to t.w, arranging for a blocked write to be
+// interrupted if ctx is done before it completes — but only when t.w is an
+// *os.File: only os.File exposes SetWriteDeadline, and the real stdio
+// transport's stdin pipe (exec.Cmd.StdinPipe) is backed by one. For any
+// other writer (e.g. the in-memory bytes.Buffer-backed transport used in
+// tests, which never blocks) this falls back to a plain blocking Write;
+// Send has already checked ctx.Err() once before calling in, so callers
+// still get a best-effort ctx check.
+//
+// Mirrors internal/websocket's runWithContext: a watcher goroutine sets a
+// past write deadline on ctx.Done(), and this function always waits for
+// that watcher to finish touching the deadline before returning, so a race
+// between the watcher firing and Write finishing can never leave a stray
+// deadline poisoning a healthy file after control has returned to the
+// caller.
+//
+// A write interrupted by the deadline may have written a partial line
+// (io.Writer makes no atomicity guarantee) — that corrupts this stream's
+// framing for any peer still reading it, so writeCtx sets t.abandoned
+// (writeMu is already held by the caller) to make every subsequent Send
+// fail fast rather than risk continuing to write after a corrupt partial
+// line.
+func (t *framedTransport) writeCtx(ctx context.Context, line []byte) (int, error) {
+	f, ok := t.w.(*os.File)
+	if !ok || ctx.Done() == nil {
+		return t.w.Write(line)
+	}
+
+	stop := make(chan struct{})
+	watcherDone := make(chan struct{})
+	var interrupted atomic.Bool
+	go func() {
+		defer close(watcherDone)
+		select {
+		case <-ctx.Done():
+			interrupted.Store(true)
+			_ = f.SetWriteDeadline(time.Unix(0, 0))
+		case <-stop:
+		}
+	}()
+
+	n, err := f.Write(line)
+	close(stop)
+	<-watcherDone // don't return until the watcher can no longer touch the deadline unexpectedly
+
+	if !interrupted.Load() {
+		return n, err
+	}
+	if err == nil {
+		// The write completed despite ctx firing (a benign race); clear the
+		// deadline so the file remains usable and don't report an error for
+		// a write that actually succeeded in full.
+		_ = f.SetWriteDeadline(time.Time{})
+		return n, nil
+	}
+	t.abandoned = true
+	return n, ctx.Err()
 }
 
 // Receive returns the next line as a JSON-RPC message. It never loses a

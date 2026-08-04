@@ -53,6 +53,64 @@ func TestHTTPTransportDirectJSONResponse(t *testing.T) {
 	}
 }
 
+// TestHTTPTransportCloseInterruptsStalledJSONBody pins fix #3: Close must
+// interrupt a hung application/json response body read, not just SSE
+// (text/event-stream) bodies. Before the fix, only SSE bodies were
+// registered in openBodies, so a server that sent headers (declaring
+// Content-Type: application/json) and then never finished the body would
+// leave sendOnce's io.ReadAll blocked forever, surviving Close.
+func TestHTTPTransportCloseInterruptsStalledJSONBody(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fl := w.(http.Flusher)
+		// Deliberately incomplete body with no Content-Length: the client
+		// has no way to know it's "done" and must keep reading.
+		fmt.Fprint(w, `{"jsonrpc":"2.0","id`)
+		fl.Flush()
+		<-release // hang until the test lets the handler return
+	}))
+	defer func() {
+		close(release)
+		srv.Close()
+	}()
+
+	tr := NewStreamableHTTPTransport(srv.URL, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	sendDone := make(chan error, 1)
+	go func() { sendDone <- tr.Send(ctx, json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"a"}`)) }()
+
+	// Give sendOnce a moment to reach the (now stalled) io.ReadAll so the
+	// body is actually tracked before Close runs, exercising the real
+	// interrupt path rather than a lucky race where Close beats Send there.
+	time.Sleep(50 * time.Millisecond)
+
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- tr.Close() }()
+
+	select {
+	case err := <-closeDone:
+		if err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+	case <-time.After(testTimeout):
+		t.Fatal("Close did not return promptly — a stalled JSON body was not interrupted (fix #3)")
+	}
+
+	select {
+	case err := <-sendDone:
+		if err == nil {
+			t.Fatal("Send: want an error once Close interrupted the stalled JSON body read, got nil")
+		}
+	case <-time.After(testTimeout):
+		t.Fatal("Send (blocked reading a stalled JSON body) did not return after Close")
+	}
+}
+
 func TestHTTPTransportSSEMultipleMessages(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -208,7 +266,7 @@ func TestHTTPTransportSSEBodyStaysOpen(t *testing.T) {
 		case "initialize":
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":{"protocolVersion":"2025-03-26","capabilities":{}}}`, *req.ID)
+			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":{"protocolVersion":"2025-03-26","capabilities":{"tools":{}}}}`, *req.ID)
 		case "notifications/initialized":
 			w.WriteHeader(http.StatusAccepted)
 		case "tools/call":
@@ -427,7 +485,7 @@ func TestHTTPTransportIntegrationWithClient(t *testing.T) {
 		case "initialize":
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":{"protocolVersion":"2025-03-26","capabilities":{}}}`, *req.ID)
+			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":{"protocolVersion":"2025-03-26","capabilities":{"tools":{}}}}`, *req.ID)
 		case "notifications/initialized":
 			w.WriteHeader(http.StatusAccepted)
 		case "tools/call":
