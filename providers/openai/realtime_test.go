@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -420,6 +422,70 @@ func TestRealtimeSession_EventSurfacing(t *testing.T) {
 	}
 }
 
+// TestRealtimeSession_CorruptAudioDeltaDeliversRawOnly pins Task 6's fix 3:
+// a base64-corrupt "delta" field inside an otherwise well-formed audio-delta
+// event must not fail the whole event (or the session) — the event is still
+// delivered with Raw set, AudioDelta left nil, and iteration/subsequent
+// events unaffected.
+func TestRealtimeSession_CorruptAudioDeltaDeliversRawOnly(t *testing.T) {
+	l, baseURL := listenerBaseURL(t)
+
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		if err := websockettest.Upgrade(conn); err != nil {
+			return
+		}
+		websockettest.ReadMessage(conn) // session update
+
+		websockettest.WriteMessage(conn, websockettest.OpText, []byte(
+			`{"type":"response.output_audio.delta","delta":"not-valid-base64!!"}`))
+		websockettest.WriteMessage(conn, websockettest.OpText, []byte(
+			`{"type":"response.output_text.delta","delta":"after"}`))
+		websockettest.WriteClose(conn, 1000, "")
+	}()
+
+	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
+	session, err := p.RealtimeSession(context.Background(), RealtimeConfig{Model: "m"})
+	if err != nil {
+		t.Fatalf("RealtimeSession: %v", err)
+	}
+	defer session.Close()
+
+	var got []RealtimeEvent
+	for e := range session.Events() {
+		got = append(got, e)
+	}
+	if err := session.Err(); err != nil {
+		t.Fatalf("Err() = %v, want nil (a corrupt delta must not fail the session)", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d events, want 2: %+v", len(got), got)
+	}
+
+	corrupt := got[0]
+	if corrupt.Type != "response.output_audio.delta" {
+		t.Fatalf("event 0 Type = %q, want response.output_audio.delta", corrupt.Type)
+	}
+	if corrupt.AudioDelta != nil {
+		t.Fatalf("event 0 AudioDelta = %v, want nil for an undecodable delta", corrupt.AudioDelta)
+	}
+	if len(corrupt.Raw) == 0 {
+		t.Fatal("event 0 Raw should still be set for a corrupt delta")
+	}
+	if !strings.Contains(string(corrupt.Raw), "not-valid-base64!!") {
+		t.Fatalf("event 0 Raw = %s, want it to contain the undecoded delta", corrupt.Raw)
+	}
+
+	// The stream must keep going after the corrupt delta.
+	if got[1].Type != "response.output_text.delta" || got[1].TextDelta != "after" {
+		t.Fatalf("event 1 = %+v", got[1])
+	}
+}
+
 func TestRealtimeSession_ErrorEventRecordedIterationContinues(t *testing.T) {
 	l, baseURL := listenerBaseURL(t)
 
@@ -494,6 +560,71 @@ func TestRealtimeSession_ServerCloseIsCleanEnd(t *testing.T) {
 	}
 	if err := session.Err(); err != nil {
 		t.Fatalf("Err() = %v, want nil", err)
+	}
+}
+
+// --- Task 6 — readLoop must close the underlying conn on a
+// readLoop-terminating decode error, not just leave the TCP connection
+// lingering until the caller eventually calls Close(). Mirrors
+// TestStreamTranscribe_ErrorEventClosesUnderlyingConn in
+// realtime_transcription_test.go and
+// TestStreamTranscribe_MetadataEndClosesUnderlyingConn in
+// providers/deepgram/live_test.go, which already pin the same invariant for
+// this session type's sibling readLoops. ---
+
+func TestRealtimeSession_MalformedMessageClosesUnderlyingConn(t *testing.T) {
+	l, baseURL := listenerBaseURL(t)
+	tornDown := make(chan bool, 1)
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		if err := websockettest.Upgrade(conn); err != nil {
+			return
+		}
+		websockettest.ReadMessage(conn) // session update
+		websockettest.WriteMessage(conn, websockettest.OpText, []byte(`not json`))
+
+		// The session's own Close() (called by the fixed readLoop) sends a
+		// close frame before tearing down the socket; drain it first so the
+		// raw Read below can't spuriously observe those buffered bytes
+		// instead of the eventual EOF/reset.
+		websockettest.ReadMessage(conn)
+
+		// Without calling session.Close(), confirm the client tore down its
+		// socket as soon as readLoop saw the decode error, rather than
+		// leaving the TCP connection open until some later Close().
+		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		var b [1]byte
+		_, rerr := conn.Read(b[:])
+		var netErr net.Error
+		isTimeout := errors.As(rerr, &netErr) && netErr.Timeout()
+		tornDown <- rerr != nil && !isTimeout
+	}()
+
+	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
+	session, err := p.RealtimeSession(context.Background(), RealtimeConfig{Model: "m"})
+	if err != nil {
+		t.Fatalf("RealtimeSession: %v", err)
+	}
+	// Deliberately not calling session.Close(): readLoop's own exit path
+	// must be the thing that closes the conn.
+
+	for range session.Events() {
+	}
+	if session.Err() == nil {
+		t.Fatal("Err() = nil, want a decode error")
+	}
+
+	select {
+	case ok := <-tornDown:
+		if !ok {
+			t.Error("expected the client to have closed its socket after the decode error without session.Close() being called")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting to observe the client's socket closure")
 	}
 }
 

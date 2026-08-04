@@ -1069,6 +1069,37 @@ func TestPingAutoPongWriteFailureShutsDownConn(t *testing.T) {
 	}
 }
 
+// --- Task 6 — control-frame writes (the automatic pong Read sends for a
+// ping) must carry a bounded write deadline, so a peer that pings and then
+// stops draining can't wedge Read forever on the reply. ---
+
+func TestWriteControlSetsBoundedWriteDeadline(t *testing.T) {
+	fc := &fakeConn{}
+	c := &Conn{conn: fc}
+
+	if err := c.writeControl(opPong, []byte("pong-payload")); err != nil {
+		t.Fatalf("writeControl: %v", err)
+	}
+
+	_, _, writeDeadlines := fc.snapshot()
+	if len(writeDeadlines) < 2 {
+		t.Fatalf("expected at least 2 SetWriteDeadline calls (set before writing, clear after), got %d: %v", len(writeDeadlines), writeDeadlines)
+	}
+
+	first := writeDeadlines[0]
+	if first.IsZero() {
+		t.Fatal("expected writeControl to set a non-zero write deadline before writing the frame")
+	}
+	if d := time.Until(first); d <= 0 || d > controlWriteTimeout+time.Second {
+		t.Fatalf("write deadline %v from now, want within (0, %v]", d, controlWriteTimeout)
+	}
+
+	last := writeDeadlines[len(writeDeadlines)-1]
+	if !last.IsZero() {
+		t.Fatalf("expected writeControl to clear the write deadline after writing (so it doesn't leak into a later WriteText/WriteBinary call), got %v", last)
+	}
+}
+
 // --- Review round: MINOR (c) — reserved headers are skipped; CR/LF is rejected ---
 
 func TestDial_HeaderCRLFRejected(t *testing.T) {

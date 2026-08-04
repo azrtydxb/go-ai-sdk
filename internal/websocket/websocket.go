@@ -69,6 +69,18 @@ const wsMagic = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 // defaultMaxMessageBytes is applied when DialOptions.MaxMessageBytes is 0.
 const defaultMaxMessageBytes = 16 * 1024 * 1024
 
+// controlWriteTimeout bounds writeControl's write of a control frame
+// (notably the automatic pong Read sends in response to a ping). Without
+// this, a peer that pings and then stops draining the socket could wedge a
+// caller's Read indefinitely on the outgoing pong write — a path ctx
+// cancellation can't reach, since that write happens deep inside Read,
+// scoped only to the read-direction deadline. This is a fixed, short bound
+// rather than derived from the caller's ctx: writeControl runs on the read
+// path (and may run with context.Background(), which has no deadline of its
+// own to borrow) and must not block the connection indefinitely regardless
+// of what ctx the caller passed to Read.
+const controlWriteTimeout = 10 * time.Second
+
 // DialOptions configures Dial.
 type DialOptions struct {
 	// Header carries extra handshake request headers (e.g. Authorization).
@@ -582,7 +594,12 @@ func closePayload(code int, reason string) []byte {
 }
 
 // writeControl writes a masked control frame, serialized against user
-// writes via writeMu.
+// writes via writeMu. The write carries a bounded deadline (see
+// controlWriteTimeout) so a stalled peer can't wedge it — and, transitively,
+// a Read call blocked replying to a ping — forever; the deadline is cleared
+// again before returning so it doesn't leak into a subsequent WriteText/
+// WriteBinary call made with a ctx that has no deadline of its own to
+// overwrite it.
 func (c *Conn) writeControl(opcode uint8, payload []byte) error {
 	key, err := newMaskKey()
 	if err != nil {
@@ -590,6 +607,8 @@ func (c *Conn) writeControl(opcode uint8, payload []byte) error {
 	}
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
+	_ = c.conn.SetWriteDeadline(time.Now().Add(controlWriteTimeout))
+	defer c.conn.SetWriteDeadline(time.Time{})
 	return writeFrame(c.conn, true, opcode, payload, &key)
 }
 

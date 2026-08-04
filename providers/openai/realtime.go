@@ -60,8 +60,14 @@ type RealtimeSession struct {
 
 // RealtimeEvent is one event surfaced from an open RealtimeSession.
 type RealtimeEvent struct {
-	Type       string          // the raw server event type
-	AudioDelta []byte          // decoded, for response.output_audio.delta / response.audio.delta
+	Type string // the raw server event type
+	// AudioDelta is the base64-decoded payload for response.output_audio.delta
+	// / response.audio.delta. If the server sends a delta that fails to
+	// base64-decode, AudioDelta is left nil (indistinguishable from an
+	// empty/absent delta) rather than failing the event or the session —
+	// Raw still carries the full, undecoded event, so a caller that needs
+	// to detect this case can inspect Raw's "delta" field directly.
+	AudioDelta []byte
 	TextDelta  string          // response.output_text.delta / response.text.delta / audio transcript deltas
 	Raw        json.RawMessage // always the full event
 }
@@ -291,6 +297,14 @@ func (s *RealtimeSession) setErr(err error) {
 func (s *RealtimeSession) readLoop() {
 	defer close(s.readLoopDone)
 	defer close(s.events)
+	// On a clean non-socket end (a decode/error terminal, or ctx
+	// cancellation) the underlying conn is still open until something
+	// closes it. Without this, the TCP connection lingers until the caller
+	// eventually calls Close() (if ever) instead of being torn down as soon
+	// as the session logically ends. Conn.Close is idempotent, so this is a
+	// no-op on the paths that already shut the conn down themselves (a
+	// *websocket.CloseError or an abnormal closure).
+	defer s.conn.Close(websocket.CloseNormal, "")
 	for {
 		mt, data, err := s.conn.Read(s.ctx)
 		if err != nil {
@@ -343,8 +357,11 @@ type voiceWireEvent struct {
 
 // parseRealtimeVoiceEvent decodes one OpenAI Realtime API event into a
 // RealtimeEvent. Raw is always set to the full event; AudioDelta/TextDelta
-// are populated only for the known delta event types. A decode failure is
-// the only case that returns an error.
+// are populated only for the known delta event types. Only a failure to
+// decode the outer event as JSON returns an error and fails the event
+// entirely — a malformed base64 payload inside an otherwise well-formed
+// audio-delta event does not fail parsing (see RealtimeEvent.AudioDelta):
+// the event is still returned, just with AudioDelta left nil.
 func parseRealtimeVoiceEvent(data []byte) (RealtimeEvent, error) {
 	var msg voiceWireEvent
 	if err := json.Unmarshal(data, &msg); err != nil {
@@ -356,6 +373,11 @@ func parseRealtimeVoiceEvent(data []byte) (RealtimeEvent, error) {
 	switch msg.Type {
 	case "response.audio.delta", "response.output_audio.delta":
 		if msg.Delta != "" {
+			// A decode failure here is intentionally not propagated as an
+			// error: it's a per-event data problem, not a connection
+			// failure, and must not end the session (unlike the outer
+			// json.Unmarshal above). Raw still carries the undecoded
+			// "delta" field for a caller that needs to detect this case.
 			if b, err := base64.StdEncoding.DecodeString(msg.Delta); err == nil {
 				ev.AudioDelta = b
 			}
