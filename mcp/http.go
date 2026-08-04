@@ -93,6 +93,13 @@ func withStaticHeaders(headers map[string]string) HTTPOption {
 // concurrent Receive under normal use.
 const recvQueueSize = 64
 
+// maxSuccessBodyBytes caps a single non-streaming (application/json) response
+// body read, so a compromised or misbehaving server cannot exhaust memory by
+// returning an unbounded body. 16 MiB is far above any real JSON-RPC message
+// yet bounded (error-response bodies are separately capped at 64 KiB). It is a
+// var (not a const) only so tests can lower it.
+var maxSuccessBodyBytes int64 = 16 << 20
+
 // httpTransport implements Transport over the MCP Streamable HTTP transport:
 // each Send is a POST of one JSON-RPC message; the response is either a
 // single application/json body (one received message) or a text/event-stream
@@ -335,9 +342,12 @@ func (t *httpTransport) sendOnce(ctx context.Context, msg json.RawMessage) error
 		return nil
 	default:
 		defer resp.Body.Close()
-		body, err := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(io.LimitReader(resp.Body, maxSuccessBodyBytes+1))
 		if err != nil {
 			return fmt.Errorf("mcp: read response body: %w", err)
+		}
+		if int64(len(body)) > maxSuccessBodyBytes {
+			return fmt.Errorf("mcp: response body exceeds %d bytes", maxSuccessBodyBytes)
 		}
 		if len(body) == 0 {
 			return nil

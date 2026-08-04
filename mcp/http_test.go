@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -455,5 +456,55 @@ func TestHTTPTransportIntegrationWithClient(t *testing.T) {
 	}
 	if res.Text != "hi" {
 		t.Fatalf("Text = %q, want hi", res.Text)
+	}
+}
+
+func TestHTTPTransportSuccessBodyOverCapErrors(t *testing.T) {
+	orig := maxSuccessBodyBytes
+	maxSuccessBodyBytes = 1024
+	defer func() { maxSuccessBodyBytes = orig }()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		// A direct-JSON response body larger than the cap.
+		w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":"`))
+		w.Write([]byte(strings.Repeat("x", 4096)))
+		w.Write([]byte(`"}`))
+	}))
+	defer srv.Close()
+
+	tr := NewStreamableHTTPTransport(srv.URL, nil)
+	defer tr.Close()
+	ctx := context.Background()
+	err := tr.Send(ctx, json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
+	if err == nil {
+		t.Fatal("expected an error when the success body exceeds maxSuccessBodyBytes, got nil")
+	}
+	if !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("error = %v, want it to mention the size limit", err)
+	}
+}
+
+func TestHTTPTransportSuccessBodyUnderCapWorks(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":"ok"}`))
+	}))
+	defer srv.Close()
+
+	tr := NewStreamableHTTPTransport(srv.URL, nil)
+	defer tr.Close()
+	ctx := context.Background()
+	if err := tr.Send(ctx, json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"ping"}`)); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	msg, err := tr.Receive(ctx)
+	if err != nil {
+		t.Fatalf("receive: %v", err)
+	}
+	if !strings.Contains(string(msg), `"ok"`) {
+		t.Fatalf("msg = %s", msg)
 	}
 }

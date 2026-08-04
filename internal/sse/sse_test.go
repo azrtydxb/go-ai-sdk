@@ -97,3 +97,49 @@ func (r *errorReader) Read(p []byte) (int, error) {
 	r.pos += n
 	return n, nil
 }
+
+func TestScanEventExceedingMaxEventBytesYieldsError(t *testing.T) {
+	orig := MaxEventBytes
+	MaxEventBytes = 1024
+	defer func() { MaxEventBytes = orig }()
+
+	// Many `data:` lines that never terminate with a blank line: without the
+	// cap this accumulates unbounded. With the cap, Scan must yield an error
+	// once accumulated data exceeds MaxEventBytes and stop.
+	var b strings.Builder
+	for i := 0; i < 200; i++ {
+		b.WriteString("data: ")
+		b.WriteString(strings.Repeat("x", 64))
+		b.WriteString("\n")
+	}
+	var gotErr error
+	var events int
+	for ev, err := range Scan(strings.NewReader(b.String())) {
+		if err != nil {
+			gotErr = err
+			break
+		}
+		_ = ev
+		events++
+	}
+	if gotErr == nil {
+		t.Fatal("expected an error once accumulated data exceeds MaxEventBytes, got nil")
+	}
+	if !strings.Contains(gotErr.Error(), "MaxEventBytes") {
+		t.Fatalf("error = %v, want it to mention MaxEventBytes", gotErr)
+	}
+	if events != 0 {
+		t.Fatalf("no complete event should have dispatched, got %d", events)
+	}
+}
+
+func TestScanUnderMaxEventBytesStillAssembles(t *testing.T) {
+	orig := MaxEventBytes
+	MaxEventBytes = 1 << 20
+	defer func() { MaxEventBytes = orig }()
+	// A large-but-under-ceiling multi-line event still assembles correctly.
+	evs := collect(t, "data: a\ndata: b\ndata: c\n\n")
+	if len(evs) != 1 || evs[0].Data != "a\nb\nc" {
+		t.Fatalf("evs = %#v", evs)
+	}
+}

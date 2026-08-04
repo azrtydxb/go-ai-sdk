@@ -2,10 +2,22 @@ package sse
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"iter"
 	"strings"
 )
+
+// MaxEventBytes caps the total size of a single event's accumulated `data:`
+// lines (summed across all data lines belonging to that event, before the
+// blank line that dispatches it). Per the SSE spec, an event isn't
+// dispatched until a blank line is seen, so a server that streams data
+// lines without ever sending one would otherwise grow dataLines unbounded
+// and OOM the process. The default (32MiB) is generous for large
+// reasoning/tool-call deltas while still bounding memory use. It is a var
+// rather than a const so tests can lower it; production code should not
+// need to change it.
+var MaxEventBytes = 32 << 20
 
 type Event struct {
 	Event string // event: field, "" if absent
@@ -23,6 +35,7 @@ func Scan(r io.Reader) iter.Seq2[Event, error] {
 
 		var currentEvent Event
 		var dataLines []string
+		var dataBytes int
 
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -37,6 +50,7 @@ func Scan(r io.Reader) iter.Seq2[Event, error] {
 					// Reset for next event
 					currentEvent = Event{}
 					dataLines = nil
+					dataBytes = 0
 				}
 				continue
 			}
@@ -66,6 +80,11 @@ func Scan(r io.Reader) iter.Seq2[Event, error] {
 			case "event":
 				currentEvent.Event = value
 			case "data":
+				dataBytes += len(value)
+				if dataBytes > MaxEventBytes {
+					yield(Event{}, fmt.Errorf("sse: event exceeds MaxEventBytes (%d)", MaxEventBytes))
+					return
+				}
 				dataLines = append(dataLines, value)
 			}
 		}
