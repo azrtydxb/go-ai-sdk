@@ -320,14 +320,23 @@ client := mcp.NewClient(transport)
   transport does not retry 401s itself; refreshing credentials on an auth
   failure is the `TokenProvider`'s own job, invoked fresh on every retry
   attempt regardless.
-  **Head-of-line blocking:** `Client` serializes all `Send`s on one
-  transport under a single mutex, held for the full duration of `Send` —
-  including any retry backoff sleeps. With retries enabled, one call's
-  backoff (up to several seconds per attempt) blocks every other
-  concurrent call, and every server-initiated request reply, on the same
-  `Client` until it completes. If that matters for your workload, use your
-  own idempotency-aware retry logic around `WithHTTPClientOpt` instead of
-  this option.
+  **No head-of-line blocking:** the HTTP transport self-serializes
+  (`SelfSerializes() bool` returns `true`), so `Client` does not hold a
+  client-wide send lock across `Send` for it. One call's retry backoff (up
+  to several seconds per attempt) therefore does **not** block any other
+  concurrent call, or a server-initiated request reply, on the same
+  `Client` — each `Send`, including its retries, runs independently. This
+  is the HTTP transport's behavior specifically: the **stdio** transport's
+  framing requires genuinely serialized writes, so on that transport one
+  call's retry backoff still blocks every other concurrent `Send` on the
+  same `Client` until it completes. If that matters for a stdio-based
+  deployment, use your own idempotency-aware retry logic around
+  `WithHTTPClientOpt` instead of this option — `WithHTTPRetry` itself only
+  applies to the HTTP transport regardless.
+  A consequence: a `TokenProvider` backing an HTTP transport used by a
+  `Client` with multiple concurrent in-flight calls must support `Token`
+  being called concurrently by more than one goroutine — see the
+  `TokenProvider` bullet above.
 - **`WithHTTPClientOpt(*http.Client)`** overrides the `*http.Client` used to
   send requests (default `http.DefaultClient`).
 - `NewStreamableHTTPTransport(url, headers)` (the pre-existing constructor)

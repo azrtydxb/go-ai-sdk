@@ -24,9 +24,16 @@ github.com/azrtydxb/go-ai-sdk        (root module, zero external dependencies)
 │   ├── openaicompat/   parsing, retry/backoff, JSON Schema reflection,
 │   ├── geminicompat/    SigV4 signing, Google auth, a client-only RFC 6455
 │   ├── websocket/       WebSocket client (underlying the streaming-
-│   └── ...              transcription/realtime features — see
-│                        docs/core/media.md), and the two compat bases
-│                        (openaicompat, geminicompat — see below)
+│   ├── wsstream/        transcription/realtime features — see
+│   └── ...              docs/core/media.md), and the two compat bases
+│                        (openaicompat, geminicompat — see below).
+│                        internal/wsstream sits on top of
+│                        internal/websocket and centralizes the
+│                        readLoop/Events/Err/Close/Send/DialURL machinery
+│                        shared by the three WebSocket-stream providers
+│                        (Deepgram live transcription, OpenAI realtime
+│                        transcription, OpenAI realtime voice) — each is a
+│                        thin wrapper over it, not a separate reimplementation
 ├── mcp/             MCP client, independent of the above (produces
 │                    []ai.Tool, doesn't touch LanguageModel)
 ├── contrib/         Optional, dependency-pulling extensions — SEPARATE Go

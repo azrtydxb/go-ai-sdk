@@ -144,6 +144,14 @@ fal/Replicate/Luma) applies:
 - **Size cap**: the response body is read with a hard ceiling (256 MiB by
   default) — a body that would exceed it fails with an error instead of
   being buffered into memory in full.
+- **Connection reuse and multi-IP failover**: the pinned, dial-time-checked
+  `http.RoundTripper` is cached per underlying `*http.Client` (keyed by its
+  base `Transport`), so repeated fetches against the same client reuse
+  pooled connections instead of dialing a fresh socket every time. If a
+  hostname resolves to more than one vetted IP, the dialer tries them in
+  order and fails over to the next on a dial error, rather than only ever
+  attempting the first — while still rejecting the whole resolution
+  up front if *any* resolved IP is blocked.
 - **BFL credential scoping**: BFL's API key is attached only to poll URLs
   that share the configured base URL's registrable domain (e.g.
   `api.us1.bfl.ai` and `api.bfl.ai` both under `bfl.ai`) — a poll URL

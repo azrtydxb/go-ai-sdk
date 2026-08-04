@@ -8,6 +8,69 @@ once it reaches 1.0.
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-08-04
+
+A follow-up sweep closing every deferred/documented-not-fixed item left by
+the v0.2.1 hardening audits (concurrency, connection-reuse, and one
+remaining SSRF-adjacent gap). No public API removed; internal-only behavior
+changes are called out under Changed.
+
+### Performance
+
+- **`internal/fetchmedia` reuses the pinned transport across fetches.** The
+  SSRF-safe, dial-time-pinned `http.RoundTripper` `PinnedTransport` builds
+  is now cached per underlying `*http.Client` (keyed by its base
+  `Transport`), so repeated media/result-URL fetches against the same
+  client reuse pooled connections instead of dialing a fresh socket every
+  time. See
+  [Media § Server-returned result-URL fetches](docs/core/media.md#server-returned-result-url-fetches-ssrf-hardening).
+
+### Fixed
+
+- **MCP HTTP retry no longer head-of-line-blocks concurrent calls.**
+  `Client` no longer holds its client-wide send lock across the Streamable
+  HTTP transport's (retrying) `Send` — the HTTP transport self-serializes
+  on its own, so one call's retry backoff no longer blocks every other
+  concurrent call (or a server-initiated request reply) on the same
+  `Client`. The **stdio** transport still serializes all `Send`s under that
+  lock, as its framing requires genuinely serialized writes. See
+  [MCP § Token-provider auth and retries](docs/mcp.md#token-provider-auth-and-retries-http-transport).
+- **`internal/fetchmedia` fails over across all resolved vetted IPs**, not
+  only the first — the pinned dial-time `DialContext` now tries each
+  vetted IP in order on a dial error, while still rejecting the whole
+  resolution up front if any resolved IP is blocked.
+- **`internal/websocket`: a queued writer's ctx-cancel no longer clobbers
+  an in-flight control write's deadline.** The write-serialization mutex
+  was replaced with a 1-slot channel semaphore whose acquire-wait is
+  ctx-cancelable without a deadline of its own; the write deadline is now
+  armed only after the lock is actually held, so an automatic pong/close
+  write already in progress can no longer have its deadline overwritten by
+  a different, canceled caller waiting for the same lock.
+- **gauth validates the service-account `token_uri`** (must be `https` and
+  absolute) before using it both as the OAuth2 token-endpoint POST target
+  and as the signed JWT's `aud` claim, rejecting a malformed or
+  attacker-controlled value up front instead of using it blindly.
+
+### Changed
+
+- **`TokenProvider.Token` may now be called concurrently.** Because the
+  HTTP transport no longer serializes `Send` behind `Client`'s send lock (see
+  Fixed above), a `TokenProvider` backing an HTTP transport used by a
+  `Client` with multiple concurrent in-flight calls must support `Token`
+  being invoked by more than one goroutine at a time. See
+  [MCP § Token-provider auth and retries](docs/mcp.md#token-provider-auth-and-retries-http-transport).
+- **`internal/retry.BaseDelay` is no longer an exported var** — it's now a
+  test-only setter (`SetBaseDelayForTest`), closing off a package-level
+  mutable knob that had no legitimate non-test caller.
+
+### Internal
+
+- The three WebSocket-stream providers (Deepgram live transcription,
+  OpenAI realtime transcription, OpenAI realtime voice) now share
+  `internal/wsstream`'s readLoop/Events/Err/Close/Send/DialURL machinery
+  instead of each duplicating it — no behavior change. See
+  [Architecture](docs/architecture.md).
+
 ## [0.2.1] — 2026-08-04
 
 A hardening sweep across security (SSRF, injection, RNG), concurrency
@@ -775,7 +838,8 @@ smoke-tested against live APIs yet (see the
 - [Migrating from the Vercel AI SDK](docs/migrating-from-vercel-ai-sdk.md)
   and [Architecture](docs/architecture.md).
 
-[Unreleased]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/azrtydxb/go-ai-sdk/releases/tag/v0.1.0
