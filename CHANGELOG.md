@@ -8,6 +8,158 @@ once it reaches 1.0.
 
 ## [Unreleased]
 
+A hardening sweep across security (SSRF, injection, RNG), concurrency
+(goroutine/connection leaks, races), and correctness (two HIGH bugs
+corrupting real output), driven by three top-level audits (security,
+concurrency, correctness) plus three provider/core/MCP sub-audits. No
+public API removed; a handful of internal-only behavior changes are called
+out under Changed.
+
+### Security
+
+- **SSRF guards on server-controlled media/result-URL fetches.**
+  `internal/fetchmedia.Fetch` (used directly by BFL's async polling, and
+  wrapped by `internal/fetchimage` for fal/Replicate/Luma's CDN-URL image
+  responses) now rejects link-local/multicast addresses (covering the
+  169.254.169.254 cloud-metadata endpoint), AWS's IPv6 IMDS address
+  (`fd00:ec2::254`), and the unspecified address, both pre-connect and, via
+  a dial-time-pinned `http.Transport.DialContext`, at the moment of the
+  actual TCP dial — closing the DNS-rebind gap where a hostname could
+  resolve safely on the pre-connect check and unsafely when the transport
+  dials it for real. Response bodies are capped at 256 MiB by default.
+  BFL's `x-key` API credential is attached only to poll URLs sharing the
+  configured base URL's registrable domain (a stdlib-only two-label
+  heuristic), never to an arbitrary server-returned URL. Deliberately
+  narrow: generic private ranges and loopback are not blocked, since
+  self-hosted CDNs on private networks are a legitimate deployment. See
+  [Media § Server-returned result-URL fetches](docs/core/media.md#server-returned-result-url-fetches-ssrf-hardening).
+- **SSE and MCP response-body caps.** `internal/sse.MaxEventBytes` (32 MiB)
+  caps a single accumulated SSE event's `data:` payload — an unbounded or
+  stalled event stream can no longer grow a single event without limit.
+  The MCP Streamable HTTP transport caps a non-streaming success body at
+  16 MiB and an error/`202 Accepted` body at 64 KiB. See
+  [Errors and retries § Timeouts](docs/core/errors-and-retries.md#timeouts-set-a-ctx-deadline)
+  and [MCP § Response body caps](docs/mcp.md#response-body-caps-http-transport).
+- **Multipart CRLF/quote injection guard.** `internal/multipartutil.ValidField`
+  rejects control characters and unescaped quotes in any string written
+  into a multipart header (filenames, field names, form values reaching a
+  `Content-Disposition`), applied across every multipart-uploading call
+  site: openai/anthropic files and skills, and the revai/gladia/elevenlabs/
+  openaicompat transcription and translation uploads. Prompt/body field
+  *values* (not header-reaching strings) are correctly left unguarded.
+- **gauth signing uses `crypto/rand`.** Google service-account JWT signing
+  (`rsa.SignPKCS1v15`) now passes `rand.Reader` (PKCS#1 v1.5 blinding)
+  instead of `nil`, closing a timing-side-channel exposure in the Vertex AI
+  auth path.
+- **MCP HTTP retry is now conservative (no more double-execution risk).**
+  `WithHTTPRetry` only retries HTTP 429/503 responses and a narrow
+  allowlist of *pre-delivery* connection errors (connection-refused, DNS
+  failure, dial-phase errors) — cases that prove the request never reached
+  the server. A generic post-dial `client.Do` error (e.g. connection reset
+  while reading the response) is no longer retried, since the server may
+  already have processed the request; retrying it could execute a
+  non-idempotent `tools/call` twice. See
+  [MCP § Token-provider auth and retries](docs/mcp.md#token-provider-auth-and-retries-http-transport).
+- **MCP server-request dispatch is bounded and drained.** At most 8
+  server-initiated requests (elicitation today) are dispatched
+  concurrently; a 9th while all slots are busy gets an immediate `-32603`
+  "server busy" reply instead of queuing without limit. `Client.Close`
+  waits (up to a 2s grace period) for in-flight dispatch goroutines to
+  finish, so a handler that ignores `ctx` cancellation can't leak past
+  `Close`. See [MCP § Dispatch is bounded](docs/mcp.md#elicitation).
+
+### Fixed
+
+- **HIGH: no-argument tool calls always failed.** `Tool.Execute` now
+  normalizes an empty/nil/whitespace-only arguments payload to `{}` before
+  decoding; previously this hit `io.EOF` and every genuinely no-input tool
+  call was rejected as `*ai.InvalidToolArgumentsError`. See
+  [Tools § No-argument tool calls](docs/core/tools.md#no-argument-tool-calls).
+- **HIGH: Gemini "thought" text leaking into the visible answer**
+  (google/vertex, both streaming and non-streaming) — thought-marked parts
+  are now split into `ReasoningPart`/`ReasoningDelta` instead of being
+  concatenated into the regular text output; `ThoughtSignature` is plumbed
+  through on the non-streaming path.
+- **Bedrock: a caller-supplied `Content-Type` header clobbered the SigV4
+  signature**, producing a `403 SignatureDoesNotMatch`. `Content-Type` is
+  now excluded from the post-signing header override, matching the
+  provider-owned value (`application/json`) that was actually signed.
+- **Middleware dropped `provider.ProviderMetadata`.**
+  `ExtractReasoningMiddleware` and `SimulateStreamingMiddleware` now
+  preserve the wrapped model's `ProviderMetadata` instead of discarding it.
+- **`StreamText`'s `Timeout.Total` leaked on immediate suspend.** A run
+  that suspends on its very first step (a pending tool approval) no longer
+  leaves the `Total` timeout's derived context/timer running past the
+  point the decision (finish/timeout/abort) was actually cached.
+- **`RealtimeSession` WebSocket connection leak** on close — a `defer`
+  now closes the underlying connection unconditionally; regression tests
+  observe a real `EOF` in all three WebSocket-based provider packages.
+- **MCP stdio transport: ctx-blind write could wedge the client.** `Send`
+  is now ctx-aware (a watcher goroutine plus `SetWriteDeadline`), abandoning
+  only on a genuinely partial write rather than blocking forever on a
+  stalled child process. A transport-level error no longer leaves the
+  client in a zombie state (`closeWith` now routes through
+  `transport.Close`), and a hung response body no longer survives `Close`
+  (tracked reads via `readTrackedBody`, including the per-session `202`
+  path, are interrupted).
+- **MCP: calling a method after the client has already died** now returns
+  a clear, immediate error instead of hanging or panicking.
+- **MCP `paginate` infinite-loop guard** — a server that echoes back the
+  same (or a cyclical) `nextCursor` forever no longer causes an unbounded
+  `ListTools`/`ListResources`/etc. loop.
+- **Cohere embed response validated against the input count** — a
+  mismatched number of returned embeddings is now a clear error instead of
+  a silent misalignment between input and output.
+- **Code Mode (`codemode.Tool`) output-budget and empty-code fixes.**
+  `MaxOutputBytes` now applies to the *combined* `Output` + `Logs`, so log
+  volume can't blow past the configured budget on its own; empty or
+  whitespace-only generated code is now rejected with
+  `*ai.InvalidToolArgumentsError` before the sandbox is ever invoked.
+- **`aitest` mock providers are now concurrency-safe** — a per-mock
+  `sync.Mutex` guards every record-append and response-index computation,
+  fixing a data race under concurrent test use; `Recorded*` snapshot
+  accessors were added.
+- **Retry timer/backoff footguns** — the retry loop now calls
+  `timer.Stop()` explicitly instead of `defer`-ing it inside the retry
+  loop (which could accumulate live timers across iterations), and guards
+  against a non-positive configured `BaseDelay`.
+- **`internal/schema`'s wire-shape mismatches for `[]byte` and
+  `time.Time`** — both a tool's derived argument schema and
+  `GenerateObject`/`StreamObject`'s derived output schema now describe
+  `[]byte` as a base64-encoded string and `time.Time` as an RFC 3339
+  `date-time` string, matching what `encoding/json` actually produces,
+  instead of describing them by their underlying Go field structure. See
+  [Tools § Schema derivation rules](docs/core/tools.md#schema-derivation-rules).
+- **gauth token-endpoint errors are now retryable** — a non-2xx response
+  from Google's OAuth2 token endpoint is returned as a typed
+  `*gauth.TokenEndpointError` implementing `IsRetryable() bool`, so a
+  transient token-endpoint failure during Vertex AI auth is retried the
+  same way a transient API call would be.
+- **MCP elicitation reachability.** The client now offers protocol version
+  `2025-06-18` (accepting `2025-06-18` or `2025-03-26` back) instead of
+  pinning to `2025-03-26` alone, making `elicitation/create` (a
+  `2025-06-18` feature) actually reachable against a conforming server. A
+  handler that returns an error is now reported to the server as a typed
+  `-32603 Internal error` reply, distinguishable from a genuine
+  `Action: "cancel"` user decision. See
+  [MCP § Elicitation](docs/mcp.md#elicitation).
+- Eight `nil`-`Model` middleware constructors (`ExtractReasoningMiddleware`,
+  `SimulateStreamingMiddleware`, and others) now panic immediately at
+  construction on a `nil` wrapped model, instead of surfacing a confusing
+  nil-pointer panic later, mid-call.
+
+### Changed
+
+- **`mcp.WithHTTPRetry` is now conservative by default**, retrying only
+  HTTP 429/503 and pre-delivery connection errors rather than a broader
+  set of transient-looking failures — see the Security entry above. This
+  narrows what gets automatically retried; callers that relied on broader
+  coverage should wrap their own idempotency-aware retry logic around
+  `WithHTTPClientOpt` instead (documented on the option itself).
+- **Middleware constructors taking a `nil` wrapped `Model` now panic at
+  construction time** (see Fixed above) instead of deferring the failure
+  to first use.
+
 ## [0.2.0] — 2026-08-03
 
 Waves 9, 10, 11, 12, 13, and 14 of the [AI SDK 6 parity roadmap](docs/superpowers/plans/2026-08-03-v6-parity-roadmap.md) —

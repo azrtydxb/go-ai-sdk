@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/fetchmedia"
+	"github.com/azrtydxb/go-ai-sdk/internal/transcribeutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -168,7 +169,7 @@ func (m *videoModel) poll(ctx context.Context, id string) (*videoGenerationRespo
 			return nil, nil, fmt.Errorf("luma: generation %s failed", id)
 		}
 
-		if err := sleep(ctx, m.provider.poll()); err != nil {
+		if err := transcribeutil.Sleep(ctx, m.provider.poll()); err != nil {
 			return nil, nil, err
 		}
 	}

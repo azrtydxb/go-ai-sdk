@@ -208,6 +208,45 @@ If `MaxRetries` is `0`, a failing call's original error is returned
 unchanged — it is never wrapped in a `*RetryError`, since there was nothing
 to retry.
 
+## Timeouts: set a ctx deadline
+
+The SDK relies on the caller's `context.Context` for hard time bounds —
+neither `ai.Generate*`/`ai.Stream*`/`ai.Embed*` calls nor the provider
+HTTP clients they use impose one of their own. `http.DefaultClient` (used
+when a provider isn't configured with a custom `*http.Client`) has no
+`Timeout`, so a call with a `context.Background()` and no deadline can, in
+principle, hang as long as the underlying connection stays open (e.g. a
+provider that accepts the request but never responds). A blanket
+`http.Client.Timeout` isn't set by the SDK itself because it would also cut
+off legitimate long-running work — a slow `StreamText`/`StreamTranscribe`
+consumer, or an async media job (`GenerateVideo` polling for minutes) — not
+just a genuinely stuck request.
+
+Streams and poll loops (`StreamText`, `StreamTranscribe`,
+`RealtimeSession`, and the asynchronous media providers' poll-until-terminal
+flows, e.g. AssemblyAI/Gladia/Rev.ai transcription and Luma/BFL/Replicate
+image/video generation) are all `ctx`-bounded: cancelling or expiring `ctx`
+unblocks them promptly rather than leaving them to wait on the network
+indefinitely. **Set a `context.WithTimeout`/`WithDeadline` on the `ctx` you
+pass in** for any call where you need a hard upper bound:
+
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+defer cancel()
+
+result, err := ai.GenerateText(ctx, opts)
+```
+
+Separately, a handful of internal reads have their own fixed byte caps
+independent of `ctx` — guarding against a slow-but-live connection that
+would otherwise buffer an unbounded amount of data rather than timing out:
+SSE streaming responses cap a single accumulated event at 32 MiB
+(`internal/sse.MaxEventBytes`), and the MCP HTTP transport caps a
+non-streaming success body at 16 MiB and an error/`202` body at 64 KiB (see
+[MCP § Response body caps](../mcp.md#response-body-caps-http-transport)).
+These are memory-DoS guards, not a substitute for a `ctx` deadline — they
+bound size, not time.
+
 ## Source of truth
 
 - [`ai/errors.go`](../../ai/errors.go)
@@ -216,6 +255,9 @@ to retry.
 - [`ai/embed.go`](../../ai/embed.go), [`ai/generate_image.go`](../../ai/generate_image.go),
   [`ai/generate_speech.go`](../../ai/generate_speech.go),
   [`ai/transcribe.go`](../../ai/transcribe.go) (required-field sentinels)
+- [`internal/sse/sse.go`](../../internal/sse/sse.go) (`MaxEventBytes`)
+- [`mcp/http.go`](../../mcp/http.go) (`maxSuccessBodyBytes`,
+  `maxDiscardBodyBytes`)
 
 See also: [Generating text](generating-text.md#retries-and-retryerror) for
 `GenerateText`'s `MaxRetries` option; [Tools](tools.md) for the tool-call

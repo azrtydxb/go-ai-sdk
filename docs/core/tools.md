@@ -67,6 +67,26 @@ type BookingArgs struct {
 This produces `required: ["city", "lat", "lng"]` — `notes` and `nickname`
 are present as properties but not required.
 
+- **`[]byte` fields** are schema'd as `{"type": "string", "description":
+  "base64-encoded bytes (as produced by encoding/json for []byte)"}` — this
+  matches the actual wire encoding, since `encoding/json` marshals a
+  `[]byte` as a base64 string, not as a JSON array of numbers. A model that
+  reads the schema (or a user-provided `description` merged alongside it,
+  via the `jsonschema` tag) sees the true expected shape instead of a
+  misleading `"type": "array"`.
+- **`time.Time` fields** are schema'd as `{"type": "string", "format":
+  "date-time"}`, matching `time.Time`'s RFC 3339 `MarshalJSON` output. Any
+  other type implementing `json.Marshaler` besides `time.Time` is still
+  expanded structurally (its underlying fields reflected as usual), since
+  there's no general way to infer a type's marshaled JSON *shape* from an
+  arbitrary `MarshalJSON` method.
+
+This applies to any derived JSON Schema in the SDK — both `ai.NewTool`'s
+tool-argument schemas and the object schema `ai.GenerateObject`/
+`ai.StreamObject` derive for structured output (see
+[Structured output](structured-output.md)) — since both go through the
+same `internal/schema` package.
+
 ## Strict mode and input examples
 
 `NewTool` takes optional trailing `ToolOption`s that configure two more
@@ -198,6 +218,19 @@ All three callbacks are nil-checked before being invoked, and are called
 synchronously on the consuming goroutine — a tool with no callbacks
 configured (the default, zero-value `ToolInputCallbacks{}`) never pays for
 this feature.
+
+## No-argument tool calls
+
+A tool with an empty `Args` struct (or one whose model call arrives with no
+arguments at all — an empty string, `null`, or whitespace-only JSON, which
+some providers send for a genuinely no-input tool call) is fully supported:
+`Execute` normalizes an empty/nil/whitespace-only `args` payload to `{}`
+before decoding, rather than treating it as malformed input. Without this
+normalization, `json.Decoder.Decode` against an empty reader returns
+`io.EOF`, which would incorrectly reject every no-arg call as
+`*ai.InvalidToolArgumentsError`. A `Args` type with required fields is
+unaffected — decoding `{}` against it still fails the same schema
+validation it always would when a required field is missing.
 
 ## Execution error taxonomy
 

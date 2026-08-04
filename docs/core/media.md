@@ -119,6 +119,41 @@ past that window).
 | [fal](../providers/fal.md) | Synchronous: `POST {base}/{modelID}` | Only `Prompt` and `AspectRatio` (`"aspect_ratio"`) are first-class wire fields — fal's video model catalog has no shared field name for resolution/duration, so those are `ProviderOptions`-only. |
 | [Replicate](../providers/replicate.md) | Synchronous (`Prefer: wait`): `POST /v1/models/{id}/predictions` | `Prompt`/`AspectRatio` nest under `input`, same as Replicate's image endpoint; `ProviderOptions` merges into `input` too. |
 
+### Server-returned result-URL fetches (SSRF hardening)
+
+Several image/video providers return a **URL** the SDK must then fetch
+itself — a CDN link, or, for BFL's asynchronous flow, an absolute
+`polling_url` — rather than inline bytes. Because that URL is chosen by the
+remote server (and could be altered by a MITM or a compromised provider),
+`internal/fetchmedia.Fetch` (used directly by BFL's polling, and wrapped by
+`internal/fetchimage` for the image providers that return CDN URLs, e.g.
+fal/Replicate/Luma) applies:
+
+- **SSRF blocklist**: only `http`/`https` schemes are allowed, and any
+  resolved IP that's link-local unicast/multicast (covering the
+  169.254.169.254 cloud-metadata endpoint), AWS's IPv6 IMDS address
+  (`fd00:ec2::254`), or the unspecified address (`0.0.0.0`/`::`) is
+  rejected — checked both pre-connect and, via a pinned dial-time
+  `DialContext`, at the moment of the actual TCP dial, closing the
+  DNS-rebind gap where a hostname could resolve to a safe IP on the
+  pre-connect check and a blocked one when the transport dials it for
+  real. This is a narrow, crown-jewel-only blocklist — generic private
+  ranges (`10/8`, `172.16/12`, `192.168/16`) and loopback are **not**
+  blocked, since self-hosted CDNs on private networks are a legitimate
+  deployment.
+- **Size cap**: the response body is read with a hard ceiling (256 MiB by
+  default) — a body that would exceed it fails with an error instead of
+  being buffered into memory in full.
+- **BFL credential scoping**: BFL's API key is attached only to poll URLs
+  that share the configured base URL's registrable domain (e.g.
+  `api.us1.bfl.ai` and `api.bfl.ai` both under `bfl.ai`) — a poll URL
+  pointing somewhere else doesn't get the credential.
+
+None of this changes success-path behavior against a well-behaved
+provider; it only rejects responses that point at an internal/metadata
+target or return an unbounded body, surfacing as an ordinary error from
+`GenerateImage`/`GenerateVideo`.
+
 All three video providers download the video bytes from the URL(s) in the
 provider's response themselves — `internal/fetchimage` is image-specific
 (it sniffs unrecognized content types as image formats via
@@ -532,6 +567,9 @@ requests, never on `/v1/messages`) and the live-testing caveat.
   [`providers/luma/image.go`](../../providers/luma/image.go),
   [`providers/prodia/image.go`](../../providers/prodia/image.go),
   [`providers/bfl/image.go`](../../providers/bfl/image.go)
+- [`internal/fetchmedia/fetchmedia.go`](../../internal/fetchmedia/fetchmedia.go)
+  (`Fetch`, `ValidateURL`, `PinnedTransport`, `SameRegistrableDomain` — the
+  SSRF/size-cap guards described above), [`internal/fetchimage/fetchimage.go`](../../internal/fetchimage/fetchimage.go)
 - [`providers/luma/video.go`](../../providers/luma/video.go),
   [`providers/fal/video.go`](../../providers/fal/video.go),
   [`providers/replicate/video.go`](../../providers/replicate/video.go)

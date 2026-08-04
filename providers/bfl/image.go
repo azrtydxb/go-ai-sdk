@@ -9,10 +9,10 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/fetchimage"
 	"github.com/azrtydxb/go-ai-sdk/internal/fetchmedia"
+	"github.com/azrtydxb/go-ai-sdk/internal/transcribeutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -217,21 +217,8 @@ func (m *imageModel) poll(ctx context.Context, pollingURL string) (*pollResponse
 			return nil, nil, fmt.Errorf("bfl: generation %s failed with status %q: %s", poll.ID, poll.Status, body)
 		}
 
-		if err := sleep(ctx, m.provider.poll()); err != nil {
+		if err := transcribeutil.Sleep(ctx, m.provider.poll()); err != nil {
 			return nil, nil, err
 		}
-	}
-}
-
-// sleep blocks for d or until ctx is done, whichever comes first,
-// returning ctx.Err() in the latter case.
-func sleep(ctx context.Context, d time.Duration) error {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-t.C:
-		return nil
 	}
 }

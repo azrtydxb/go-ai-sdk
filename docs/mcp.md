@@ -8,9 +8,15 @@ alongside hand-written tools. Beyond tools, the client also supports
 server-initiated **elicitation**, and, on the HTTP transport,
 **token-provider auth with transient retry** — see the sections below.
 
-This client speaks protocol version **`2025-03-26`**, pinned as a constant;
-`Initialize` rejects the handshake outright if the server negotiates a
-different version.
+This client offers protocol version **`2025-06-18`** (the latest it
+supports) during `Initialize`, and accepts either `2025-06-18` or
+`2025-03-26` back from the server; `Initialize` rejects the handshake
+outright if the server negotiates anything else. `Client.ProtocolVersion()`
+returns whichever of the two was actually negotiated, once `Initialize` has
+succeeded. Negotiating the newer version (rather than pinning to
+`2025-03-26` as an earlier revision of this client did) is what makes
+[elicitation](#elicitation) reachable against a conforming `2025-06-18`
+server — see the version-negotiation note in that section.
 
 ## Client walkthrough: stdio
 
@@ -206,12 +212,14 @@ if err := client.Initialize(ctx); err != nil {
 - **No handler installed** → the client auto-responds `Action: "decline"`
   to any `elicitation/create` it receives, and does not declare the
   `"elicitation"` capability during `Initialize` at all.
-- **A handler that returns an error** → the client reports `Action:
-  "cancel"` to the server rather than propagating the error anywhere else;
-  there's no return path from a server-initiated request back to whatever
-  code path is currently blocked on a `client.CallTool`/`ListResources`/etc.
-  call, so a handler error can only be observed by the handler's own
-  logging.
+- **A handler that returns an error** → the client replies to the server
+  with a JSON-RPC `-32603 Internal error`, **not** a synthesized
+  `ElicitationResult{Action: "cancel"}` — a handler bug is deliberately
+  distinguishable, on the wire, from a genuine user cancellation
+  (`Action: "cancel"` is reserved for that case). There's no return path
+  from a server-initiated request back to whatever code path is currently
+  blocked on a `client.CallTool`/`ListResources`/etc. call, so a handler
+  error can only be observed by the handler's own logging.
 - **Any other server-initiated method** (anything besides
   `elicitation/create`) gets a JSON-RPC `-32601 Method not found` error
   response — the dispatch mechanism is generic, elicitation is just the one
@@ -222,17 +230,15 @@ if err := client.Initialize(ctx); err != nil {
   protocol-level shape error is distinct from the handler declining/erroring
   on a well-formed request.
 
-> **Version-negotiation caveat.** Elicitation is a **2025-06-18** MCP
-> feature, but this client negotiates and pins **`2025-03-26`** (stated at
-> the top of this page — `Initialize` rejects the handshake outright if the
-> server negotiates a different version) — a spec-conforming server
-> honoring that older version has no `elicitation/create` in its vocabulary
-> and simply won't send it. The dispatch path above is real and exercised
-> by this SDK's own tests, but today it's only reachable against servers
-> that send `elicitation/create` regardless of the negotiated version (or a
-> test harness, as in this package's tests). Reaching it against
-> spec-conforming servers would require a future change to widen the
-> negotiated/accepted protocol version range.
+> **Version-negotiation note.** Elicitation is a **2025-06-18** MCP
+> feature. This client offers **`2025-06-18`** during `Initialize` and
+> accepts either it or `2025-03-26` back (see the top of this page) —
+> so elicitation is reachable against any spec-conforming server that
+> negotiates `2025-06-18`. Against a server that negotiates the older
+> `2025-03-26` (its own choice, or because it doesn't implement
+> `2025-06-18`), `elicitation/create` simply isn't in that server's
+> vocabulary and it won't send it — that's a property of the server, not a
+> client-side restriction.
 
 **Server-initiated request dispatch and the response-matching path.** The
 client's receive loop discriminates every incoming message by shape: `id` +
@@ -243,6 +249,17 @@ in-flight `CallTool`); no `id` is a notification, dropped as before. A
 `tools/call` in flight when the server sends `elicitation/create`
 concurrently is unaffected — the original call's response still matches by
 `id` regardless of what other traffic interleaves on the wire.
+
+**Dispatch is bounded.** At most 8 server-initiated requests are dispatched
+concurrently (a semaphore); a 9th arriving while all 8 slots are busy gets
+an immediate JSON-RPC `-32603 Internal error` ("server busy") reply instead
+of queuing indefinitely, so one slow or hung handler can't back up an
+unbounded number of goroutines. `Client.Close` waits (up to a 2s grace
+period) for any in-flight dispatch goroutines to finish before returning,
+so a handler that ignores `ctx` cancellation doesn't leak past `Close` —
+after the grace period elapses, `Close` returns anyway and any remaining
+goroutine is left to finish on its own, which is harmless since the
+transport is already closed.
 
 **⚠ HTTP transport cannot receive server-initiated requests.** The dispatch
 machinery above is transport-agnostic, but the Streamable HTTP transport has
@@ -281,9 +298,21 @@ client := mcp.NewClient(transport)
   raw token, no `"Bearer "` prefix) instead of `Authorization`; it has no
   effect without a `TokenProvider`.
 - **`WithHTTPRetry(maxRetries)`** enables retrying `Send` on HTTP 429/503
-  responses and connection errors, with capped exponential backoff
+  responses (always safe — the server either rejected or didn't process the
+  request) and on a **conservative allowlist** of pre-delivery connection
+  errors only: connection-refused, DNS resolution failures, and any error
+  surfaced during the dial phase — all of which prove the request bytes
+  never reached the server, so retrying can't double-execute a
+  side-effecting call like `tools/call`. A generic `client.Do` error
+  outside that allowlist (e.g. "connection reset by peer" while reading the
+  response, which can happen *after* the server already processed the
+  POST) is deliberately **not** retried, since the transport can't tell
+  whether the server acted on the request — retrying it could execute a
+  non-idempotent tool call twice. If your deployment needs broader retry
+  coverage, wrap the `*http.Client` (`WithHTTPClientOpt`) with your own
+  idempotency-aware retry logic instead. Backoff is capped exponential
   (`Retry-After` honored when present, either as integer seconds or an
-  HTTP-date) and ctx-aware backoff waits. `maxRetries` is retries *after*
+  HTTP-date) with ctx-aware backoff waits. `maxRetries` is retries *after*
   the initial attempt — `0` (the default) disables retrying entirely.
   **Never retried:** 4xx responses other than 429, and any failure once
   response bytes (a JSON body or an SSE stream) have started being
@@ -291,12 +320,41 @@ client := mcp.NewClient(transport)
   transport does not retry 401s itself; refreshing credentials on an auth
   failure is the `TokenProvider`'s own job, invoked fresh on every retry
   attempt regardless.
+  **Head-of-line blocking:** `Client` serializes all `Send`s on one
+  transport under a single mutex, held for the full duration of `Send` —
+  including any retry backoff sleeps. With retries enabled, one call's
+  backoff (up to several seconds per attempt) blocks every other
+  concurrent call, and every server-initiated request reply, on the same
+  `Client` until it completes. If that matters for your workload, use your
+  own idempotency-aware retry logic around `WithHTTPClientOpt` instead of
+  this option.
 - **`WithHTTPClientOpt(*http.Client)`** overrides the `*http.Client` used to
   send requests (default `http.DefaultClient`).
 - `NewStreamableHTTPTransport(url, headers)` (the pre-existing constructor)
   is unchanged and still works — it now delegates to
   `NewStreamableHTTPTransportWithOptions` internally with the `headers` map
   applied as static headers, so no existing call site needs to change.
+
+### Response body caps (HTTP transport)
+
+Every response body the HTTP transport reads is bounded, so a compromised
+or misbehaving server can't exhaust client memory by returning an unbounded
+body: a non-streaming JSON-RPC success response is capped at 16 MiB; an
+error response and a `202 Accepted` notification-ack (whose body is
+discarded either way) are each capped at 64 KiB. Exceeding a cap fails the
+call with an error rather than reading further.
+
+## Tool results are untrusted model input
+
+Like any tool-calling integration, the text an MCP `CallTool` result puts
+into `ToolResult.Text` is not trusted or sanitized by this SDK — it's
+whatever the MCP server chose to return, which the model will then see as
+part of the conversation on the next turn. Treat it the same way you'd
+treat any other tool output that ultimately came from a third party: don't
+assume it's safe to execute, render unescaped, or use to make authorization
+decisions without your own validation. This is a standard caveat for any
+tool/function-calling setup (MCP or hand-written `ai.Tool`s alike), not
+something specific to this client.
 
 ## Transports' documented deviations
 
@@ -424,10 +482,12 @@ if err != nil {
 ## Source of truth
 
 - [`mcp/client.go`](../mcp/client.go) (`Initialize`, `ListTools`,
-  `CallTool`, `CapabilityError`, `hasCapability`, `paginate`, protocol
-  version)
+  `CallTool`, `CapabilityError`, `hasCapability`, `paginate`,
+  `supportedProtocolVersions`, `ProtocolVersion`)
 - [`mcp/jsonrpc.go`](../mcp/jsonrpc.go) (`Client`, `NewClient`, `recvLoop`'s
-  response/request/notification discrimination)
+  response/request/notification discrimination, `dispatchSem`/
+  `maxConcurrentServerDispatch` bounded dispatch, `dispatchWG`/
+  `closeDrainGrace` drain-on-`Close`)
 - [`mcp/resources.go`](../mcp/resources.go) (`Resource`,
   `ResourceTemplate`, `ResourceContents`, `ListResources`,
   `ListResourceTemplates`, `ReadResource`)
