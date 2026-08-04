@@ -20,12 +20,14 @@ import (
 type fakeSandbox struct {
 	gotCode  string
 	gotEnv   Env
+	calls    int
 	callback func(ctx context.Context, env Env) (*Result, error)
 	result   *Result
 	err      error
 }
 
 func (s *fakeSandbox) Execute(ctx context.Context, code string, env Env) (*Result, error) {
+	s.calls++
 	s.gotCode = code
 	s.gotEnv = env
 	if s.callback != nil {
@@ -475,7 +477,8 @@ func TestOutputBudgetIncludesLogs(t *testing.T) {
 // "code" argument must return *ai.InvalidToolArgumentsError, not silently
 // run an empty program.
 func TestEmptyCodeArgumentRejected(t *testing.T) {
-	tool := Tool(&fakeSandbox{}, nil, nil)
+	sb := &fakeSandbox{}
+	tool := Tool(sb, nil, nil)
 
 	// Test with empty string
 	_, err := tool.Execute(t.Context(), json.RawMessage(`{"code":""}`))
@@ -500,5 +503,11 @@ func TestEmptyCodeArgumentRejected(t *testing.T) {
 	}
 	if iae.ToolName != "run_code" {
 		t.Fatalf("whitespace code: ToolName = %q, want run_code", iae.ToolName)
+	}
+
+	// The sandbox must never be invoked for an empty/whitespace code arg —
+	// the guard runs before Execute. Pins the "check before sandbox" invariant.
+	if sb.calls != 0 {
+		t.Fatalf("sandbox invoked %d times for empty/whitespace code, want 0", sb.calls)
 	}
 }
