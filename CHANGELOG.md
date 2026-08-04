@@ -8,6 +8,8 @@ once it reaches 1.0.
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-08-04
+
 A hardening sweep across security (SSRF, injection, RNG), concurrency
 (goroutine/connection leaks, races), and correctness (two HIGH bugs
 corrupting real output), driven by three top-level audits (security,
@@ -773,6 +775,7 @@ smoke-tested against live APIs yet (see the
 - [Migrating from the Vercel AI SDK](docs/migrating-from-vercel-ai-sdk.md)
   and [Architecture](docs/architecture.md).
 
-[Unreleased]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/azrtydxb/go-ai-sdk/releases/tag/v0.1.0
