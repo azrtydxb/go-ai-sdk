@@ -246,6 +246,61 @@ func TestHTTPTransportNotificationNoMessage(t *testing.T) {
 	}
 }
 
+// TestHTTPTransportCloseInterruptsStalled202Body pins the fix #3 residual:
+// the 202 Accepted (notification-ack) body read must be tracked and
+// interruptible by Close too, not just the SSE and JSON success paths. This
+// path runs on every session's "notifications/initialized" handshake step,
+// so a server that stalls it isn't a rare edge case.
+func TestHTTPTransportCloseInterruptsStalled202Body(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+		fl := w.(http.Flusher)
+		fmt.Fprint(w, "not valid json, and deliberately never finished")
+		fl.Flush()
+		<-release // hang until the test lets the handler return
+	}))
+	defer func() {
+		close(release)
+		srv.Close()
+	}()
+
+	tr := NewStreamableHTTPTransport(srv.URL, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	sendDone := make(chan error, 1)
+	go func() {
+		sendDone <- tr.Send(ctx, json.RawMessage(`{"jsonrpc":"2.0","method":"notifications/initialized"}`))
+	}()
+
+	// Give sendOnce a moment to reach the (now stalled) 202 body read so it's
+	// actually tracked before Close runs.
+	time.Sleep(50 * time.Millisecond)
+
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- tr.Close() }()
+
+	select {
+	case err := <-closeDone:
+		if err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+	case <-time.After(testTimeout):
+		t.Fatal("Close did not return promptly — a stalled 202 body was not interrupted (fix #3 residual)")
+	}
+
+	select {
+	case <-sendDone:
+		// Either a nil (the read simply got cut off cleanly, which is fine —
+		// Send never enqueues a message on a 202 either way) or a non-nil
+		// error is acceptable; what matters is that it returned at all.
+	case <-time.After(testTimeout):
+		t.Fatal("Send (blocked reading a stalled 202 body) did not return after Close")
+	}
+}
+
 // TestHTTPTransportSSEBodyStaysOpen exercises the deviation-from-SHOULD case
 // the doc comment on NewStreamableHTTPTransport calls out: a server that
 // sends its JSON-RPC response over SSE but keeps the response body open

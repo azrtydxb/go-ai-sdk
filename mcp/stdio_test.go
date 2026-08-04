@@ -321,6 +321,70 @@ func TestFramedTransportSendCtxCancelOnBlockedWrite(t *testing.T) {
 	}
 }
 
+// TestFramedTransportSendCtxCancelZeroBytesDoesNotAbandon covers the n==0
+// refinement to fix #1: if a write is interrupted by ctx cancellation
+// before any bytes reached the wire, framing is provably intact (this Send
+// contributed nothing to the stream), so the transport must NOT be
+// abandoned — unlike the partial-write (n>0) case tested by
+// TestFramedTransportSendCtxCancelOnBlockedWrite.
+//
+// It saturates the pipe's kernel buffer completely first (via short
+// per-attempt write deadlines, stopping once two consecutive attempts make
+// zero progress — i.e. there is no free space left at all), so the
+// subsequent Send's very first internal write attempt blocks with zero
+// bytes accepted before the ctx deadline fires.
+func TestFramedTransportSendCtxCancelZeroBytesDoesNotAbandon(t *testing.T) {
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	defer pr.Close()
+
+	// Saturate the pipe's kernel buffer: keep attempting bounded writes
+	// until two in a row make no progress at all, meaning free space is
+	// exhausted.
+	zeroStreak := 0
+	for zeroStreak < 2 {
+		if err := pw.SetWriteDeadline(time.Now().Add(20 * time.Millisecond)); err != nil {
+			t.Fatalf("SetWriteDeadline: %v", err)
+		}
+		n, werr := pw.Write(bytes.Repeat([]byte("y"), 4096))
+		if n == 0 && werr != nil {
+			zeroStreak++
+		} else {
+			zeroStreak = 0
+		}
+	}
+	if err := pw.SetWriteDeadline(time.Time{}); err != nil {
+		t.Fatalf("clear SetWriteDeadline: %v", err)
+	}
+
+	tr := newFramedTransport(strings.NewReader(""), pw, nil)
+	defer tr.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- tr.Send(ctx, json.RawMessage(`{"a":1}`)) }()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("Send: want error from ctx cancellation on a fully-saturated pipe, got nil")
+		}
+	case <-time.After(testTimeout):
+		t.Fatal("Send did not return after ctx cancellation")
+	}
+
+	tr.writeMu.Lock()
+	abandoned := tr.abandoned
+	tr.writeMu.Unlock()
+	if abandoned {
+		t.Fatal("transport marked abandoned after a write that contributed zero bytes to the wire, want not abandoned")
+	}
+}
+
 // TestFramedTransportSendSubprocessRoundTripStillWorks is a companion to
 // the ctx-cancel-on-blocked-write test above: it asserts the ctx-aware
 // write path introduced by fix #1 doesn't break the common case of a

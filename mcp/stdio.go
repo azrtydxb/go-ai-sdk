@@ -162,10 +162,11 @@ func (t *framedTransport) Send(ctx context.Context, msg json.RawMessage) error {
 //
 // A write interrupted by the deadline may have written a partial line
 // (io.Writer makes no atomicity guarantee) — that corrupts this stream's
-// framing for any peer still reading it, so writeCtx sets t.abandoned
-// (writeMu is already held by the caller) to make every subsequent Send
-// fail fast rather than risk continuing to write after a corrupt partial
-// line.
+// framing for any peer still reading it. writeCtx only sets t.abandoned
+// (writeMu is already held by the caller) when n > 0 proves some bytes
+// actually reached the wire; if n == 0, framing is provably intact (this
+// Send contributed nothing to the stream) and the transport is left usable
+// for the next Send.
 func (t *framedTransport) writeCtx(ctx context.Context, line []byte) (int, error) {
 	f, ok := t.w.(*os.File)
 	if !ok || ctx.Done() == nil {
@@ -180,6 +181,11 @@ func (t *framedTransport) writeCtx(ctx context.Context, line []byte) (int, error
 		select {
 		case <-ctx.Done():
 			interrupted.Store(true)
+			// SetWriteDeadline's error is intentionally ignored: on a
+			// non-pollable file it's a documented no-op error, and for the
+			// real stdio transport's pipe-backed *os.File it always
+			// succeeds — there's nothing actionable to do with a failure
+			// here either way.
 			_ = f.SetWriteDeadline(time.Unix(0, 0))
 		case <-stop:
 		}
@@ -195,11 +201,24 @@ func (t *framedTransport) writeCtx(ctx context.Context, line []byte) (int, error
 	if err == nil {
 		// The write completed despite ctx firing (a benign race); clear the
 		// deadline so the file remains usable and don't report an error for
-		// a write that actually succeeded in full.
+		// a write that actually succeeded in full. Error intentionally
+		// ignored — same rationale as the SetWriteDeadline call above.
 		_ = f.SetWriteDeadline(time.Time{})
 		return n, nil
 	}
-	t.abandoned = true
+	if n > 0 {
+		// Some bytes of this line reached the wire before the write was
+		// interrupted: the peer may now be looking at a partial JSON-RPC
+		// line. Refuse every future Send rather than risk writing after it.
+		t.abandoned = true
+	}
+	if !errors.Is(err, os.ErrDeadlineExceeded) {
+		// A genuine write error (e.g. EPIPE from a dead child), not our own
+		// deadline firing — surface it directly rather than masking it
+		// behind ctx.Err(), so callers can tell "the peer is gone" from
+		// "we merely gave up waiting".
+		return n, err
+	}
 	return n, ctx.Err()
 }
 

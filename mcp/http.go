@@ -85,6 +85,16 @@ func WithAuthHeader(name string) HTTPOption {
 // re-invokes the configured TokenProvider, if any, for a fresh token — the
 // transport does not retry 401s itself; refreshing credentials on auth
 // failure is the TokenProvider's job.
+//
+// Head-of-line blocking: Client serializes all Sends on one client under a
+// single mutex (sendMu), held for the full duration of Send — including
+// any retry backoff sleeps here. With retries enabled, one call's backoff
+// (up to ~10s per attempt, capped by defaultRetryMaxDelay) therefore blocks
+// every other concurrent call, and every server-initiated request reply,
+// on the same Client until it completes. If that head-of-line blocking
+// matters for your workload, wrap your own idempotency-aware retry logic
+// around the *http.Client via WithHTTPClientOpt instead of using this
+// option.
 func WithHTTPRetry(maxRetries int) HTTPOption {
 	return func(t *httpTransport) { t.maxRetries = maxRetries }
 }
@@ -116,6 +126,44 @@ const recvQueueSize = 64
 // yet bounded (error-response bodies are separately capped at 64 KiB). It is a
 // var (not a const) only so tests can lower it.
 var maxSuccessBodyBytes int64 = 16 << 20
+
+// maxDiscardBodyBytes caps the body read on paths that discard the result
+// (currently: the 202 Accepted notification-ack). The body is thrown away
+// either way, but a stalled or maliciously huge 202 body must still not be
+// read unboundedly, so this is a modest cap rather than maxSuccessBodyBytes.
+const maxDiscardBodyBytes = 64 * 1024
+
+// errTransportClosedBody is returned by readTrackedBody when the transport
+// was already closed before the read could even start (trackBody's
+// closed-check — see its doc for the atomicity rationale). Kept as a
+// package-level sentinel (rather than a fresh errors.New at each call site)
+// so callers can errors.Is it to distinguish "never started" from "started
+// and failed/was interrupted mid-read".
+var errTransportClosedBody = errors.New("mcp: transport closed")
+
+// readTrackedBody registers b in openBodies for the duration of the read
+// (so a concurrent Close can interrupt it — see trackBody's doc), reads up
+// to limit bytes, then untracks and closes b. It backs every response body
+// read in sendOnce except the SSE case (which hands the body to an async
+// drain goroutine instead of reading synchronously here): the 202
+// notification-ack discard, the 429/503 and other non-2xx error bodies, and
+// the direct application/json success body. Consolidating them ensures a
+// server that stalls any of these — not just the SSE or plain JSON success
+// path — cannot survive Close; in particular the 202 path runs on every
+// session during the "notifications/initialized" handshake step, so a stall
+// there is not a rare edge case.
+func (t *httpTransport) readTrackedBody(b io.ReadCloser, limit int64) ([]byte, error) {
+	if !t.trackBody(b) {
+		b.Close()
+		return nil, errTransportClosedBody
+	}
+	defer func() {
+		t.untrackBody(b)
+		t.drainWG.Done()
+	}()
+	defer b.Close()
+	return io.ReadAll(io.LimitReader(b, limit))
+}
 
 // httpTransport implements Transport over the MCP Streamable HTTP transport:
 // each Send is a POST of one JSON-RPC message; the response is either a
@@ -354,23 +402,32 @@ func (t *httpTransport) sendOnce(ctx context.Context, msg json.RawMessage) error
 	}
 
 	if resp.StatusCode == http.StatusAccepted {
-		// Notification acknowledged; no body, no message to enqueue.
-		_, _ = io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
+		// Notification acknowledged; no message to enqueue, but the body is
+		// still read (bounded, and tracked so Close can interrupt a stall —
+		// see readTrackedBody's doc) rather than left dangling. This path
+		// runs on every session's "notifications/initialized" handshake
+		// step, so a stall here is not a rare edge case.
+		if _, err := t.readTrackedBody(resp.Body, maxDiscardBodyBytes); err != nil && errors.Is(err, errTransportClosedBody) {
+			return err
+		}
 		return nil
 	}
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable {
 		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
-		resp.Body.Close()
+		body, bodyErr := t.readTrackedBody(resp.Body, 64*1024)
+		if bodyErr != nil && errors.Is(bodyErr, errTransportClosedBody) {
+			return bodyErr
+		}
 		return &retryableHTTPError{
 			err:        fmt.Errorf("mcp: http status %d: %s", resp.StatusCode, string(body)),
 			retryAfter: retryAfter,
 		}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
-		resp.Body.Close()
+		body, bodyErr := t.readTrackedBody(resp.Body, 64*1024)
+		if bodyErr != nil && errors.Is(bodyErr, errTransportClosedBody) {
+			return bodyErr
+		}
 		return fmt.Errorf("mcp: http status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -398,24 +455,15 @@ func (t *httpTransport) sendOnce(ctx context.Context, msg json.RawMessage) error
 		go t.drainSSE(resp.Body)
 		return nil
 	default:
-		// Track this body in openBodies too (not just the SSE case above):
+		// Tracked via readTrackedBody (not just the SSE case above):
 		// otherwise a JSON body whose read stalls (e.g. a server that sends
 		// headers and a Content-Length but then never finishes the body) is
 		// not interrupted by Close, which only sweeps bodies it knows about.
-		// Same atomicity rationale as trackBody's doc: if the transport
-		// raced closed after the fast-path check at the top of Send, back
-		// off here too.
-		if !t.trackBody(resp.Body) {
-			resp.Body.Close()
-			return errors.New("mcp: transport closed")
-		}
-		defer func() {
-			t.untrackBody(resp.Body)
-			t.drainWG.Done()
-		}()
-		defer resp.Body.Close()
-		body, err := io.ReadAll(io.LimitReader(resp.Body, maxSuccessBodyBytes+1))
+		body, err := t.readTrackedBody(resp.Body, maxSuccessBodyBytes+1)
 		if err != nil {
+			if errors.Is(err, errTransportClosedBody) {
+				return err
+			}
 			return fmt.Errorf("mcp: read response body: %w", err)
 		}
 		if int64(len(body)) > maxSuccessBodyBytes {
