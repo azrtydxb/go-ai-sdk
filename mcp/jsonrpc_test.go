@@ -223,6 +223,50 @@ func TestCloseDrainsDispatchGoroutines(t *testing.T) {
 	}
 }
 
+// TestCloseReturnsWithinGraceWhenHandlerIgnoresCtx pins the bounded-drain
+// fix: a misbehaving ElicitationHandler that ignores ctx and blocks forever
+// (on an unrelated channel that's never closed, simulating a stuck UI
+// prompt or downstream call) must not make Close hang forever. Close must
+// still return, within closeDrainGrace plus a small scheduling margin.
+func TestCloseReturnsWithinGraceWhenHandlerIgnoresCtx(t *testing.T) {
+	client, server := newPipePair()
+	c := NewClient(client)
+
+	entered := make(chan struct{})
+	neverClosed := make(chan struct{}) // deliberately never closed
+	c.SetElicitationHandler(func(ctx context.Context, req ElicitationRequest) (ElicitationResult, error) {
+		close(entered)
+		<-neverClosed // ignores ctx entirely — the misbehavior under test
+		return ElicitationResult{}, nil
+	})
+
+	initializeWithCaps(t, client, server, c, map[string]any{"elicitation": map[string]any{}})
+
+	sendServerRequest(t, server, 1, "elicitation/create", map[string]any{"message": "x"})
+
+	select {
+	case <-entered:
+	case <-time.After(testTimeout):
+		t.Fatal("dispatch goroutine never started")
+	}
+
+	closeDone := make(chan error, 1)
+	start := time.Now()
+	go func() { closeDone <- c.Close() }()
+
+	select {
+	case err := <-closeDone:
+		if err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		if elapsed := time.Since(start); elapsed > closeDrainGrace+2*time.Second {
+			t.Fatalf("Close took %v, want roughly within closeDrainGrace (%v)", elapsed, closeDrainGrace)
+		}
+	case <-time.After(closeDrainGrace + 2*time.Second):
+		t.Fatal("Close did not return within the drain grace bound — a ctx-ignoring handler hung it")
+	}
+}
+
 // TestNextIDIsAtomicInt64 is a light sanity check that concurrent calls
 // each get a unique, monotonically-assigned id via atomic.Int64 (fix #5) —
 // mostly a compile-time/API check (the alignment issue it fixes is a

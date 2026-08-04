@@ -23,6 +23,13 @@ type ElicitationResult struct {
 // request. A nil handler installed on the Client causes it to auto-respond
 // with Action "decline" and not declare the "elicitation" capability during
 // Initialize.
+//
+// Implementations must respect ctx: it is cancelled when the Client is
+// closed, and a handler that ignores cancellation and blocks indefinitely
+// (e.g. on an unrelated channel, a UI prompt, or a stuck downstream call)
+// will not hang Client.Close forever, but it will delay it — Close waits up
+// to a short grace period (see closeDrainGrace) for in-flight handlers to
+// finish before giving up and returning anyway.
 type ElicitationHandler func(ctx context.Context, req ElicitationRequest) (ElicitationResult, error)
 
 // SetElicitationHandler installs h as the handler invoked for

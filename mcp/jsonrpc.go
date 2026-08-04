@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // errClosedMsg is the error text used when a call is abandoned because the
@@ -31,6 +32,33 @@ const rpcInternalError = -32603
 // JSON-RPC error rather than queued or blocked, so recvLoop is never stalled
 // waiting for dispatch capacity.
 const maxConcurrentServerDispatch = 8
+
+// busyReplyTimeout bounds how long recvLoop will wait while writing the
+// synchronous "server busy" rejection reply (see the default case in
+// recvLoop's dispatch select). That reply is written directly on recvLoop,
+// not from a spawned goroutine — rejecting a request when the dispatch
+// bound is saturated must not itself consume a dispatch slot or spawn an
+// unbounded goroutine per rejection. But that also means an unbounded write
+// there (e.g. against a stuck stdio child that isn't draining stdin) would
+// stall recvLoop indefinitely, defeating the reason bounded dispatch exists
+// in the first place. Deriving a short-deadline context for just this write
+// keeps it best-effort: if the bounded send fails or times out, the reply
+// is simply dropped and the server is left to time out its own request.
+const busyReplyTimeout = 200 * time.Millisecond
+
+// closeDrainGrace bounds how long Client.Close waits for in-flight
+// server-request dispatch goroutines (dispatchWG) to finish before
+// returning anyway. ElicitationHandler implementations are documented to
+// respect the ctx they're given (which Close cancels), so in the normal
+// case drain finishes almost immediately; this grace is a backstop against
+// a handler that ignores ctx and blocks indefinitely (on an unrelated
+// channel, a UI prompt, a stuck downstream call, ...), which would
+// otherwise make Close hang forever. A dispatch goroutine still running
+// after the grace elapses is harmless to leave detached: the transport is
+// already closed by the time Close reaches this wait, so any respondServer*
+// call it eventually makes fails fast against the closed transport instead
+// of corrupting client state.
+const closeDrainGrace = 2 * time.Second
 
 // rpcRequest is a JSON-RPC 2.0 request object (always carries an id).
 type rpcRequest struct {
@@ -223,7 +251,15 @@ func (c *Client) recvLoop() {
 					c.dispatchServerRequest(req)
 				}()
 			default:
-				c.respondServerError(req.ID, rpcInternalError, "server busy")
+				// Bounded, best-effort: see busyReplyTimeout for why this
+				// write must not be allowed to block recvLoop indefinitely.
+				busyCtx, busyCancel := context.WithTimeout(c.ctx, busyReplyTimeout)
+				c.sendServerResponse(busyCtx, serverResponseWire{
+					JSONRPC: "2.0",
+					ID:      req.ID,
+					Error:   &rpcErrorObj{Code: rpcInternalError, Message: "server busy"},
+				})
+				busyCancel()
 			}
 			continue
 		}
@@ -342,30 +378,32 @@ type serverResponseWire struct {
 	Error   *rpcErrorObj    `json:"error,omitempty"`
 }
 
-// respondServerResult sends a successful reply to a server-initiated
-// request, with the same id, serialized via sendMu like any other write.
-func (c *Client) respondServerResult(id json.RawMessage, result any) {
-	resp := serverResponseWire{JSONRPC: "2.0", ID: id, Result: result}
+// sendServerResponse marshals and writes resp (a reply to a server-initiated
+// request), serialized via sendMu like any other write. ctx bounds only this
+// write; callers that don't need a tighter bound than the client's lifetime
+// pass c.ctx (see respondServerResult/respondServerError), while the
+// saturated-dispatch "server busy" path in recvLoop passes a short-deadline
+// ctx instead (see busyReplyTimeout).
+func (c *Client) sendServerResponse(ctx context.Context, resp serverResponseWire) {
 	b, err := json.Marshal(resp)
 	if err != nil {
 		return
 	}
 	c.sendMu.Lock()
 	defer c.sendMu.Unlock()
-	_ = c.transport.Send(c.ctx, b)
+	_ = c.transport.Send(ctx, b)
+}
+
+// respondServerResult sends a successful reply to a server-initiated
+// request, with the same id.
+func (c *Client) respondServerResult(id json.RawMessage, result any) {
+	c.sendServerResponse(c.ctx, serverResponseWire{JSONRPC: "2.0", ID: id, Result: result})
 }
 
 // respondServerError sends a JSON-RPC error reply to a server-initiated
 // request, with the same id.
 func (c *Client) respondServerError(id json.RawMessage, code int, message string) {
-	resp := serverResponseWire{JSONRPC: "2.0", ID: id, Error: &rpcErrorObj{Code: code, Message: message}}
-	b, err := json.Marshal(resp)
-	if err != nil {
-		return
-	}
-	c.sendMu.Lock()
-	defer c.sendMu.Unlock()
-	_ = c.transport.Send(c.ctx, b)
+	c.sendServerResponse(c.ctx, serverResponseWire{JSONRPC: "2.0", ID: id, Error: &rpcErrorObj{Code: code, Message: message}})
 }
 
 // notify sends a JSON-RPC notification (no response expected).
@@ -383,21 +421,36 @@ func (c *Client) notify(ctx context.Context, method string, params any) error {
 // Close shuts down the receive loop, abandons any pending calls with a
 // "mcp: client closed" error, and closes the underlying transport (via
 // closeWith, which performs the actual transport.Close call — see its doc).
-// It also drains any in-flight server-request dispatch goroutines
-// (dispatchWG) before returning, so no dispatch goroutine outlives Close.
+// It also waits (up to closeDrainGrace) for any in-flight server-request
+// dispatch goroutines (dispatchWG) to finish before returning, so that in
+// the normal case — a well-behaved ElicitationHandler that respects the ctx
+// it's given — no dispatch goroutine outlives Close. A handler that ignores
+// ctx and blocks indefinitely cannot make Close hang forever: after
+// closeDrainGrace, Close returns anyway (see that constant's doc for why
+// leaving such a goroutine running is safe).
 //
 // Ordering matters: closeWith cancels c.ctx (so a ctx-respecting handler in
 // a dispatch goroutine exits promptly) and closes the transport (so
 // recvLoop's blocked Receive call returns an error and recvLoop exits,
 // closing loopDone). Only after <-c.loopDone — meaning recvLoop has
 // definitely stopped and will spawn no further dispatch goroutines — is it
-// safe to call dispatchWG.Wait(): sync.WaitGroup forbids a positive-delta
-// Add racing with a Wait call that could observe a zero counter, and
-// waiting immediately after closeWith (while recvLoop might still be
-// spawning new dispatch goroutines) would risk exactly that race.
+// safe to wait on dispatchWG: sync.WaitGroup forbids a positive-delta Add
+// racing with a Wait call that could observe a zero counter, and waiting
+// immediately after closeWith (while recvLoop might still be spawning new
+// dispatch goroutines) would risk exactly that race.
 func (c *Client) Close() error {
 	c.closeWith(errors.New(errClosedMsg))
 	<-c.loopDone
-	c.dispatchWG.Wait()
+
+	drained := make(chan struct{})
+	go func() {
+		c.dispatchWG.Wait()
+		close(drained)
+	}()
+	select {
+	case <-drained:
+	case <-time.After(closeDrainGrace):
+	}
+
 	return c.transportCloseErr
 }
