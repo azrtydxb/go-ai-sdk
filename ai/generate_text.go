@@ -93,6 +93,12 @@ type GenerateTextResult struct {
 	// suspended step's Text has nothing to do with the output schema (the
 	// batch never executed). Output is decoded on the RESUMED run that
 	// actually completes.
+	//
+	// StreamText fills this field identically on the result it hands
+	// OnFinish, with one divergence: a decode failure fails the whole
+	// GenerateText call, whereas a stream has already delivered its parts
+	// by then — so it leaves this nil and reports the
+	// *NoObjectGeneratedError from TextStream.Output instead.
 	Output any
 	// PendingApprovals is non-empty when the tool loop suspended because
 	// some call(s) in a batch needed approval (see ApprovalRequirer) and no

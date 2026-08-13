@@ -174,17 +174,39 @@ func TestStreamSmoke(t *testing.T) {
 	}
 }
 
-// TestStreamWithOutputPassesThroughError verifies Stream does not intercept
-// or drop ai.ErrOutputWithStreamText when Output is set — it's passed
-// through unchanged, same as calling ai.StreamText directly.
-func TestStreamWithOutputPassesThroughError(t *testing.T) {
-	a := &Agent{
-		Model:  &aitest.MockModel{},
-		Output: ai.OutputObject[struct{ X string }](),
+// TestStreamWithOutputStreamsStructuredOutput verifies Stream honors Output
+// the same way ai.StreamText does: the parts stream normally and the decoded
+// value is available from the stream's Output method.
+func TestStreamWithOutputStreamsStructuredOutput(t *testing.T) {
+	type box struct {
+		X string `json:"x"`
 	}
-	_, err := a.Stream(t.Context(), RunOpts{Prompt: "hi"})
-	if !errors.Is(err, ai.ErrOutputWithStreamText) {
-		t.Fatalf("err = %v, want ai.ErrOutputWithStreamText", err)
+	a := &Agent{
+		Model: &aitest.MockModel{
+			Caps: provider.Capabilities{NativeJSON: true},
+			Streams: [][]provider.StreamPart{{
+				provider.TextDelta{Text: `{"x":`},
+				provider.TextDelta{Text: `"hi"}`},
+				provider.FinishPart{Reason: provider.FinishStop},
+			}},
+		},
+		Output: ai.OutputObject[box](),
+	}
+	stream, err := a.Stream(t.Context(), RunOpts{Prompt: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range stream.Parts() {
+	}
+	if stream.Err() != nil {
+		t.Fatal(stream.Err())
+	}
+	out, oerr := stream.Output()
+	if oerr != nil {
+		t.Fatal(oerr)
+	}
+	if got, ok := out.(box); !ok || got.X != "hi" {
+		t.Fatalf("Output() = %#v, want box{X:\"hi\"}", out)
 	}
 }
 
