@@ -155,3 +155,32 @@ func TestNewToolWithBothOptions(t *testing.T) {
 		t.Errorf("len(InputExamples()) = %d, want 1", len(tool.InputExamples()))
 	}
 }
+
+func TestExecutePanicRecovered(t *testing.T) {
+	tool := NewTool("boom", "always panics", func(ctx context.Context, _ struct{}) (any, error) {
+		panic("kaboom")
+	})
+	res, err := tool.Execute(context.Background(), json.RawMessage(`{}`))
+	if res != nil {
+		t.Fatalf("result = %v, want nil", res)
+	}
+	var te *ToolExecutionError
+	if !errors.As(err, &te) {
+		t.Fatalf("err = %v (%T), want *ToolExecutionError", err, err)
+	}
+	if te.ToolName != "boom" || !strings.Contains(te.Cause.Error(), "kaboom") {
+		t.Fatalf("unexpected error contents: %v", te)
+	}
+}
+
+func TestExecutePanicWithErrorValue(t *testing.T) {
+	sentinel := errors.New("sentinel")
+	tool := NewTool("boom2", "panics with error", func(ctx context.Context, _ struct{}) (any, error) {
+		panic(sentinel)
+	})
+	_, err := tool.Execute(context.Background(), json.RawMessage(`{}`))
+	var te *ToolExecutionError
+	if !errors.As(err, &te) || !errors.Is(te.Cause, sentinel) {
+		t.Fatalf("err = %v, want *ToolExecutionError wrapping sentinel", err)
+	}
+}
