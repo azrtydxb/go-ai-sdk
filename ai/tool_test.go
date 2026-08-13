@@ -171,6 +171,12 @@ func TestExecutePanicRecovered(t *testing.T) {
 	if te.ToolName != "boom" || !strings.Contains(te.Cause.Error(), "kaboom") {
 		t.Fatalf("unexpected error contents: %v", te)
 	}
+	if len(te.Stack) == 0 {
+		t.Fatalf("te.Stack is empty, want captured stack trace")
+	}
+	if strings.Contains(te.Error(), "goroutine ") {
+		t.Fatalf("te.Error() = %q, must not contain the stack trace", te.Error())
+	}
 }
 
 func TestExecutePanicWithErrorValue(t *testing.T) {
@@ -182,5 +188,11 @@ func TestExecutePanicWithErrorValue(t *testing.T) {
 	var te *ToolExecutionError
 	if !errors.As(err, &te) || !errors.Is(te.Cause, sentinel) {
 		t.Fatalf("err = %v, want *ToolExecutionError wrapping sentinel", err)
+	}
+	if len(te.Stack) == 0 {
+		t.Fatalf("te.Stack is empty, want captured stack trace")
+	}
+	if strings.Contains(te.Error(), "goroutine ") {
+		t.Fatalf("te.Error() = %q, must not contain the stack trace", te.Error())
 	}
 }

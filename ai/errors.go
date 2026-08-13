@@ -88,6 +88,15 @@ func (e *InvalidToolArgumentsError) Unwrap() error {
 type ToolExecutionError struct {
 	ToolName string
 	Cause    error
+
+	// Stack is the goroutine stack captured at the point a tool panic was
+	// recovered (see (*tool).Execute), for callers that want to log it
+	// themselves. It is nil for an ordinary (non-panic) tool error. It is
+	// deliberately NOT included in Error()'s output: that string can end up
+	// in a provider prompt (generate_text.go's toolResultValue sends it back
+	// to the model as the tool result), and a raw stack trace there would
+	// leak local file paths and goroutine internals into the conversation.
+	Stack []byte
 }
 
 // Error implements the error interface.

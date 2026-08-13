@@ -230,16 +230,21 @@ func (t *tool) Execute(ctx context.Context, args json.RawMessage) (result any, e
 	// panic(error) keeps its error identity via %w for errors.Is chains.
 	// Placed after arg-decoding so decode failures keep returning
 	// *InvalidToolArgumentsError untouched by recover.
+	//
+	// The captured stack goes on ToolExecutionError.Stack, NOT into Cause:
+	// Cause feeds Error(), and Error() can be shipped back to the provider
+	// as a tool result (generate_text.go's toolResultValue), so embedding a
+	// goroutine dump there would leak local file paths into the prompt.
 	defer func() {
 		if r := recover(); r != nil {
 			var cause error
 			if perr, ok := r.(error); ok {
-				cause = fmt.Errorf("tool panicked: %w\n%s", perr, debug.Stack())
+				cause = fmt.Errorf("tool panicked: %w", perr)
 			} else {
-				cause = fmt.Errorf("tool panicked: %v\n%s", r, debug.Stack())
+				cause = fmt.Errorf("tool panicked: %v", r)
 			}
 			result = nil
-			err = &ToolExecutionError{ToolName: t.name, Cause: cause}
+			err = &ToolExecutionError{ToolName: t.name, Cause: cause, Stack: debug.Stack()}
 		}
 	}()
 

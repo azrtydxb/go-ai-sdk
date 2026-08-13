@@ -231,7 +231,12 @@ type httpTransport struct {
 // Close marks the transport closed, closes any response bodies still being
 // drained, unblocks any blocked Receive, and — if a session id was
 // captured — issues a best-effort DELETE carrying that session id to let
-// the server free session state promptly (see terminateSession's doc).
+// the server free session state promptly (see terminateSession's doc). That
+// DELETE is sent synchronously from Close and is bounded by its own 5-second
+// timeout, so against a stalled or unreachable server Close (and therefore
+// mcp.Client.Close, which calls it) can block for up to ~5 seconds; against
+// a session-less transport (no session id ever captured) Close returns
+// immediately.
 //
 // Known deviations from the full 2025-03-26 Streamable HTTP transport spec
 // (v1 is scoped to tools-only MCP clients, which don't need the rest):
@@ -635,7 +640,12 @@ func (t *httpTransport) Receive(ctx context.Context) (json.RawMessage, error) {
 // Close implements Transport. It marks the transport closed (unblocking any
 // pending Receive), closes any SSE response bodies still being drained
 // (unblocking their drain goroutines' reads), and waits for those
-// goroutines to finish before returning.
+// goroutines to finish before returning. If a session id was captured
+// (t.sessionID != ""), it also sends a best-effort DELETE to terminate the
+// session (see terminateSession's doc) before returning — that call is
+// bounded by its own 5-second timeout, so Close can block up to ~5 seconds
+// against a server that accepted the connection but then stalls or is
+// unreachable for the DELETE. mcp.Client.Close inherits this latency.
 //
 // closedFlag is flipped and openBodies snapshotted under mu, the same lock
 // trackBody uses to check closedFlag and register a body — see trackBody's

@@ -177,6 +177,13 @@ func TestStreamTextOutputWrongToolName(t *testing.T) {
 	if !errors.As(s.Err(), &noObj) {
 		t.Fatalf("Err() = %v (%T), want *NoObjectGeneratedError", s.Err(), s.Err())
 	}
+	out, oerr := s.Output()
+	if out != nil {
+		t.Fatalf("Output() value = %v, want nil", out)
+	}
+	if !errors.Is(oerr, s.Err()) {
+		t.Fatalf("Output() err = %v, want the same error as Err() = %v", oerr, s.Err())
+	}
 }
 
 // TestStreamTextOutputDecodeFailure covers non-JSON final text: the parts

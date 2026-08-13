@@ -201,6 +201,13 @@ type GenerateTextOpts struct {
 	// It never fires for OutputChoice (a choice is atomic: intermediate
 	// prefixes name no valid choice), and is a no-op when Output is nil or in
 	// GenerateText, which has no intermediate states to report.
+	//
+	// In the tool-mode fallback, partials are reported as the forced call's
+	// arguments stream in — before the tool loop validates that the call
+	// named the injected output tool. If it named a different tool instead,
+	// that mismatch is only rejected at step end, so one or more partials
+	// may already have been delivered before TextStream.Err() (and
+	// TextStream.Output(), which returns the same error) reports it.
 	OnPartialOutput func(v any)
 
 	// OnFinish, when set, is called once with the call's result after it

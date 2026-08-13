@@ -927,6 +927,13 @@ func (s *TextStream) emitPartialOutput() {
 // time the final text can be decoded at all, so retroactively failing the
 // stream would contradict what it already yielded.
 //
+// If the stream instead ended abnormally (Err() is non-nil — e.g. a wrong
+// tool name in Output's tool-mode fallback, an unknown tool, or a
+// mid-stream provider error), Output() returns that same error rather than
+// decoding whatever partial/unrelated text happened to accumulate: decoding
+// s.lastText in that case would typically just report an unrelated empty-
+// text *NoObjectGeneratedError and mask the real cause.
+//
 // It returns nil, nil when Output was not set, when Parts() has not been
 // ranged over at all, and likewise for a stream
 // that suspended on pending approvals (see PendingApprovals): the suspended
@@ -942,6 +949,13 @@ func (s *TextStream) Output() (any, error) {
 		// report "no output" rather than caching a decode of the empty
 		// string as this stream's permanent answer.
 		return nil, nil
+	}
+	if s.err != nil {
+		// The stream ended abnormally; s.lastText is whatever partial text
+		// happened to accumulate before that and is not a meaningful answer
+		// to decode. Report the real error instead of a misleading decode
+		// failure derived from it.
+		return nil, s.err
 	}
 	if !s.outputResolved {
 		s.outputResolved = true

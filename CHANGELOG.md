@@ -17,11 +17,16 @@ No public API removed.
 
 ### Fixed
 
-- **`ai`: user-tool panics recovered into `*ai.ToolExecutionError`.** A
-  panic inside a caller-supplied `Tool.Execute` (or `ApprovalRequirer`
-  hook) is now recovered and surfaced as a `*ai.ToolExecutionError`
-  wrapping the panic value, instead of unwinding the whole
-  `GenerateText`/`StreamText` call (and the caller's goroutine) with it.
+- **`ai`: panics from `NewTool`-built tools recovered into
+  `*ai.ToolExecutionError`.** A panic inside a tool function passed to
+  `NewTool` is now recovered by `(*tool).Execute` and surfaced as a
+  `*ai.ToolExecutionError` wrapping the panic value, instead of unwinding
+  the whole `GenerateText`/`StreamText` call (and the caller's goroutine)
+  with it. (A panic in a hand-written `Tool` implementation, or in an
+  `ApprovalRequirer` hook, is not covered — only `NewTool`'s `Execute` has
+  the recover.) The recovered goroutine stack is captured on the new
+  `ToolExecutionError.Stack` field, not embedded in `Error()`'s string, so
+  it never leaks into a provider-facing tool result.
 - **`mcp`: `framedTransport.Close` joins both close errors** instead of
   discarding one when closing the underlying stdio pipe fails alongside
   the process-wait error; `RuntimeContext`'s concurrency contract (read-only
