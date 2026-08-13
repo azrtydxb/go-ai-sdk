@@ -768,3 +768,90 @@ func TestHTTPRetryDoesNotHeadOfLineBlockConcurrentCalls(t *testing.T) {
 		t.Fatal("slow call did not finish")
 	}
 }
+
+// TestHTTPTransportCloseSendsDELETEWithSessionID pins the MCP Streamable
+// HTTP session-termination behavior: once the server has handed out a
+// session id (via the Mcp-Session-Id response header), Close must issue a
+// best-effort DELETE to the same URL carrying that session id, so the
+// server can free session state promptly instead of waiting for it to time
+// out on its own.
+func TestHTTPTransportCloseSendsDELETEWithSessionID(t *testing.T) {
+	deleteCh := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			deleteCh <- r.Header.Get("Mcp-Session-Id")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.Header().Set("Mcp-Session-Id", "sess-1")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`))
+	}))
+	defer srv.Close()
+
+	tr := NewStreamableHTTPTransport(srv.URL, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+	if err := tr.Send(ctx, json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"ping"}`)); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if _, err := tr.Receive(ctx); err != nil {
+		t.Fatalf("Receive: %v", err)
+	}
+
+	if err := tr.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	select {
+	case sid := <-deleteCh:
+		if sid != "sess-1" {
+			t.Fatalf("DELETE Mcp-Session-Id = %q, want %q", sid, "sess-1")
+		}
+	case <-time.After(testTimeout):
+		t.Fatal("server never received a DELETE request")
+	}
+}
+
+// TestHTTPTransportCloseNoSessionNoDELETE ensures Close does not attempt a
+// DELETE when no session id was ever captured (e.g. the server never sent
+// Mcp-Session-Id) — there is nothing to terminate.
+func TestHTTPTransportCloseNoSessionNoDELETE(t *testing.T) {
+	var gotDelete atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			gotDelete.Store(true)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`))
+	}))
+	defer srv.Close()
+
+	tr := NewStreamableHTTPTransport(srv.URL, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+	if err := tr.Send(ctx, json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"ping"}`)); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if _, err := tr.Receive(ctx); err != nil {
+		t.Fatalf("Receive: %v", err)
+	}
+
+	if err := tr.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Give a stray DELETE a moment to arrive if the implementation were
+	// (incorrectly) unconditional; a short sleep is acceptable here since we
+	// are asserting absence, not waiting on a channel for a positive event.
+	time.Sleep(50 * time.Millisecond)
+	if gotDelete.Load() {
+		t.Fatal("Close sent a DELETE despite no session id ever having been captured")
+	}
+}
