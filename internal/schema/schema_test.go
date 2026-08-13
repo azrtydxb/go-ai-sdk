@@ -2,6 +2,7 @@ package schema
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -461,5 +462,30 @@ func TestForType_RequiredOrderIsDeterministic(t *testing.T) {
 		if req[i] != w {
 			t.Fatalf("required[%d] = %v, want %q (required = %v)", i, req[i], w, req)
 		}
+	}
+}
+
+func TestForTypeCached(t *testing.T) {
+	type S struct{ A string }
+	first, err := ForType(reflect.TypeOf(S{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := ForType(reflect.TypeOf(S{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if &first[0] != &second[0] {
+		t.Fatal("second ForType call must return the cached bytes (same backing array)")
+	}
+}
+
+func TestForTypeErrorNotCachedAsSuccess(t *testing.T) {
+	type Bad struct{ M map[int]string }
+	if _, err := ForType(reflect.TypeOf(Bad{})); err == nil {
+		t.Fatal("want error for int-keyed map")
+	}
+	if _, err := ForType(reflect.TypeOf(Bad{})); err == nil {
+		t.Fatal("want error again on second call")
 	}
 }
