@@ -20,6 +20,15 @@ type TranscribeOpts struct {
 	Prompt          string
 	MaxRetries      *int
 	ProviderOptions map[string]any
+
+	// OnTranscribeStart, when non-nil, fires once before the first attempt
+	// of the underlying provider call.
+	OnTranscribeStart func(call provider.TranscriptionCall)
+	// OnTranscribeEnd, when non-nil, fires once after the final attempt
+	// (success or retry exhaustion). err, when non-nil, is the SAME error
+	// Transcribe itself returns (retry exhaustion translated to
+	// *RetryError). resp is nil on error.
+	OnTranscribeEnd func(resp *provider.TranscriptionResponse, err error)
 }
 
 // TranscribeResult is the outcome of a Transcribe call.
@@ -53,15 +62,20 @@ func Transcribe(ctx context.Context, opts TranscribeOpts) (*TranscribeResult, er
 		ProviderOptions: opts.ProviderOptions,
 	}
 
+	if opts.OnTranscribeStart != nil {
+		opts.OnTranscribeStart(call)
+	}
+
 	resp, err := retry.Do(ctx, maxRetries, func() (*provider.TranscriptionResponse, error) {
 		return opts.Model.Transcribe(ctx, call)
 	})
-	if err != nil {
-		var exhausted *retry.ExhaustedError
-		if errors.As(err, &exhausted) {
-			return nil, &RetryError{Attempts: exhausted.Attempts, LastErr: exhausted.LastErr}
-		}
-		return nil, err
+	callErr := translateRetryErr(err)
+
+	if opts.OnTranscribeEnd != nil {
+		opts.OnTranscribeEnd(resp, callErr)
+	}
+	if callErr != nil {
+		return nil, callErr
 	}
 
 	return &TranscribeResult{

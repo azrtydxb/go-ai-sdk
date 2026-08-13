@@ -62,6 +62,80 @@ func TestTranslateRetriesOnRetryableError(t *testing.T) {
 	}
 }
 
+func TestTranslateLifecycleCallbacksSuccess(t *testing.T) {
+	m := &aitest.MockTranslationModel{Response: &provider.TranslationResponse{Text: "hello"}}
+	var startCalls int
+	var startCall provider.TranslationCall
+	var endCalls int
+	var endResp *provider.TranslationResponse
+	var endErr error
+	_, err := Translate(t.Context(), TranslateOpts{
+		Model: m,
+		Audio: []byte("x"),
+		OnTranslateStart: func(call provider.TranslationCall) {
+			startCalls++
+			startCall = call
+		},
+		OnTranslateEnd: func(resp *provider.TranslationResponse, err error) {
+			endCalls++
+			endResp = resp
+			endErr = err
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if startCalls != 1 {
+		t.Fatalf("OnTranslateStart calls = %d, want 1", startCalls)
+	}
+	if string(startCall.Audio) != "x" {
+		t.Fatalf("OnTranslateStart call = %+v, want built call", startCall)
+	}
+	if endCalls != 1 {
+		t.Fatalf("OnTranslateEnd calls = %d, want 1", endCalls)
+	}
+	if endErr != nil {
+		t.Fatalf("OnTranslateEnd err = %v, want nil", endErr)
+	}
+	if endResp == nil || endResp.Text != "hello" {
+		t.Fatalf("OnTranslateEnd resp = %+v, want resp with Text=hello", endResp)
+	}
+}
+
+func TestTranslateLifecycleCallbacksError(t *testing.T) {
+	m := &aitest.MockTranslationModel{Err: NewAPICallError(500, "https://x", "", "boom")}
+	var startCalls, endCalls int
+	var endResp *provider.TranslationResponse
+	var endErr error
+	_, err := Translate(t.Context(), TranslateOpts{
+		Model: m,
+		Audio: []byte("x"),
+		OnTranslateStart: func(call provider.TranslationCall) {
+			startCalls++
+		},
+		OnTranslateEnd: func(resp *provider.TranslationResponse, err error) {
+			endCalls++
+			endResp = resp
+			endErr = err
+		},
+	})
+	if err == nil {
+		t.Fatal("want error")
+	}
+	if startCalls != 1 {
+		t.Fatalf("OnTranslateStart calls = %d, want 1", startCalls)
+	}
+	if endCalls != 1 {
+		t.Fatalf("OnTranslateEnd calls = %d, want 1", endCalls)
+	}
+	if endResp != nil {
+		t.Fatalf("OnTranslateEnd resp = %+v, want nil", endResp)
+	}
+	if !errors.Is(endErr, err) {
+		t.Fatalf("OnTranslateEnd err = %v, want same as returned err %v", endErr, err)
+	}
+}
+
 func TestTranslateEmptyText(t *testing.T) {
 	// An empty translation is a legitimate successful result (e.g. silent
 	// audio) — it must not be treated as an error.

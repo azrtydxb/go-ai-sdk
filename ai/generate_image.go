@@ -22,6 +22,15 @@ type GenerateImageOpts struct {
 	Seed            *int64
 	MaxRetries      *int
 	ProviderOptions map[string]any
+
+	// OnImageStart, when non-nil, fires once before the first attempt of
+	// the underlying provider call.
+	OnImageStart func(call provider.ImageCall)
+	// OnImageEnd, when non-nil, fires once after the final attempt (success
+	// or retry exhaustion). err, when non-nil, is the SAME error
+	// GenerateImage itself returns (retry exhaustion translated to
+	// *RetryError). resp is nil on error.
+	OnImageEnd func(resp *provider.ImageResponse, err error)
 }
 
 // GenerateImageResult is the outcome of a GenerateImage call.
@@ -54,15 +63,20 @@ func GenerateImage(ctx context.Context, opts GenerateImageOpts) (*GenerateImageR
 		ProviderOptions: opts.ProviderOptions,
 	}
 
+	if opts.OnImageStart != nil {
+		opts.OnImageStart(call)
+	}
+
 	resp, err := retry.Do(ctx, maxRetries, func() (*provider.ImageResponse, error) {
 		return opts.Model.GenerateImages(ctx, call)
 	})
-	if err != nil {
-		var exhausted *retry.ExhaustedError
-		if errors.As(err, &exhausted) {
-			return nil, &RetryError{Attempts: exhausted.Attempts, LastErr: exhausted.LastErr}
-		}
-		return nil, err
+	callErr := translateRetryErr(err)
+
+	if opts.OnImageEnd != nil {
+		opts.OnImageEnd(resp, callErr)
+	}
+	if callErr != nil {
+		return nil, callErr
 	}
 
 	if len(resp.Images) == 0 {
