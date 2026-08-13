@@ -245,7 +245,9 @@ client's receive loop discriminates every incoming message by shape: `id` +
 no `method` is a response, matched to the pending call it answers exactly as
 before; `id` + `method` is a server-initiated request, dispatched to its own
 goroutine (so a slow elicitation handler can't stall reads for an unrelated
-in-flight `CallTool`); no `id` is a notification, dropped as before. A
+in-flight `CallTool`); no `id` is a notification, dispatched to the
+installed `NotificationHandler` (`SetNotificationHandler`) on the same
+bounded pool, or dropped if none is installed. A
 `tools/call` in flight when the server sends `elicitation/create`
 concurrently is unaffected — the original call's response still matches by
 `id` regardless of what other traffic interleaves on the wire.
@@ -410,7 +412,9 @@ matched to a pending call purely by having an `id` and no `method`; a
 message with both an `id` and a `method` is a server-initiated request,
 dispatched to `SetElicitationHandler`'s handler (or auto-declined/rejected,
 see [Elicitation](#elicitation)) rather than dropped; a message with no `id`
-at all (a notification) is still dropped silently, as before.
+at all (a notification) is dispatched to `SetNotificationHandler`'s handler,
+if one is installed, on the same bounded dispatch pool — with no handler
+installed, or the pool saturated, it is dropped silently.
 
 ## Tools() adapter and the tool loop
 
@@ -487,6 +491,15 @@ if err != nil {
   still has no `sampling/createMessage` or `roots/list` support.
 - **No session termination handshake** on the HTTP transport (`Close`
   simply abandons the session); no `DELETE` request is ever sent.
+- **Notifications reach a single raw handler, undecoded.** An installed
+  `NotificationHandler` (`SetNotificationHandler`) receives every incoming
+  notification's method name and raw `json.RawMessage` params — there is no
+  per-method typed dispatch (e.g. a dedicated callback for
+  `notifications/message` vs `notifications/resources/updated`); the
+  handler must switch on `method` and unmarshal itself. Delivery is
+  best-effort: like server-initiated requests, notifications share the
+  bounded dispatch pool, and one arriving while the pool is saturated is
+  dropped rather than queued.
 
 ## Source of truth
 
@@ -507,6 +520,8 @@ if err != nil {
 - [`mcp/elicitation.go`](../mcp/elicitation.go) (`ElicitationRequest`,
   `ElicitationResult`, `ElicitationHandler`, `SetElicitationHandler`,
   `dispatchServerRequest`, `handleElicitationCreate`)
+- [`mcp/notification.go`](../mcp/notification.go) (`NotificationHandler`,
+  `SetNotificationHandler`)
 - [`mcp/stdio.go`](../mcp/stdio.go) (`NewStdioTransport`,
   `framedTransport`)
 - [`mcp/http.go`](../mcp/http.go) (`NewStreamableHTTPTransport`,
