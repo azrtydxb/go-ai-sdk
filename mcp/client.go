@@ -213,9 +213,20 @@ func (c *Client) ListTools(ctx context.Context) ([]ToolDef, error) {
 	})
 }
 
+// ToolContent is one content part of a CallTool result, preserved verbatim
+// from the wire response.
+type ToolContent struct {
+	Type     string          // "text", "image", "audio", "resource", ...
+	Text     string          // set for "text"
+	Data     string          // base64 payload for "image"/"audio"
+	MimeType string          // media type for binary parts
+	Raw      json.RawMessage // the full wire part, for forward compatibility
+}
+
 // ToolResult is the outcome of a CallTool invocation.
 type ToolResult struct {
-	Text    string // concatenated text content parts
+	Text    string        // concatenated text content parts
+	Content []ToolContent // every content part, in wire order, preserved verbatim
 	IsError bool
 }
 
@@ -225,20 +236,23 @@ type toolsCallParams struct {
 }
 
 type contentPart struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type     string `json:"type"`
+	Text     string `json:"text"`
+	Data     string `json:"data"`
+	MimeType string `json:"mimeType"`
 }
 
 type toolsCallResult struct {
-	Content []contentPart `json:"content"`
-	IsError bool          `json:"isError"`
+	Content []json.RawMessage `json:"content"`
+	IsError bool              `json:"isError"`
 }
 
 // CallTool issues tools/call with the given arguments (a JSON object; a nil
-// args is sent as {}). Content parts of type "text" are concatenated in
-// order into ToolResult.Text; other content types (e.g. images) are ignored
-// in v1. It returns a *CapabilityError without sending any request if the
-// server's "initialize" response didn't advertise the "tools" capability.
+// args is sent as {}). Every content part is preserved, in order, in
+// ToolResult.Content; parts of type "text" are additionally concatenated in
+// order into ToolResult.Text for convenience. It returns a *CapabilityError
+// without sending any request if the server's "initialize" response didn't
+// advertise the "tools" capability.
 func (c *Client) CallTool(ctx context.Context, name string, args json.RawMessage) (*ToolResult, error) {
 	if !c.hasCapability("tools") {
 		return nil, &CapabilityError{Capability: "tools"}
@@ -255,10 +269,22 @@ func (c *Client) CallTool(ctx context.Context, name string, args json.RawMessage
 		return nil, fmt.Errorf("mcp: decode tools/call result: %w", err)
 	}
 	var sb strings.Builder
-	for _, p := range res.Content {
+	content := make([]ToolContent, len(res.Content))
+	for i, rawPart := range res.Content {
+		var p contentPart
+		if err := json.Unmarshal(rawPart, &p); err != nil {
+			return nil, fmt.Errorf("mcp: decode tools/call content part %d: %w", i, err)
+		}
 		if p.Type == "text" {
 			sb.WriteString(p.Text)
 		}
+		content[i] = ToolContent{
+			Type:     p.Type,
+			Text:     p.Text,
+			Data:     p.Data,
+			MimeType: p.MimeType,
+			Raw:      rawPart,
+		}
 	}
-	return &ToolResult{Text: sb.String(), IsError: res.IsError}, nil
+	return &ToolResult{Text: sb.String(), Content: content, IsError: res.IsError}, nil
 }
