@@ -65,9 +65,13 @@ func (c *Client) Initialize(ctx context.Context) error {
 	caps := map[string]any{}
 	c.mu.Lock()
 	hasElicitationHandler := c.elicitationHandler != nil
+	hasSamplingHandler := c.samplingHandler != nil
 	c.mu.Unlock()
 	if hasElicitationHandler {
 		caps["elicitation"] = struct{}{}
+	}
+	if hasSamplingHandler {
+		caps["sampling"] = struct{}{}
 	}
 	params := initializeParams{
 		ProtocolVersion: supportedProtocolVersions[0],

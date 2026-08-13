@@ -221,9 +221,9 @@ if err := client.Initialize(ctx); err != nil {
   blocked on a `client.CallTool`/`ListResources`/etc. call, so a handler
   error can only be observed by the handler's own logging.
 - **Any other server-initiated method** (anything besides
-  `elicitation/create`) gets a JSON-RPC `-32601 Method not found` error
-  response — the dispatch mechanism is generic, elicitation is just the one
-  method wired up today.
+  `elicitation/create` and `sampling/createMessage`, see
+  [Sampling](#sampling)) gets a JSON-RPC `-32601 Method not found` error
+  response — the dispatch mechanism is generic.
 - **Malformed `elicitation/create` params** (the request's `params` doesn't
   decode into `{message, requestedSchema}`) get a JSON-RPC `-32602 Invalid
   params` error response, not a synthesized `Action: "cancel"` result — a
@@ -272,6 +272,54 @@ below), so `elicitation/create` (or any other server-initiated request) can
 only reach the client over the **stdio** transport today. This is a real,
 unresolved gap, not a hypothetical one — document it honestly rather than
 assuming a future HTTP streaming channel closes it automatically.
+
+## Sampling
+
+Sampling is the second **server-initiated** MCP extension: the server
+sends the client a `sampling/createMessage` request mid-session, asking it
+to run an LLM completion on the client's behalf (e.g. so a tool
+implementation can delegate a sub-task to the model without the server
+holding its own API credentials). Install a handler *before*
+`Initialize` — the client only declares the `"sampling"` capability to the
+server when a handler is set:
+
+```go
+client.SetSamplingHandler(func(ctx context.Context, req mcp.CreateMessageRequest) (mcp.CreateMessageResult, error) {
+	// req.Messages[i].Content and req.ModelPreferences are wire content
+	// objects (json.RawMessage), passed through verbatim — decode the
+	// parts your application understands (e.g. {"type":"text","text":...}).
+	return mcp.CreateMessageResult{
+		Role:       "assistant",
+		Content:    json.RawMessage(`{"type":"text","text":"hello"}`),
+		Model:      "my-model",
+		StopReason: "endTurn",
+	}, nil
+})
+
+if err := client.Initialize(ctx); err != nil {
+	log.Fatal(err)
+}
+```
+
+- `CreateMessageRequest{Messages []SamplingMessage, SystemPrompt, MaxTokens,
+  ModelPreferences json.RawMessage}`. `SamplingMessage{Role, Content
+  json.RawMessage}`.
+- `CreateMessageResult{Role, Content json.RawMessage, Model, StopReason}`.
+- **No handler installed** → the client replies to any
+  `sampling/createMessage` it receives with a JSON-RPC `-32601 Method not
+  found` error, and does not declare the `"sampling"` capability during
+  `Initialize` at all — this mirrors the unknown-server-method path rather
+  than elicitation's auto-decline, since there's no neutral
+  `CreateMessageResult` to synthesize in place of an actual completion.
+- **A handler that returns an error** → the client replies to the server
+  with a JSON-RPC `-32603 Internal error`, same as an
+  `ElicitationHandler` error (see [Elicitation](#elicitation)).
+- **Malformed `sampling/createMessage` params** get a JSON-RPC `-32602
+  Invalid params` error response, same treatment as malformed
+  `elicitation/create` params.
+- Subject to the same dispatch, bounding, `Close`-drain, and HTTP-transport
+  limitations documented under [Elicitation](#elicitation) — the mechanism
+  is shared, sampling is just a second method wired up on top of it.
 
 ## Token-provider auth and retries (HTTP transport)
 
@@ -410,8 +458,9 @@ subsequent call.
 **Client** (`mcp/jsonrpc.go`), applying to both transports: a message is
 matched to a pending call purely by having an `id` and no `method`; a
 message with both an `id` and a `method` is a server-initiated request,
-dispatched to `SetElicitationHandler`'s handler (or auto-declined/rejected,
-see [Elicitation](#elicitation)) rather than dropped; a message with no `id`
+dispatched to `SetElicitationHandler`'s or `SetSamplingHandler`'s handler
+(or auto-declined/rejected, see [Elicitation](#elicitation) and
+[Sampling](#sampling)) rather than dropped; a message with no `id`
 at all (a notification) is dispatched to `SetNotificationHandler`'s handler,
 if one is installed, on the same bounded dispatch pool — with no handler
 installed, or the pool saturated, it is dropped silently.
@@ -480,15 +529,15 @@ if err != nil {
 - **Text-content-only tool results.** `CallTool` concatenates only
   `"text"`-type content parts from the result into `ToolResult.Text`; other
   content types (e.g. images) are ignored.
-- **Elicitation over HTTP is unsupported.** Server-initiated requests
-  (elicitation today, and any future server-initiated method) can only
-  reach the client over the stdio transport — the Streamable HTTP transport
-  has no server→client channel to receive them on. See
-  [Elicitation](#elicitation) and
+- **Server-initiated requests over HTTP are unsupported.** Server-initiated
+  requests (elicitation, sampling, and any future server-initiated method)
+  can only reach the client over the stdio transport — the Streamable HTTP
+  transport has no server→client channel to receive them on. See
+  [Elicitation](#elicitation), [Sampling](#sampling), and
   [Transports' documented deviations](#transports-documented-deviations).
-- **No sampling or roots.** The client implements resources, prompts,
-  completions, and elicitation on top of the original tools surface, but
-  still has no `sampling/createMessage` or `roots/list` support.
+- **No roots.** The client implements resources, prompts, completions,
+  elicitation, and sampling on top of the original tools surface, but still
+  has no `roots/list` support.
 - **No session termination handshake** on the HTTP transport (`Close`
   simply abandons the session); no `DELETE` request is ever sent.
 - **Notifications reach a single raw handler, undecoded.** An installed
@@ -520,6 +569,9 @@ if err != nil {
 - [`mcp/elicitation.go`](../mcp/elicitation.go) (`ElicitationRequest`,
   `ElicitationResult`, `ElicitationHandler`, `SetElicitationHandler`,
   `dispatchServerRequest`, `handleElicitationCreate`)
+- [`mcp/sampling.go`](../mcp/sampling.go) (`SamplingMessage`,
+  `CreateMessageRequest`, `CreateMessageResult`, `SamplingHandler`,
+  `SetSamplingHandler`, `handleSamplingCreateMessage`)
 - [`mcp/notification.go`](../mcp/notification.go) (`NotificationHandler`,
   `SetNotificationHandler`)
 - [`mcp/stdio.go`](../mcp/stdio.go) (`NewStdioTransport`,

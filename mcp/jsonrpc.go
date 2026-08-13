@@ -202,6 +202,10 @@ type Client struct {
 	// "elicitation/create" requests. Guarded by mu.
 	elicitationHandler ElicitationHandler
 
+	// samplingHandler, if set, is invoked for server-initiated
+	// "sampling/createMessage" requests. Guarded by mu.
+	samplingHandler SamplingHandler
+
 	// notificationHandler, if set, is invoked for server-initiated
 	// notifications (messages with a method but no id, e.g.
 	// "notifications/message"). Guarded by mu.

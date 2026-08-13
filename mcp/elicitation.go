@@ -72,6 +72,8 @@ func (c *Client) dispatchServerRequest(req serverRequest) {
 	switch req.Method {
 	case "elicitation/create":
 		c.handleElicitationCreate(req)
+	case "sampling/createMessage":
+		c.handleSamplingCreateMessage(req)
 	default:
 		c.respondServerError(req.ID, rpcMethodNotFound, "Method not found")
 	}
