@@ -74,6 +74,15 @@ func (c *Client) dispatchServerRequest(req serverRequest) {
 		c.handleElicitationCreate(req)
 	case "sampling/createMessage":
 		c.handleSamplingCreateMessage(req)
+	case "roots/list":
+		c.mu.Lock()
+		rootsSet := c.rootsSet
+		c.mu.Unlock()
+		if !rootsSet {
+			c.respondServerError(req.ID, rpcMethodNotFound, "Method not found")
+			return
+		}
+		c.handleRootsList(req)
 	default:
 		c.respondServerError(req.ID, rpcMethodNotFound, "Method not found")
 	}

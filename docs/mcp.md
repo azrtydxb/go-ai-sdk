@@ -321,6 +321,35 @@ if err := client.Initialize(ctx); err != nil {
   limitations documented under [Elicitation](#elicitation) — the mechanism
   is shared, sampling is just a second method wired up on top of it.
 
+## Roots
+
+Roots let the client tell the server which filesystem locations it's
+scoped to work with. Unlike elicitation and sampling, `roots/list` carries
+no user-supplied logic — the client just reports a fixed list — so there's
+no handler to install; call `SetRoots` *before* `Initialize` instead. The
+client only declares the `"roots"` capability (`{"listChanged": false}` —
+this SDK has no dynamic root updates) when roots have been set:
+
+```go
+client.SetRoots([]mcp.Root{
+	{URI: "file:///home/user/project", Name: "project"},
+})
+
+if err := client.Initialize(ctx); err != nil {
+	log.Fatal(err)
+}
+```
+
+- `Root{URI, Name string}`. `URI` must be a `file://` URI per the MCP spec.
+- **`SetRoots` never called** → the client replies to any `roots/list` it
+  receives with a JSON-RPC `-32601 Method not found` error, and does not
+  declare the `"roots"` capability during `Initialize` — a spec-conforming
+  server won't send `roots/list` without the capability, so this is
+  defense in depth, same as sampling's no-handler path (see
+  [Sampling](#sampling)).
+- Subject to the same dispatch, bounding, `Close`-drain, and HTTP-transport
+  limitations documented under [Elicitation](#elicitation).
+
 ## Token-provider auth and retries (HTTP transport)
 
 `NewStreamableHTTPTransportWithOptions` is the options-taking form of the
@@ -530,14 +559,11 @@ if err != nil {
   `"text"`-type content parts from the result into `ToolResult.Text`; other
   content types (e.g. images) are ignored.
 - **Server-initiated requests over HTTP are unsupported.** Server-initiated
-  requests (elicitation, sampling, and any future server-initiated method)
-  can only reach the client over the stdio transport — the Streamable HTTP
-  transport has no server→client channel to receive them on. See
-  [Elicitation](#elicitation), [Sampling](#sampling), and
-  [Transports' documented deviations](#transports-documented-deviations).
-- **No roots.** The client implements resources, prompts, completions,
-  elicitation, and sampling on top of the original tools surface, but still
-  has no `roots/list` support.
+  requests (elicitation, sampling, `roots/list`, and any future
+  server-initiated method) can only reach the client over the stdio
+  transport — the Streamable HTTP transport has no server→client channel to
+  receive them on. See [Elicitation](#elicitation), [Sampling](#sampling),
+  and [Transports' documented deviations](#transports-documented-deviations).
 - **No session termination handshake** on the HTTP transport (`Close`
   simply abandons the session); no `DELETE` request is ever sent.
 - **Notifications reach a single raw handler, undecoded.** An installed

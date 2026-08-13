@@ -211,6 +211,15 @@ type Client struct {
 	// "notifications/message"). Guarded by mu.
 	notificationHandler NotificationHandler
 
+	// roots is the fixed set of roots reported to server-initiated
+	// "roots/list" requests, installed via SetRoots. Guarded by mu.
+	roots []Root
+
+	// rootsSet reports whether SetRoots has been called, gating both the
+	// "roots" capability declaration in Initialize and the "roots/list"
+	// dispatch case. Guarded by mu.
+	rootsSet bool
+
 	// dispatchSem bounds the number of server-initiated requests dispatched
 	// concurrently (see maxConcurrentServerDispatch): recvLoop acquires a
 	// slot before spawning a dispatch goroutine and rejects the request with
