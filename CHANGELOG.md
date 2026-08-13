@@ -8,7 +8,7 @@ once it reaches 1.0.
 
 ## [Unreleased]
 
-## v0.3.0 (unreleased)
+## v0.3.0 (2026-08-14)
 
 A follow-up wave closing the deferred/documented-not-fixed items from the
 `ai`/`mcp` correctness, concurrency, and feature-parity audits: two
@@ -954,7 +954,8 @@ smoke-tested against live APIs yet (see the
 - [Migrating from the Vercel AI SDK](docs/migrating-from-vercel-ai-sdk.md)
   and [Architecture](docs/architecture.md).
 
-[Unreleased]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.0...v0.2.1
