@@ -1033,3 +1033,75 @@ func TestAddToolInputExamplesMiddleware_Idempotent(t *testing.T) {
 		t.Errorf("Description = %q, want %q (examples folded exactly once)", got.Tools[0].Description, wantDesc)
 	}
 }
+
+// ---------------------------------------------------------------------
+// ChainMiddleware
+// ---------------------------------------------------------------------
+
+// orderTagModel is a test-only provider.LanguageModel that records its name
+// into *order (in call order, since the tag runs before delegating) then
+// delegates to model, so a chain of these reveals middleware wrap order.
+type orderTagModel struct {
+	model provider.LanguageModel
+	name  string
+	order *[]string
+}
+
+func (m *orderTagModel) ModelID() string      { return m.model.ModelID() }
+func (m *orderTagModel) ProviderName() string { return m.model.ProviderName() }
+func (m *orderTagModel) Capabilities() provider.Capabilities {
+	return m.model.Capabilities()
+}
+
+func (m *orderTagModel) Generate(ctx context.Context, call provider.Call) (*provider.Response, error) {
+	*m.order = append(*m.order, m.name)
+	return m.model.Generate(ctx, call)
+}
+
+func (m *orderTagModel) Stream(ctx context.Context, call provider.Call) (provider.StreamResponse, error) {
+	*m.order = append(*m.order, m.name)
+	return m.model.Stream(ctx, call)
+}
+
+func TestChainMiddlewareOrder(t *testing.T) {
+	base := &aitest.MockModel{Responses: []*provider.Response{{}}}
+	var order []string
+	tag := func(name string) func(provider.LanguageModel) provider.LanguageModel {
+		return func(m provider.LanguageModel) provider.LanguageModel {
+			return &orderTagModel{model: m, name: name, order: &order}
+		}
+	}
+	wrapped := ChainMiddleware(base, tag("outer"), tag("inner"))
+	if _, err := wrapped.Generate(context.Background(), provider.Call{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(order) != 2 || order[0] != "outer" || order[1] != "inner" {
+		t.Fatalf("order = %v, want [outer inner]", order)
+	}
+}
+
+func TestChainMiddlewareEmpty(t *testing.T) {
+	base := &aitest.MockModel{}
+	if got := ChainMiddleware(base); got != provider.LanguageModel(base) {
+		t.Fatal("ChainMiddleware with no middlewares must return model unchanged")
+	}
+}
+
+func TestChainMiddlewareNilModelPanics(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic for nil model")
+		}
+	}()
+	ChainMiddleware(nil)
+}
+
+func TestChainMiddlewareNilMiddlewarePanics(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic for nil middleware")
+		}
+	}()
+	base := &aitest.MockModel{}
+	ChainMiddleware(base, nil)
+}
