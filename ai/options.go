@@ -173,6 +173,11 @@ type GenerateTextOpts struct {
 	// wrapped with SmoothStream, that re-chunking happens downstream of
 	// OnChunk, so OnChunk still sees the provider's original, unsmoothed
 	// parts rather than the re-chunked ones the consumer ultimately reads.
+	//
+	// Exception: in Output's tool-mode fallback, the forced output tool's
+	// call/result parts are suppressed from Parts() entirely (they're an
+	// encoding detail, not real content the consumer should see) but are
+	// still observed by OnChunk before that suppression happens.
 	OnChunk func(part provider.StreamPart)
 
 	// OnPartialOutput, when set together with Output, is called during

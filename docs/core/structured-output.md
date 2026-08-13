@@ -163,14 +163,15 @@ tool-mode strategy above — they share the same fallback logic and the same
 - **`GenerateObject[T]`/`StreamObject[T]`** — the call's *only* output is a
   structured object; no text response, no tool calls of your own, and (with
   `StreamObject`) you want incremental `Partials()` as the object accumulates.
-- **`GenerateTextOpts.Output`** — you're already using `GenerateText`
-  (possibly with your own `Tools` and a multi-step tool loop) and want the
-  *final* step's text decoded into a Go value at the end, without a second
-  call. It adds four shapes `GenerateObject` doesn't have on its own
-  (`OutputArray[T]`, `OutputChoice`, `OutputJSON`, and reusing whatever tool
-  loop already ran) — but `Output` is `GenerateText`-only: `StreamText`
-  returns `ai.ErrOutputWithStreamText` immediately if `Output` is set, so use
-  `StreamObject[T]` when you need streaming.
+- **`GenerateTextOpts.Output`** — you're already using `GenerateText`/
+  `StreamText` (possibly with your own `Tools` and a multi-step tool loop)
+  and want the *final* step's text decoded into a Go value at the end,
+  without a second call. It adds four shapes `GenerateObject` doesn't have
+  on its own (`OutputArray[T]`, `OutputChoice`, `OutputJSON`, and reusing
+  whatever tool loop already ran); `StreamText` honors it too, delivering
+  intermediate values via `GenerateTextOpts.OnPartialOutput` and the final
+  value via `TextStream.Output()` — see [Generating text § Streaming
+  structured output](generating-text.md#streaming-structured-output).
 
 Both fall back to a forced single tool call on the same condition
 (`Capabilities().NativeJSON == false`); `Output`'s tool-mode fallback

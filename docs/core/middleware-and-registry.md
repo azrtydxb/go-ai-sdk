@@ -200,6 +200,35 @@ call before anything else runs; put response-shaping middleware
 (`ExtractReasoningMiddleware`, `SimulateStreamingMiddleware`) closest to the
 real model, since they interpret that specific model's raw output format.
 
+## ChainMiddleware
+
+`ChainMiddleware` is a convenience for the composition pattern above when
+none of the middlewares need per-call configuration beyond what a closure
+can capture: it wraps `model` in a list of
+`func(provider.LanguageModel) provider.LanguageModel` values, first-listed
+outermost.
+
+```go
+model := ai.ChainMiddleware(baseModel,
+	func(m provider.LanguageModel) provider.LanguageModel {
+		return ai.DefaultSettingsMiddleware(m, provider.Call{Temperature: ptr(0.7)})
+	},
+	func(m provider.LanguageModel) provider.LanguageModel {
+		return ai.ExtractReasoningMiddleware(m, ai.ExtractReasoningOpts{TagName: "think"})
+	},
+)
+```
+
+`ChainMiddleware(m, a, b) == a(b(m))` — `a` (first-listed) is outermost, so
+it sees every call first, matching the Vercel AI SDK's `wrapLanguageModel`
+middleware-array order. Middleware constructors that take extra
+configuration (`ExtractReasoningMiddleware`, `DefaultSettingsMiddleware`,
+`TelemetryMiddleware`) need the closure adaptation shown above since
+`ChainMiddleware` only accepts the plain `func(provider.LanguageModel)
+provider.LanguageModel` shape. A `nil` `model` or a `nil` entry in
+`middlewares` panics, matching the individual constructors' own nil-model
+panic; calling with zero `middlewares` returns `model` unchanged.
+
 ## Registry
 
 ```go

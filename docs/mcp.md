@@ -451,8 +451,11 @@ called out directly in their source doc comments:
 
 **Streamable HTTP** (from `mcp/http.go`):
 
-- `Close` does not send a `DELETE` to terminate the session on the server;
-  the session, if any, is simply abandoned.
+- `Close` issues a best-effort `DELETE` carrying the session id (if one was
+  captured) to let the server free session state promptly, but this is a
+  courtesy, not a negotiated handshake: the response status and any error
+  are ignored, and the session is treated as abandoned from the client's
+  perspective regardless of whether the `DELETE` succeeds.
 - There is no standalone `GET` request opening a server-initiated SSE
   channel, so server-initiated requests/notifications outside of a POST
   response are not supported — this is why elicitation (and any other
@@ -555,17 +558,24 @@ if err != nil {
 
 ## Limitations
 
-- **Text-content-only tool results.** `CallTool` concatenates only
-  `"text"`-type content parts from the result into `ToolResult.Text`; other
-  content types (e.g. images) are ignored.
+- **`ToolResult.Text` is text-only.** `CallTool` still concatenates only
+  `"text"`-type content parts into `ToolResult.Text`; every content part
+  (text, image, audio, embedded resource, in wire order) is preserved
+  verbatim in `ToolResult.Content` instead, so no content type is
+  discarded — see `mcp/client.go`'s `ToolResult`/`ToolContent` types for the
+  full-fidelity surface.
 - **Server-initiated requests over HTTP are unsupported.** Server-initiated
   requests (elicitation, sampling, `roots/list`, and any future
   server-initiated method) can only reach the client over the stdio
   transport — the Streamable HTTP transport has no server→client channel to
   receive them on. See [Elicitation](#elicitation), [Sampling](#sampling),
   and [Transports' documented deviations](#transports-documented-deviations).
-- **No session termination handshake** on the HTTP transport (`Close`
-  simply abandons the session); no `DELETE` request is ever sent.
+- **No session termination *handshake*** on the HTTP transport: `Close`
+  issues a best-effort `DELETE` carrying the session id to let the server
+  free state promptly, but the response status and any error are ignored
+  (a server MAY reject it, e.g. `405` if it doesn't support client-initiated
+  termination) — the session is abandoned from the client's perspective
+  either way, so this is a courtesy, not a negotiated handshake.
 - **Notifications reach a single raw handler, undecoded.** An installed
   `NotificationHandler` (`SetNotificationHandler`) receives every incoming
   notification's method name and raw `json.RawMessage` params — there is no
