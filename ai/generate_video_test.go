@@ -67,6 +67,82 @@ func TestGenerateVideoRetriesOnRetryableError(t *testing.T) {
 	}
 }
 
+func TestGenerateVideoLifecycleCallbacksSuccess(t *testing.T) {
+	m := &aitest.MockVideoModel{Response: &provider.VideoResponse{
+		Videos: []provider.GeneratedVideo{{Data: []byte("vid1")}},
+	}}
+	var startCalls int
+	var startCall provider.VideoCall
+	var endCalls int
+	var endResp *provider.VideoResponse
+	var endErr error
+	_, err := GenerateVideo(t.Context(), GenerateVideoOpts{
+		Model:  m,
+		Prompt: "a cat running",
+		OnVideoStart: func(call provider.VideoCall) {
+			startCalls++
+			startCall = call
+		},
+		OnVideoEnd: func(resp *provider.VideoResponse, err error) {
+			endCalls++
+			endResp = resp
+			endErr = err
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if startCalls != 1 {
+		t.Fatalf("OnVideoStart calls = %d, want 1", startCalls)
+	}
+	if startCall.Prompt != "a cat running" {
+		t.Fatalf("OnVideoStart call = %+v, want built call", startCall)
+	}
+	if endCalls != 1 {
+		t.Fatalf("OnVideoEnd calls = %d, want 1", endCalls)
+	}
+	if endErr != nil {
+		t.Fatalf("OnVideoEnd err = %v, want nil", endErr)
+	}
+	if endResp == nil || len(endResp.Videos) != 1 {
+		t.Fatalf("OnVideoEnd resp = %+v, want resp with 1 video", endResp)
+	}
+}
+
+func TestGenerateVideoLifecycleCallbacksError(t *testing.T) {
+	m := &aitest.MockVideoModel{Err: NewAPICallError(500, "https://x", "", "boom")}
+	var startCalls, endCalls int
+	var endResp *provider.VideoResponse
+	var endErr error
+	_, err := GenerateVideo(t.Context(), GenerateVideoOpts{
+		Model:  m,
+		Prompt: "a cat running",
+		OnVideoStart: func(call provider.VideoCall) {
+			startCalls++
+		},
+		OnVideoEnd: func(resp *provider.VideoResponse, err error) {
+			endCalls++
+			endResp = resp
+			endErr = err
+		},
+	})
+	if err == nil {
+		t.Fatal("want error")
+	}
+	if startCalls != 1 {
+		t.Fatalf("OnVideoStart calls = %d, want 1", startCalls)
+	}
+	if endCalls != 1 {
+		t.Fatalf("OnVideoEnd calls = %d, want 1", endCalls)
+	}
+	if endResp != nil {
+		t.Fatalf("OnVideoEnd resp = %+v, want nil", endResp)
+	}
+	if !errors.Is(endErr, err) {
+		t.Fatalf("OnVideoEnd err = %v, want same as returned err %v", endErr, err)
+	}
+}
+
 func TestGenerateVideoEmptyVideos(t *testing.T) {
 	m := &aitest.MockVideoModel{Response: &provider.VideoResponse{Videos: []provider.GeneratedVideo{}}}
 	_, err := GenerateVideo(t.Context(), GenerateVideoOpts{Model: m, Prompt: "a cat"})

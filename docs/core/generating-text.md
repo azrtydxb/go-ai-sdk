@@ -381,10 +381,15 @@ existed — so only `OnAbort` fires for it.
 
 `GenerateTextOpts.Output` selects a structured-output mode for
 `GenerateText` — decode the model's final text straight into a Go value,
-without switching to `ai.GenerateObject[T]`. It's `GenerateText`-only:
-`StreamText` returns `ErrOutputWithStreamText` immediately when `Output` is
-set (partial-output streaming is future work — see
-[Migrating from the Vercel AI SDK](../migrating-from-vercel-ai-sdk.md)).
+without switching to `ai.GenerateObject[T]`. `StreamText` honors `Output`
+too: intermediate values repair-parse from the accumulating text/tool-call
+JSON and are delivered via `GenerateTextOpts.OnPartialOutput` as they
+change, and the final decoded value is available from
+`TextStream.Output()` once `Parts()` iteration completes — see
+[Streaming structured output](#streaming-structured-output) below.
+(`ai.ErrOutputWithStreamText`, once returned by `StreamText` when `Output`
+was set, is deprecated and no longer returned; it is kept only so existing
+`errors.Is` checks still compile.)
 
 Four constructors build an `Output`:
 
@@ -531,6 +536,70 @@ up front (before any model call), rather than requesting an unsatisfiable
 problems; see
 [Structured output § GenerateObject vs Output modes](structured-output.md#generateobject-vs-output-modes)
 for when to reach for which.
+
+### Streaming structured output
+
+`StreamText` honors `Output` exactly the way `GenerateText` does — same
+native-JSON/tool-mode fallback, same `ErrOutputRequiresJSONOrNoTools`
+up-front check, same forced-call scrubbing — but adds two ways to observe
+the value as it streams in, instead of only after the call returns:
+
+- **`GenerateTextOpts.OnPartialOutput func(v any)`** — called during
+  `Parts()` iteration with each successfully repair-parsed, *distinct*
+  intermediate value, as the accumulated text (or, in the tool-mode
+  fallback, the forced output tool's streaming arguments) grows. Fires zero
+  or more times; skipped for a raw prefix that doesn't yet repair-parse into
+  anything, and skipped again when the freshly parsed value is
+  `reflect.DeepEqual` to the last one reported (a chunk boundary that
+  doesn't change the parsed shape doesn't re-fire it).
+- **`TextStream.Output() (any, error)`** — the final decoded value, valid
+  once `Parts()` iteration has completed. It decodes the same way
+  `GenerateText`'s `result.Output` does (`stripFences`, then the mode's
+  `decode`), so it reports the same `*ai.NoObjectGeneratedError` for text
+  the mode can't parse — and that decode failure surfaces only from
+  `Output()`, never from `TextStream.Err()`: the parts have already been
+  delivered to the consumer by the time the final text can be decoded, so
+  retroactively failing the stream would contradict what it already
+  yielded. `Output()` returns `nil, nil` if `Output` was never set, if
+  `Parts()` was never ranged over, or if the stream suspended on pending
+  approvals (see [Approvals for tool execution](tools.md#approvals-for-tool-execution)).
+  Repeated calls return the same decoded value; the decode itself runs at
+  most once.
+- `GenerateTextResult.Output` (from `TextStream.Result()`, once iteration
+  finishes) mirrors `TextStream.Output()`'s value — but a decode failure
+  there is silently left as `nil` rather than propagated, since a stream
+  that has already delivered its parts can't fail the whole call the way
+  `GenerateText` does.
+
+In the tool-mode fallback, the forced output tool's call/result parts are
+never yielded from `Parts()` (they're an encoding detail, not real content)
+but are still observed by `OnChunk` if one is set — see
+[`OnChunk`'s doc comment](../../ai/options.go) for that one exception to
+"before being yielded to the consumer of `Parts()`".
+
+```go
+stream, err := ai.StreamText(context.Background(), ai.GenerateTextOpts{
+	Model:  model,
+	Prompt: "Give me a simple pancake recipe.",
+	Output: ai.OutputObject[Recipe](),
+	OnPartialOutput: func(v any) {
+		if r, ok := v.(Recipe); ok {
+			fmt.Println("partial:", r.Name)
+		}
+	},
+})
+if err != nil {
+	log.Fatal(err)
+}
+for range stream.Parts() {
+}
+v, err := stream.Output()
+if err != nil {
+	log.Fatal(err)
+}
+recipe := v.(Recipe)
+fmt.Println("final:", recipe.Name)
+```
 
 ## Lifecycle callbacks: model call and tool execution
 

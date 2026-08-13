@@ -22,6 +22,15 @@ type GenerateSpeechOpts struct {
 	Language        string
 	MaxRetries      *int
 	ProviderOptions map[string]any
+
+	// OnSpeechStart, when non-nil, fires once before the first attempt of
+	// the underlying provider call.
+	OnSpeechStart func(call provider.SpeechCall)
+	// OnSpeechEnd, when non-nil, fires once after the final attempt
+	// (success or retry exhaustion). err, when non-nil, is the SAME error
+	// GenerateSpeech itself returns (retry exhaustion translated to
+	// *RetryError). resp is nil on error.
+	OnSpeechEnd func(resp *provider.SpeechResponse, err error)
 }
 
 // GenerateSpeechResult is the outcome of a GenerateSpeech call.
@@ -54,15 +63,20 @@ func GenerateSpeech(ctx context.Context, opts GenerateSpeechOpts) (*GenerateSpee
 		ProviderOptions: opts.ProviderOptions,
 	}
 
+	if opts.OnSpeechStart != nil {
+		opts.OnSpeechStart(call)
+	}
+
 	resp, err := retry.Do(ctx, maxRetries, func() (*provider.SpeechResponse, error) {
 		return opts.Model.GenerateSpeech(ctx, call)
 	})
-	if err != nil {
-		var exhausted *retry.ExhaustedError
-		if errors.As(err, &exhausted) {
-			return nil, &RetryError{Attempts: exhausted.Attempts, LastErr: exhausted.LastErr}
-		}
-		return nil, err
+	callErr := translateRetryErr(err)
+
+	if opts.OnSpeechEnd != nil {
+		opts.OnSpeechEnd(resp, callErr)
+	}
+	if callErr != nil {
+		return nil, callErr
 	}
 
 	if len(resp.Audio) == 0 {

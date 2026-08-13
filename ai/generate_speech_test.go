@@ -67,6 +67,80 @@ func TestGenerateSpeechRetriesOnRetryableError(t *testing.T) {
 	}
 }
 
+func TestGenerateSpeechLifecycleCallbacksSuccess(t *testing.T) {
+	m := &aitest.MockSpeechModel{Response: &provider.SpeechResponse{Audio: []byte("a"), MediaType: "audio/mpeg"}}
+	var startCalls int
+	var startCall provider.SpeechCall
+	var endCalls int
+	var endResp *provider.SpeechResponse
+	var endErr error
+	_, err := GenerateSpeech(t.Context(), GenerateSpeechOpts{
+		Model: m,
+		Text:  "hi",
+		OnSpeechStart: func(call provider.SpeechCall) {
+			startCalls++
+			startCall = call
+		},
+		OnSpeechEnd: func(resp *provider.SpeechResponse, err error) {
+			endCalls++
+			endResp = resp
+			endErr = err
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if startCalls != 1 {
+		t.Fatalf("OnSpeechStart calls = %d, want 1", startCalls)
+	}
+	if startCall.Text != "hi" {
+		t.Fatalf("OnSpeechStart call = %+v, want built call", startCall)
+	}
+	if endCalls != 1 {
+		t.Fatalf("OnSpeechEnd calls = %d, want 1", endCalls)
+	}
+	if endErr != nil {
+		t.Fatalf("OnSpeechEnd err = %v, want nil", endErr)
+	}
+	if endResp == nil || string(endResp.Audio) != "a" {
+		t.Fatalf("OnSpeechEnd resp = %+v, want resp with Audio=a", endResp)
+	}
+}
+
+func TestGenerateSpeechLifecycleCallbacksError(t *testing.T) {
+	m := &aitest.MockSpeechModel{Err: NewAPICallError(500, "https://x", "", "boom")}
+	var startCalls, endCalls int
+	var endResp *provider.SpeechResponse
+	var endErr error
+	_, err := GenerateSpeech(t.Context(), GenerateSpeechOpts{
+		Model: m,
+		Text:  "hi",
+		OnSpeechStart: func(call provider.SpeechCall) {
+			startCalls++
+		},
+		OnSpeechEnd: func(resp *provider.SpeechResponse, err error) {
+			endCalls++
+			endResp = resp
+			endErr = err
+		},
+	})
+	if err == nil {
+		t.Fatal("want error")
+	}
+	if startCalls != 1 {
+		t.Fatalf("OnSpeechStart calls = %d, want 1", startCalls)
+	}
+	if endCalls != 1 {
+		t.Fatalf("OnSpeechEnd calls = %d, want 1", endCalls)
+	}
+	if endResp != nil {
+		t.Fatalf("OnSpeechEnd resp = %+v, want nil", endResp)
+	}
+	if !errors.Is(endErr, err) {
+		t.Fatalf("OnSpeechEnd err = %v, want same as returned err %v", endErr, err)
+	}
+}
+
 func TestGenerateSpeechEmptyAudio(t *testing.T) {
 	m := &aitest.MockSpeechModel{Response: &provider.SpeechResponse{Audio: []byte{}}}
 	_, err := GenerateSpeech(t.Context(), GenerateSpeechOpts{Model: m, Text: "hi"})

@@ -536,11 +536,23 @@ func TestOutputSuspendedRunSkipsDecode(t *testing.T) {
 	}
 }
 
-func TestStreamTextWithOutputIsError(t *testing.T) {
+// TestStreamTextWithOutputToolsRejected covers the one Output restriction
+// StreamText still enforces (inherited from buildOutputCall, same as
+// GenerateText): a tool-mode fallback cannot coexist with the caller's own
+// tools. ErrOutputWithStreamText, by contrast, is no longer returned at all.
+func TestStreamTextWithOutputToolsRejected(t *testing.T) {
 	m := &aitest.MockModel{}
-	_, err := StreamText(t.Context(), GenerateTextOpts{Model: m, Prompt: "x", Output: OutputObject[outBook]()})
-	if !errors.Is(err, ErrOutputWithStreamText) {
-		t.Fatalf("err = %v, want ErrOutputWithStreamText", err)
+	_, err := StreamText(t.Context(), GenerateTextOpts{
+		Model:  m,
+		Prompt: "x",
+		Tools:  []Tool{NewTool("t", "t", func(ctx context.Context, in struct{}) (any, error) { return "", nil })},
+		Output: OutputObject[outBook](),
+	})
+	if !errors.Is(err, ErrOutputRequiresJSONOrNoTools) {
+		t.Fatalf("err = %v, want ErrOutputRequiresJSONOrNoTools", err)
+	}
+	if errors.Is(err, ErrOutputWithStreamText) {
+		t.Fatal("ErrOutputWithStreamText must no longer be returned")
 	}
 	if len(m.Calls) != 0 {
 		t.Fatalf("want no model call, got %d", len(m.Calls))

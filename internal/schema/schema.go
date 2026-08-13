@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -18,6 +19,21 @@ var (
 	byteSliceType  = reflect.TypeOf([]byte(nil))
 	timeType       = reflect.TypeOf(time.Time{})
 )
+
+// schemaCache memoizes ForType results keyed by the (pointer-normalized)
+// reflect.Type. The schema for a type never changes within a process, and
+// generation walks the whole struct via reflection + a full json.Marshal, so
+// every GenerateObject/Output/NewTool call was paying that cost repeatedly.
+// Values are cacheEntry{schema, err}; errors are cached too (they are just
+// as deterministic). Callers receive the SAME json.RawMessage bytes — the
+// package contract (already implicit) is that callers must not mutate the
+// returned schema.
+var schemaCache sync.Map // reflect.Type -> cacheEntry
+
+type cacheEntry struct {
+	schema json.RawMessage
+	err    error
+}
 
 // For reflects T (which must be a struct type) into a JSON Schema object.
 func For[T any]() (json.RawMessage, error) {
@@ -36,11 +52,26 @@ func ForType(t reflect.Type) (json.RawMessage, error) {
 		return nil, fmt.Errorf("schema: %s is not a struct", t)
 	}
 
-	m, err := structSchema(t, map[reflect.Type]bool{})
-	if err != nil {
-		return nil, err
+	if v, ok := schemaCache.Load(t); ok {
+		e := v.(cacheEntry)
+		return e.schema, e.err
 	}
-	return json.Marshal(m)
+
+	m, err := structSchema(t, map[reflect.Type]bool{})
+	var entry cacheEntry
+	if err != nil {
+		entry = cacheEntry{err: err}
+	} else {
+		schema, marshalErr := json.Marshal(m)
+		if marshalErr != nil {
+			entry = cacheEntry{err: marshalErr}
+		} else {
+			entry = cacheEntry{schema: schema}
+		}
+	}
+	actual, _ := schemaCache.LoadOrStore(t, entry)
+	e := actual.(cacheEntry)
+	return e.schema, e.err
 }
 
 // fieldEntry holds a computed field schema plus enough bookkeeping to

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -559,5 +560,28 @@ func TestStdioClientConcurrentCallsStaySerialized(t *testing.T) {
 	case <-serverDone:
 	case <-time.After(testTimeout):
 		t.Fatal("server loop did not finish processing all requests")
+	}
+}
+
+// failCloser is an io.WriteCloser whose Close always fails with a fixed
+// error, so it can stand in for framedTransport.w in tests exercising
+// Close's error-combining behavior.
+type failCloser struct{ err error }
+
+func (f failCloser) Write(p []byte) (int, error) { return len(p), nil }
+func (f failCloser) Close() error                { return f.err }
+
+func TestFramedTransportCloseJoinsErrors(t *testing.T) {
+	werr := errors.New("writer close failed")
+	cerr := errors.New("proc close failed")
+	tr := &framedTransport{
+		w:       failCloser{err: werr},
+		closeFn: func() error { return cerr },
+		closed:  make(chan struct{}),
+		msgCh:   make(chan framedResult),
+	}
+	err := tr.Close()
+	if !errors.Is(err, werr) || !errors.Is(err, cerr) {
+		t.Fatalf("Close() = %v, want both werr and cerr via errors.Is", err)
 	}
 }

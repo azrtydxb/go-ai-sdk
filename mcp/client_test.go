@@ -473,6 +473,69 @@ func TestCallToolConcatenatesTextAndIgnoresOtherTypes(t *testing.T) {
 	}
 }
 
+// TestCallToolPreservesContentParts verifies that CallTool now preserves
+// every wire content part in ToolResult.Content (Type, Text/Data/MimeType,
+// and a Raw round-trip of the original part object), while ToolResult.Text
+// remains the concatenation of just the "text" parts (fix task 6).
+func TestCallToolPreservesContentParts(t *testing.T) {
+	c, server := withCap("tools")
+	defer c.Close()
+
+	type result struct {
+		res *ToolResult
+		err error
+	}
+	results := make(chan result, 1)
+	go func() {
+		r, err := c.CallTool(context.Background(), "search", json.RawMessage(`{"q":"hi"}`))
+		results <- result{r, err}
+	}()
+
+	req := recvRequest(t, server)
+	sendResult(t, server, *req.ID, map[string]any{
+		"content": []map[string]any{
+			{"type": "text", "text": "a"},
+			{"type": "image", "data": "aGk=", "mimeType": "image/png"},
+			{"type": "text", "text": "b"},
+		},
+		"isError": false,
+	})
+
+	r := <-results
+	if r.err != nil {
+		t.Fatalf("CallTool: %v", r.err)
+	}
+	if r.res.Text != "ab" {
+		t.Fatalf("Text = %q, want %q", r.res.Text, "ab")
+	}
+	if len(r.res.Content) != 3 {
+		t.Fatalf("len(Content) = %d, want 3", len(r.res.Content))
+	}
+	img := r.res.Content[1]
+	if img.Type != "image" {
+		t.Fatalf("Content[1].Type = %q, want image", img.Type)
+	}
+	if img.MimeType != "image/png" {
+		t.Fatalf("Content[1].MimeType = %q, want image/png", img.MimeType)
+	}
+	if img.Data != "aGk=" {
+		t.Fatalf("Content[1].Data = %q, want aGk=", img.Data)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(img.Raw, &raw); err != nil {
+		t.Fatalf("decode Content[1].Raw: %v", err)
+	}
+	want := map[string]any{"type": "image", "data": "aGk=", "mimeType": "image/png"}
+	if len(raw) != len(want) {
+		t.Fatalf("Content[1].Raw = %v, want %v", raw, want)
+	}
+	for k, v := range want {
+		if raw[k] != v {
+			t.Fatalf("Content[1].Raw[%q] = %v, want %v", k, raw[k], v)
+		}
+	}
+}
+
 func TestCallToolIsError(t *testing.T) {
 	c, server := withCap("tools")
 	defer c.Close()

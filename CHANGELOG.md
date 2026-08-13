@@ -8,6 +8,96 @@ once it reaches 1.0.
 
 ## [Unreleased]
 
+## v0.3.0 (2026-08-14)
+
+A follow-up wave closing the deferred/documented-not-fixed items from the
+`ai`/`mcp` correctness, concurrency, and feature-parity audits: two
+correctness fixes, one perf fix, and eight new features (`ai` and `mcp`).
+No public API removed.
+
+### Fixed
+
+- **`ai`: panics from `NewTool`-built tools recovered into
+  `*ai.ToolExecutionError`.** A panic inside a tool function passed to
+  `NewTool` is now recovered by `(*tool).Execute` and surfaced as a
+  `*ai.ToolExecutionError` wrapping the panic value, instead of unwinding
+  the whole `GenerateText`/`StreamText` call (and the caller's goroutine)
+  with it. (A panic in a hand-written `Tool` implementation, or in an
+  `ApprovalRequirer` hook, is not covered — only `NewTool`'s `Execute` has
+  the recover.) The recovered goroutine stack is captured on the new
+  `ToolExecutionError.Stack` field, not embedded in `Error()`'s string, so
+  it never leaks into a provider-facing tool result.
+- **`mcp`: `framedTransport.Close` joins both close errors** instead of
+  discarding one when closing the underlying stdio pipe fails alongside
+  the process-wait error; `RuntimeContext`'s concurrency contract (read-only
+  after the tool loop starts) is now documented on the type itself.
+
+### Performance
+
+- **`internal/schema`: generated JSON Schemas are memoized per
+  `reflect.Type`.** Repeated `schema.For[T]()` calls for the same `T` (a
+  tool re-registered per call, `Output`/`GenerateObject` on a hot path)
+  now reuse the cached schema instead of re-deriving it via reflection
+  every time.
+
+### Added
+
+- **`ai.ChainMiddleware`** stacks multiple `LanguageModelMiddleware`
+  values into one, applied in the given order. See
+  [Middleware and registry § ChainMiddleware](docs/core/middleware-and-registry.md#chainmiddleware).
+- **`mcp.NotificationHandler` / `Client.SetNotificationHandler`** delivers
+  server-initiated notifications (`notifications/message`,
+  `notifications/resources/updated`, etc.) to an installable handler
+  instead of silently dropping them. See
+  [MCP § Notifications](docs/mcp.md).
+- **`mcp.ToolResult.Content`** preserves every content part of a
+  `tools/call` result verbatim, in wire order (text, image, audio,
+  embedded resource) — `ToolResult.Text` still concatenates only the
+  `"text"`-type parts, but no content type is discarded any more. See
+  [MCP § Limitations](docs/mcp.md#limitations).
+- **`mcp.SamplingHandler` / `Client.SetSamplingHandler`** answers
+  server-initiated `sampling/createMessage` requests. See
+  [MCP § Sampling](docs/mcp.md#sampling).
+- **`mcp.Client.SetRoots`** advertises and serves the client's filesystem
+  roots via `roots/list`. See [MCP § Roots](docs/mcp.md#roots).
+- **`mcp` HTTP transport: session termination on `Close`.** The
+  Streamable HTTP transport now issues a best-effort `DELETE` carrying the
+  session id when `Close` is called, and the stdio/HTTP transport
+  trust-model deviations from the 2025-03-26 spec are documented on both
+  transports' doc comments. See
+  [MCP § Transports' documented deviations](docs/mcp.md#transports-documented-deviations).
+- **Lifecycle callbacks for `Translate`/`Transcribe`/`GenerateSpeech`/
+  `GenerateImage`/`GenerateVideo`** — each gains an `On<X>Start`/`On<X>End`
+  pair (`OnTranslateStart`/`OnTranslateEnd`, `OnTranscribeStart`/
+  `OnTranscribeEnd`, `OnSpeechStart`/`OnSpeechEnd`, `OnImageStart`/
+  `OnImageEnd`, `OnVideoStart`/`OnVideoEnd`), matching `ai.EmbedOpts`'s
+  `OnEmbedStart`/`OnEmbedEnd` pattern. See
+  [Media § Lifecycle callbacks](docs/core/media.md#lifecycle-callbacks).
+- **`StreamText` structured output.** `GenerateTextOpts.Output` is now
+  honored by `StreamText`, not just `GenerateText`: intermediate values
+  repair-parse from the accumulating text/tool-call JSON and are delivered
+  via `GenerateTextOpts.OnPartialOutput`, and the final decoded value is
+  available from `TextStream.Output()`. `ai.ErrOutputWithStreamText` is
+  deprecated and no longer returned. See
+  [Generating text § Streaming structured output](docs/core/generating-text.md#streaming-structured-output).
+
+### Notes — carried minors
+
+Recorded here rather than fixed in this wave; none are regressions, and
+each remains its own documented, non-blocking gap:
+
+- **`StreamObject`'s repair-reparse is O(n²) in the accumulated text
+  length** — every chunk re-runs JSON repair over the whole
+  accumulation-so-far rather than incrementally, which is fine for
+  typical object sizes but a real cost on very large streamed objects.
+- **`EmbedMany` batches sequentially**, not concurrently — a large input
+  split across many provider-max-sized batches pays each batch's latency
+  serially rather than overlapping them.
+- **`Call.Headers` has no effect on embed/media (image/speech/video/
+  transcription) calls** — it's honored by `GenerateText`/`StreamText`/
+  `GenerateObject`/`StreamObject` only; the embed and media call paths
+  don't thread per-call headers through to their provider requests.
+
 ## [0.2.3] — 2026-08-04
 
 A documentation-only release ahead of announcing the module. No code, no
@@ -864,7 +954,8 @@ smoke-tested against live APIs yet (see the
 - [Migrating from the Vercel AI SDK](docs/migrating-from-vercel-ai-sdk.md)
   and [Architecture](docs/architecture.md).
 
-[Unreleased]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.0...v0.2.1

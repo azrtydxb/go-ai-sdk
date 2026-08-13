@@ -66,8 +66,10 @@ type GenerateTextOpts struct {
 	Tools      []Tool
 	ToolChoice *provider.ToolChoice
 	// Output selects a structured-output mode (object/array/choice/json) for
-	// this call. GenerateText-only: StreamText returns
-	// ErrOutputWithStreamText immediately when Output is set. When Output
+	// this call. Both GenerateText and StreamText honor it: in StreamText the
+	// decoded value comes from TextStream.Output (and GenerateTextResult.
+	// Output on the OnFinish result) once iteration completes, with
+	// intermediate values delivered via OnPartialOutput. When Output
 	// has a schema and Model.Capabilities().NativeJSON is true, it is
 	// enforced via Call.ResponseFormat; when NativeJSON is false, it falls
 	// back to a single forced tool call the same way GenerateObject does —
@@ -171,7 +173,42 @@ type GenerateTextOpts struct {
 	// wrapped with SmoothStream, that re-chunking happens downstream of
 	// OnChunk, so OnChunk still sees the provider's original, unsmoothed
 	// parts rather than the re-chunked ones the consumer ultimately reads.
+	//
+	// Exception: in Output's tool-mode fallback, the forced output tool's
+	// call/result parts are suppressed from Parts() entirely (they're an
+	// encoding detail, not real content the consumer should see) but are
+	// still observed by OnChunk before that suppression happens.
 	OnChunk func(part provider.StreamPart)
+
+	// OnPartialOutput, when set together with Output, is called during
+	// StreamText with each successfully repair-parsed, distinct intermediate
+	// value of the structured output as it streams in — the same
+	// repair-then-unmarshal snapshots ObjectStream.Partials yields, delivered
+	// as a callback because TextStream's iterator is already spoken for by
+	// the unified stream parts. The dynamic type of v is the mode's own: T
+	// for OutputObject[T], []T for OutputArray[T], any (map/slice/scalar) for
+	// OutputJSON.
+	//
+	// It taps the accumulating text of the current step (native-JSON and
+	// schemaless modes) or the accumulating arguments of the forced output
+	// tool call (the tool-mode fallback — see Output). Consecutive snapshots
+	// that are reflect.DeepEqual are collapsed, so it fires only when the
+	// partial value actually changed; the last value it reports for a step
+	// therefore equals that step's final decoded output. Values may be
+	// incomplete in every sense (missing fields, truncated strings, a
+	// half-formed final element) — treat them as previews, not as the result.
+	//
+	// It never fires for OutputChoice (a choice is atomic: intermediate
+	// prefixes name no valid choice), and is a no-op when Output is nil or in
+	// GenerateText, which has no intermediate states to report.
+	//
+	// In the tool-mode fallback, partials are reported as the forced call's
+	// arguments stream in — before the tool loop validates that the call
+	// named the injected output tool. If it named a different tool instead,
+	// that mismatch is only rejected at step end, so one or more partials
+	// may already have been delivered before TextStream.Err() (and
+	// TextStream.Output(), which returns the same error) reports it.
+	OnPartialOutput func(v any)
 
 	// OnFinish, when set, is called once with the call's result after it
 	// completes successfully: in GenerateText, right before it returns,

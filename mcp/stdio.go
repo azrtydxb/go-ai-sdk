@@ -252,11 +252,7 @@ func (t *framedTransport) Close() error {
 		if t.closeFn != nil {
 			cerr = t.closeFn()
 		}
-		if werr != nil {
-			err = werr
-		} else {
-			err = cerr
-		}
+		err = errors.Join(werr, cerr)
 	})
 	return err
 }
@@ -266,6 +262,9 @@ func (t *framedTransport) Close() error {
 // line). Env entries are appended to the child's environment. The child's
 // stderr is passed through to os.Stderr. Close closes the child's stdin,
 // waits briefly for it to exit on its own, and kills it if it hasn't.
+//
+// cmd is trusted developer configuration, executed verbatim; callers
+// passing user-influenced input are responsible for validating it.
 func NewStdioTransport(cmd []string, env []string) (Transport, error) {
 	if len(cmd) == 0 {
 		return nil, errors.New("mcp: NewStdioTransport: empty command")

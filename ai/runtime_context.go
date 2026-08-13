@@ -9,6 +9,11 @@ import "context"
 // ApproveToolCall) for the duration of that GenerateText/StreamText call. It
 // is installed once, before the tool loop begins — both loops install the
 // SAME RuntimeContext value for every step and every resumed batch.
+//
+// RuntimeContext is not synchronized. The tool loop executes tool calls
+// sequentially, so reads and writes from tool Execute functions are safe
+// without locking — but a tool that spawns its own goroutines and touches
+// the map from them must provide its own synchronization.
 type RuntimeContext map[string]any
 
 // runtimeContextKey is the unexported context key RuntimeContext is stored

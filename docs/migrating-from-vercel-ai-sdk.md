@@ -44,7 +44,7 @@ complete feature-by-feature status:
 | Image-model middleware (`wrapImageModel` equivalent) | **Shipped as a naming hook** — `ai.WrapImageModel`; no built-in image middlewares ship yet, and Vercel's full image-middleware interface (which can also rewrite `params`/results) isn't modeled — see [Middleware and registry § WrapImageModel](core/middleware-and-registry.md#wrapimagemodel). |
 | AssemblyAI, Gladia, Rev.ai transcription providers | **Shipped** — see [Provider overview](providers/README.md) and each provider's page. |
 | `stopWhen` consultation on every step | **Shipped, and Vercel-consistent** — `StopWhen` is consulted after every completed step (not only ones that requested tool calls). See [Generating text § The multi-step tool loop](core/generating-text.md#the-multi-step-tool-loop). |
-| Output modes on `generateText` (`text`/`object`/`array`/`choice`/`json`, `Experimental_Output`) | **Shipped for `GenerateText`** — `GenerateTextOpts.Output` (`ai.OutputObject[T]`/`ai.OutputArray[T]`/`ai.OutputChoice`/`ai.OutputJSON`), extracted via `ai.OutputAs[T]`; see [Generating text § Output modes](core/generating-text.md#output-modes). **Not shipped for `StreamText`**: Vercel's `Experimental_Output` also streams partial output incrementally as a stream mode; `go-ai-sdk`'s `StreamText` returns the typed `ai.ErrOutputWithStreamText` immediately if `Output` is set — this remains the one known future item, tracked under [Future — plausible, not yet implemented](#future--plausible-not-yet-implemented) below, not a v6-core gap. |
+| Output modes on `generateText` (`text`/`object`/`array`/`choice`/`json`, `Experimental_Output`) | **Shipped for both `GenerateText` and `StreamText`** — `GenerateTextOpts.Output` (`ai.OutputObject[T]`/`ai.OutputArray[T]`/`ai.OutputChoice`/`ai.OutputJSON`), extracted via `ai.OutputAs[T]`; see [Generating text § Output modes](core/generating-text.md#output-modes). `StreamText` streams partial output incrementally, matching Vercel's `Experimental_Output` stream mode: intermediate repair-parsed values arrive via `GenerateTextOpts.OnPartialOutput`, and the final value via `TextStream.Output()` — see [Generating text § Streaming structured output](core/generating-text.md#streaming-structured-output). (`ai.ErrOutputWithStreamText`, previously returned when `Output` was set on `StreamText`, is deprecated and no longer returned.) |
 | Reranking (`rerank`, `RerankingModel`, Cohere/Voyage/Mixedbread) | **Shipped** — `ai.Rerank`, `provider.RerankingModel`, `Registry.RerankingModel`; Cohere, Voyage, and Mixedbread all implement `provider.RerankingModel`. See [Embeddings § Reranking](core/embeddings.md#reranking), [Voyage](providers/voyage.md#reranking), and [Mixedbread](providers/mixedbread.md#reranking). |
 | Unified `reasoning` option (effort/budget, per-provider mapping) | **Shipped** — `GenerateTextOpts.Reasoning`/`provider.ReasoningConfig{Effort, BudgetTokens}`, mapped to `reasoning_effort` (openaicompat), a resolved token budget via `provider.EffortBudgetTokens` (Anthropic, Google/Vertex AI, Bedrock), or ignored (Cohere, Mistral); see [Reasoning § Requesting reasoning](core/reasoning.md#requesting-reasoning-generatetextoptsreasoning). `ProviderOptions` still merges last and wins over `Reasoning` on a wire-key collision — the repo-wide `ProviderOptions` precedence convention was not special-cased for this option; see [Provider options § Reasoning is no exception](core/provider-options.md#reasoning-is-no-exception). A top-level per-message reasoning **enum** (v7-only — see below) is not modeled. |
 | Full lifecycle-callback event set (call-start/end, tool-execution start/end, embed/rerank events) | **Shipped** — `GenerateTextOpts.OnModelCallStart`/`OnModelCallEnd`, `OnToolExecutionStart`/`OnToolExecutionEnd` (see [Generating text § Lifecycle callbacks](core/generating-text.md#lifecycle-callbacks-model-call-and-tool-execution)); `EmbedOpts`/`EmbedManyOpts.OnEmbedStart`/`OnEmbedEnd` (see [Embeddings § Embed](core/embeddings.md#embed)); `RerankOpts.OnRerankStart`/`OnRerankEnd` (see [Embeddings § Reranking](core/embeddings.md#reranking)). Every End-callback's error is the SAME error the caller's function returns (retry exhaustion already translated to `*ai.RetryError`). |
@@ -362,16 +362,14 @@ deviations are in [MCP § Limitations](mcp.md#limitations).
   infrastructure rather than round-tripping through the caller) — not
   modeled; every tool call in `go-ai-sdk` today executes client-side via
   `ai.Tool.Execute`.
-- **Partial-output streaming for `StreamText`'s `Output` modes** — the one
-  remaining `StreamText`-side gap from the [output modes](#ai-sdk-6-delta)
-  row above; `GenerateText`'s `Output` modes are fully shipped.
 
 ## Source of truth
 
 - [`ai/options.go`](../ai/options.go), [`ai/generate_text.go`](../ai/generate_text.go),
   [`ai/stream_text.go`](../ai/stream_text.go) — `GenerateTextOpts` and the
   tool loop
-- [`ai/output.go`](../ai/output.go) — `Output` modes on `GenerateText`
+- [`ai/output.go`](../ai/output.go) — `Output` modes, shared by
+  `GenerateText` and `StreamText`
 - [`ai/rerank.go`](../ai/rerank.go), [`provider/rerank.go`](../provider/rerank.go) —
   `ai.Rerank`/`provider.RerankingModel`
 - [`ai/tool_result_content.go`](../ai/tool_result_content.go),

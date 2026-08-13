@@ -2,7 +2,9 @@ package ai
 
 import (
 	"context"
+	"fmt"
 	"iter"
+	"reflect"
 	"time"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/retry"
@@ -47,6 +49,28 @@ type TextStream struct {
 	lastSources   []provider.SourcePart
 	lastFinish    provider.FinishReason
 
+	// outputToolName is the name of the injected output-schema tool when
+	// GenerateTextOpts.Output uses the tool-mode fallback (see
+	// buildOutputCall); "" for plain text, native-JSON, and schemaless JSON
+	// modes. When set, the forced call's stream parts are consumed as the
+	// structured output rather than yielded/executed as real tool traffic —
+	// see Parts.
+	outputToolName string
+
+	// outputAccum is the current step's accumulating raw structured output
+	// (text deltas, or the forced output tool call's argument deltas), and
+	// outputPrev/outputHavePrev the last value reported to OnPartialOutput —
+	// used to suppress repeat snapshots. All three reset at every step.
+	outputAccum    []byte
+	outputPrev     any
+	outputHavePrev bool
+
+	// outputResolved records that the final decode has already run, so
+	// Output() (and buildResult) are idempotent and decode at most once.
+	outputResolved bool
+	outputValue    any
+	outputErr      error
+
 	// pendingApprovals is set when the tool loop suspended because some
 	// call(s) needed approval and none was available — either on the
 	// resume batch (before any stream ran) or mid-loop, after a step. See
@@ -70,11 +94,7 @@ type TextStream struct {
 // StreamText starts the first model call (retried like GenerateText) and
 // returns a *TextStream. A non-nil error means the stream could not start.
 func StreamText(ctx context.Context, opts GenerateTextOpts) (*TextStream, error) {
-	if opts.Output != nil {
-		return nil, ErrOutputWithStreamText
-	}
-
-	call, err := buildCall(opts)
+	call, outputToolName, err := buildOutputCall(opts)
 	if err != nil {
 		return nil, err
 	}
@@ -112,6 +132,8 @@ func StreamText(ctx context.Context, opts GenerateTextOpts) (*TextStream, error)
 		model:       opts.Model,
 		activeTools: activeToolSet(opts.ActiveTools),
 		cancelTotal: cancelTotal,
+
+		outputToolName: outputToolName,
 	}
 
 	// Resume: an unanswered assistant tool-call batch at the end of
@@ -268,6 +290,13 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 			}
 			stepIndex := len(s.steps)
 
+			// Partial-output accumulation is per step: with native JSON and
+			// user tools, the decoded output is the LAST step's text (same as
+			// GenerateText), so earlier steps' text must not bleed into it.
+			s.outputAccum = s.outputAccum[:0]
+			s.outputPrev = nil
+			s.outputHavePrev = false
+
 			var text string
 			var reasoningText string
 			// reasoningTail accumulates ReasoningDelta text received since
@@ -304,9 +333,18 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 				if s.opts.OnChunk != nil {
 					s.opts.OnChunk(p)
 				}
+				// suppressed marks a part that is an encoding detail of
+				// Output's tool-mode fallback (the forced output tool's call
+				// parts) rather than real tool traffic: it is consumed here as
+				// structured output and never yielded to the consumer, who
+				// gets the value from Output()/OnPartialOutput instead.
+				suppressed := false
 				switch part := p.(type) {
 				case provider.TextDelta:
 					text += part.Text
+					if s.outputToolName == "" {
+						s.tapPartialOutput(part.Text)
+					}
 				case provider.ReasoningDelta:
 					reasoningText += part.Text
 					reasoningTail += part.Text
@@ -316,6 +354,19 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 				case provider.SourceEvent:
 					sources = append(sources, part.Source)
 				case provider.ToolCallDelta:
+					if s.outputToolName != "" {
+						// Forced output mode offers exactly one tool (user
+						// tools are rejected up front by
+						// ErrOutputRequiresJSONOrNoTools), so every tool-call
+						// part in this step belongs to the output call —
+						// including one whose name doesn't match, which the
+						// step assembly below turns into a
+						// *NoObjectGeneratedError. Args arrive either as a
+						// sequence of fragments or as a single full-args
+						// delta (Gemini-family); appending handles both.
+						suppressed = true
+						s.tapPartialOutput(part.ArgsDelta)
+					}
 					pc, ok := argsByID[part.ID]
 					if !ok {
 						pc = &pendingCall{}
@@ -352,10 +403,22 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 						}
 					}
 				case provider.ToolCallEnd:
+					if s.outputToolName != "" {
+						suppressed = true
+						// The assembled call carries the authoritative args:
+						// replace the accumulation rather than appending to
+						// it, so a provider that emits both deltas and a full
+						// ToolCallEnd doesn't double up.
+						s.resetPartialOutput(part.Call.Args)
+					}
 					toolCalls = append(toolCalls, part.Call)
 				case provider.FinishPart:
 					finish = part
 					gotFinish = true
+				}
+
+				if suppressed {
+					continue
 				}
 
 				if !yield(p) {
@@ -479,6 +542,55 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 
 			hasToolCalls := len(toolCalls) > 0
 
+			if s.outputToolName != "" && hasToolCalls {
+				// Output's tool-mode fallback, mirroring GenerateText's
+				// handling of the same forced call: match by name, don't
+				// execute, promote the args to the step's text, scrub the
+				// call, answer it with a synthetic tool-result message, and
+				// end the loop. See GenerateTextResult.Output.
+				matched, ok := findToolCallByName(toolCalls, s.outputToolName)
+				if !ok {
+					err := &NoObjectGeneratedError{
+						RawText: text,
+						Cause:   fmt.Errorf("ai: output: model did not call the output tool %q", s.outputToolName),
+					}
+					s.err = err
+					s.current = nil
+					s.reportAbortOrError(err)
+					return
+				}
+
+				step.Text = string(matched.Args)
+				step.ToolCalls = nil
+				s.lastText = step.Text
+
+				s.messages = append(s.messages, provider.Message{
+					Role: provider.RoleTool,
+					Content: []provider.ContentPart{provider.ToolResultPart{
+						ToolCallID: matched.ID,
+						Name:       matched.Name,
+						Result:     string(matched.Args),
+					}},
+				})
+
+				// With ToolCalls scrubbed to empty, reporting tool-calls as
+				// the finish reason would contradict the step's own content;
+				// a more informative reason (length, content-filter) is left
+				// as-is.
+				if finish.Reason == provider.FinishToolCalls {
+					step.FinishReason = provider.FinishStop
+					s.lastFinish = provider.FinishStop
+				}
+
+				s.steps = append(s.steps, step)
+				if s.opts.OnStepFinish != nil {
+					s.opts.OnStepFinish(step)
+				}
+				s.current = nil
+				s.finishOrTimeout()
+				return
+			}
+
 			if hasToolCalls {
 				batch, err := runApprovalAwareToolCalls(s.ctx, s.opts, s.opts.Tools, toolCalls, s.activeTools, stepIndex, false)
 				if err != nil {
@@ -536,7 +648,7 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 				return
 			}
 
-			call, err := buildCall(s.opts)
+			call, _, err := buildOutputCall(s.opts)
 			if err != nil {
 				s.err = err
 				s.current = nil
@@ -746,6 +858,14 @@ func (s *TextStream) buildResult() *GenerateTextResult {
 		FinishReason:     s.lastFinish,
 		PendingApprovals: s.pendingApprovals,
 	}
+	// GenerateTextResult.Output carries the decoded value exactly as
+	// GenerateText populates it. A decode failure is deliberately not
+	// propagated into the result (GenerateText fails the whole call for it,
+	// which a stream that has already delivered its parts cannot do) — it
+	// stays available via TextStream.Output.
+	if v, err := s.Output(); err == nil {
+		result.Output = v
+	}
 	if len(s.steps) > 0 {
 		last := s.steps[len(s.steps)-1]
 		result.Text = last.Text
@@ -756,6 +876,98 @@ func (s *TextStream) buildResult() *GenerateTextResult {
 		result.FinishReason = last.FinishReason
 	}
 	return result
+}
+
+// tapPartialOutput appends a chunk of the streaming structured output to the
+// current step's accumulation and reports a new partial value to
+// OnPartialOutput when the accumulation now repair-parses into a value
+// different from the last one reported (see
+// GenerateTextOpts.OnPartialOutput). It is a no-op unless both Output and
+// OnPartialOutput are set.
+func (s *TextStream) tapPartialOutput(chunk string) {
+	if s.opts.Output == nil || s.opts.OnPartialOutput == nil {
+		return
+	}
+	s.outputAccum = append(s.outputAccum, chunk...)
+	s.emitPartialOutput()
+}
+
+// resetPartialOutput replaces the current step's accumulation wholesale (a
+// provider-assembled ToolCallEnd supersedes the deltas that preceded it) and
+// reports the resulting value like tapPartialOutput does.
+func (s *TextStream) resetPartialOutput(raw []byte) {
+	if s.opts.Output == nil || s.opts.OnPartialOutput == nil {
+		return
+	}
+	s.outputAccum = append(s.outputAccum[:0], raw...)
+	s.emitPartialOutput()
+}
+
+func (s *TextStream) emitPartialOutput() {
+	v, ok := s.opts.Output.decodePartial(string(s.outputAccum))
+	if !ok {
+		return
+	}
+	if s.outputHavePrev && reflect.DeepEqual(s.outputPrev, v) {
+		return
+	}
+	s.outputHavePrev = true
+	s.outputPrev = v
+	s.opts.OnPartialOutput(v)
+}
+
+// Output returns the decoded structured output of a stream started with
+// GenerateTextOpts.Output set, and is valid once Parts() iteration has
+// completed: it decodes the final step's accumulated text through the same
+// path GenerateText uses (stripFences, then the mode's decode), so it
+// reports the same *NoObjectGeneratedError for text the mode can't parse.
+//
+// That decode failure surfaces HERE and only here — Err() stays nil for it.
+// The parts of a stream have already been delivered to the consumer by the
+// time the final text can be decoded at all, so retroactively failing the
+// stream would contradict what it already yielded.
+//
+// If the stream instead ended abnormally (Err() is non-nil — e.g. a wrong
+// tool name in Output's tool-mode fallback, an unknown tool, or a
+// mid-stream provider error), Output() returns that same error rather than
+// decoding whatever partial/unrelated text happened to accumulate: decoding
+// s.lastText in that case would typically just report an unrelated empty-
+// text *NoObjectGeneratedError and mask the real cause.
+//
+// It returns nil, nil when Output was not set, when Parts() has not been
+// ranged over at all, and likewise for a stream
+// that suspended on pending approvals (see PendingApprovals): the suspended
+// step's text is unrelated to the output schema — mirroring the decode
+// GenerateText skips in the same situation. Repeated calls return the same
+// decoded value; the decode itself runs at most once.
+func (s *TextStream) Output() (any, error) {
+	if s.opts.Output == nil || len(s.pendingApprovals) > 0 {
+		return nil, nil
+	}
+	if !s.started {
+		// Nothing has streamed yet, so there is no final text to decode —
+		// report "no output" rather than caching a decode of the empty
+		// string as this stream's permanent answer.
+		return nil, nil
+	}
+	if s.err != nil {
+		// The stream ended abnormally; s.lastText is whatever partial text
+		// happened to accumulate before that and is not a meaningful answer
+		// to decode. Report the real error instead of a misleading decode
+		// failure derived from it.
+		return nil, s.err
+	}
+	if !s.outputResolved {
+		s.outputResolved = true
+		s.outputValue, s.outputErr = s.opts.Output.decode(stripFences(s.lastText))
+		if s.outputErr != nil {
+			// A mode's decode can return a non-nil zero value alongside its
+			// error (decodeObject returns the zero T); an errored Output must
+			// report no value at all.
+			s.outputValue = nil
+		}
+	}
+	return s.outputValue, s.outputErr
 }
 
 // Err returns the error, if any, that ended iteration abnormally: a

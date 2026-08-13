@@ -668,3 +668,29 @@ func copyNamespaceValue(v any) any {
 	}
 	return cp
 }
+
+// ---------------------------------------------------------------------
+// ChainMiddleware
+// ---------------------------------------------------------------------
+
+// ChainMiddleware wraps model in middlewares, first-listed outermost:
+// ChainMiddleware(m, a, b) == a(b(m)), so a sees every call first — matching
+// the Vercel AI SDK's wrapLanguageModel middleware-array order. Middleware
+// constructors that take extra configuration (ExtractReasoningMiddleware,
+// DefaultSettingsMiddleware, TelemetryMiddleware) are adapted with a
+// closure: func(m provider.LanguageModel) provider.LanguageModel {
+// return ExtractReasoningMiddleware(m, opts) }. A nil middleware panics
+// (programmer error, same contract as the individual constructors' nil-model
+// panic); calling with no middlewares returns model unchanged.
+func ChainMiddleware(model provider.LanguageModel, middlewares ...func(provider.LanguageModel) provider.LanguageModel) provider.LanguageModel {
+	if model == nil {
+		panic("ai: ChainMiddleware: nil model")
+	}
+	for i := len(middlewares) - 1; i >= 0; i-- {
+		if middlewares[i] == nil {
+			panic("ai: ChainMiddleware: nil middleware")
+		}
+		model = middlewares[i](model)
+	}
+	return model
+}

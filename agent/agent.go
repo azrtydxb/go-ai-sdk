@@ -132,10 +132,11 @@ func (a *Agent) Generate(ctx context.Context, run RunOpts) (*ai.GenerateTextResu
 }
 
 // Stream runs the agent once against run, delegating entirely to
-// ai.StreamText. If Output is set, ai.StreamText's own restriction applies
-// unchanged: it returns ai.ErrOutputWithStreamText immediately rather than
-// streaming — Stream does not intercept or drop that error, it passes it
-// straight through to the caller.
+// ai.StreamText. Output is honored exactly as ai.StreamText honors it: the
+// parts stream normally and the decoded value is available from the returned
+// stream's Output method once iteration completes (with intermediate values
+// delivered via GenerateTextOpts.OnPartialOutput, settable through
+// PrepareOpts).
 func (a *Agent) Stream(ctx context.Context, run RunOpts) (*ai.TextStream, error) {
 	if a == nil {
 		return nil, errors.New("agent: nil Agent")

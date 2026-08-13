@@ -72,6 +72,82 @@ func TestGenerateImageRetriesOnRetryableError(t *testing.T) {
 	}
 }
 
+func TestGenerateImageLifecycleCallbacksSuccess(t *testing.T) {
+	m := &aitest.MockImageModel{Response: &provider.ImageResponse{
+		Images: []provider.GeneratedImage{{Data: []byte("img1")}},
+	}}
+	var startCalls int
+	var startCall provider.ImageCall
+	var endCalls int
+	var endResp *provider.ImageResponse
+	var endErr error
+	_, err := GenerateImage(t.Context(), GenerateImageOpts{
+		Model:  m,
+		Prompt: "a cat",
+		OnImageStart: func(call provider.ImageCall) {
+			startCalls++
+			startCall = call
+		},
+		OnImageEnd: func(resp *provider.ImageResponse, err error) {
+			endCalls++
+			endResp = resp
+			endErr = err
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if startCalls != 1 {
+		t.Fatalf("OnImageStart calls = %d, want 1", startCalls)
+	}
+	if startCall.Prompt != "a cat" {
+		t.Fatalf("OnImageStart call = %+v, want built call", startCall)
+	}
+	if endCalls != 1 {
+		t.Fatalf("OnImageEnd calls = %d, want 1", endCalls)
+	}
+	if endErr != nil {
+		t.Fatalf("OnImageEnd err = %v, want nil", endErr)
+	}
+	if endResp == nil || len(endResp.Images) != 1 {
+		t.Fatalf("OnImageEnd resp = %+v, want resp with 1 image", endResp)
+	}
+}
+
+func TestGenerateImageLifecycleCallbacksError(t *testing.T) {
+	m := &aitest.MockImageModel{Err: NewAPICallError(500, "https://x", "", "boom")}
+	var startCalls, endCalls int
+	var endResp *provider.ImageResponse
+	var endErr error
+	_, err := GenerateImage(t.Context(), GenerateImageOpts{
+		Model:  m,
+		Prompt: "a cat",
+		OnImageStart: func(call provider.ImageCall) {
+			startCalls++
+		},
+		OnImageEnd: func(resp *provider.ImageResponse, err error) {
+			endCalls++
+			endResp = resp
+			endErr = err
+		},
+	})
+	if err == nil {
+		t.Fatal("want error")
+	}
+	if startCalls != 1 {
+		t.Fatalf("OnImageStart calls = %d, want 1", startCalls)
+	}
+	if endCalls != 1 {
+		t.Fatalf("OnImageEnd calls = %d, want 1", endCalls)
+	}
+	if endResp != nil {
+		t.Fatalf("OnImageEnd resp = %+v, want nil", endResp)
+	}
+	if !errors.Is(endErr, err) {
+		t.Fatalf("OnImageEnd err = %v, want same as returned err %v", endErr, err)
+	}
+}
+
 func TestGenerateImageEmptyImages(t *testing.T) {
 	m := &aitest.MockImageModel{Response: &provider.ImageResponse{Images: []provider.GeneratedImage{}}}
 	_, err := GenerateImage(t.Context(), GenerateImageOpts{Model: m, Prompt: "a cat"})

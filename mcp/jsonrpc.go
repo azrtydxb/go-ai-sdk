@@ -202,6 +202,24 @@ type Client struct {
 	// "elicitation/create" requests. Guarded by mu.
 	elicitationHandler ElicitationHandler
 
+	// samplingHandler, if set, is invoked for server-initiated
+	// "sampling/createMessage" requests. Guarded by mu.
+	samplingHandler SamplingHandler
+
+	// notificationHandler, if set, is invoked for server-initiated
+	// notifications (messages with a method but no id, e.g.
+	// "notifications/message"). Guarded by mu.
+	notificationHandler NotificationHandler
+
+	// roots is the fixed set of roots reported to server-initiated
+	// "roots/list" requests, installed via SetRoots. Guarded by mu.
+	roots []Root
+
+	// rootsSet reports whether SetRoots has been called, gating both the
+	// "roots" capability declaration in Initialize and the "roots/list"
+	// dispatch case. Guarded by mu.
+	rootsSet bool
+
 	// dispatchSem bounds the number of server-initiated requests dispatched
 	// concurrently (see maxConcurrentServerDispatch): recvLoop acquires a
 	// slot before spawning a dispatch goroutine and rejects the request with
@@ -270,7 +288,10 @@ func NewClient(t Transport) *Client {
 // non-nil id and no method is a response to a call we made, matched by id.
 // A message with a non-nil id AND a method is a server-initiated request,
 // dispatched to dispatchServerRequest. A message with a nil id is a
-// notification and is dropped: v1 does not support incoming notifications.
+// server-initiated notification: it is handed to the installed
+// NotificationHandler, if any, on a bounded dispatch goroutine (see
+// dispatchSem); with no handler installed, or the bound saturated, it is
+// dropped.
 func (c *Client) recvLoop() {
 	defer close(c.loopDone)
 	for {
@@ -285,7 +306,29 @@ func (c *Client) recvLoop() {
 			continue // malformed message, drop
 		}
 		if idIsAbsent(resp.ID) {
-			continue // notification, ignored
+			// Server-initiated notification (no id → no reply expected). v1
+			// dropped these; now they are handed to the installed
+			// NotificationHandler, if any, on a bounded dispatch goroutine —
+			// same flood protection as server-initiated requests, but since
+			// no reply is owed, a saturated bound simply drops the
+			// notification (best-effort delivery, matching the
+			// fire-and-forget semantics of JSON-RPC notifications).
+			c.mu.Lock()
+			h := c.notificationHandler
+			c.mu.Unlock()
+			if h != nil && resp.Method != "" {
+				select {
+				case c.dispatchSem <- struct{}{}:
+					c.dispatchWG.Add(1)
+					go func() {
+						defer c.dispatchWG.Done()
+						defer func() { <-c.dispatchSem }()
+						h(resp.Method, resp.Params)
+					}()
+				default:
+				}
+			}
+			continue
 		}
 		if resp.Method != "" {
 			// Server-initiated request: dispatch on a new goroutine so a

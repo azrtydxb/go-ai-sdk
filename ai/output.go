@@ -5,13 +5,19 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/partialjson"
 	"github.com/azrtydxb/go-ai-sdk/internal/schema"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
-// ErrOutputWithStreamText is returned by StreamText when
-// GenerateTextOpts.Output is set. Structured output modes are GenerateText-
-// only for now; partial-output streaming is future work.
+// ErrOutputWithStreamText was returned by StreamText when
+// GenerateTextOpts.Output was set, back when structured output modes were
+// GenerateText-only. StreamText now supports every Output mode (see
+// TextStream.Output and GenerateTextOpts.OnPartialOutput), so nothing
+// returns this error any more; it is kept only so existing errors.Is checks
+// still compile.
+//
+// Deprecated: no longer returned.
 var ErrOutputWithStreamText = errors.New("ai: Output is not supported by StreamText (GenerateText only)")
 
 // ErrOutputRequiresJSONOrNoTools is returned by GenerateText when
@@ -30,6 +36,29 @@ type Output interface {
 	schema() (name string, sch json.RawMessage, err error)
 	// decode parses the model's final text into the mode's Go value.
 	decode(rawText string) (any, error)
+	// decodePartial repair-parses a still-accumulating raw JSON prefix into
+	// the mode's Go value, reporting ok=false while it cannot yet be parsed
+	// into anything meaningful. It drives GenerateTextOpts.OnPartialOutput
+	// during streaming; modes whose value is atomic (OutputChoice) always
+	// report false.
+	decodePartial(raw string) (v any, ok bool)
+}
+
+// decodePartialAs repair-parses raw (a prefix of a JSON document that is
+// still streaming in) into a T, reporting ok=false while the prefix cannot
+// be repaired into valid JSON or does not unmarshal into a T. It is the
+// shared body of the Output modes' decodePartial, mirroring the
+// repair-then-unmarshal step ObjectStream.Partials performs per chunk.
+func decodePartialAs[T any](raw string) (T, bool) {
+	var v T
+	repaired, ok := partialjson.Repair(raw)
+	if !ok {
+		return v, false
+	}
+	if err := json.Unmarshal([]byte(repaired), &v); err != nil {
+		return v, false
+	}
+	return v, true
 }
 
 // objectOutput is the Output implementation for OutputObject[T].
@@ -51,6 +80,14 @@ func (objectOutput[T]) schema() (string, json.RawMessage, error) {
 
 func (objectOutput[T]) decode(rawText string) (any, error) {
 	return decodeObject[T](rawText)
+}
+
+func (objectOutput[T]) decodePartial(raw string) (any, bool) {
+	v, ok := decodePartialAs[T](raw)
+	if !ok {
+		return nil, false
+	}
+	return v, true
 }
 
 // arrayElements wraps a []T under an "elements" key, matching the schema
@@ -94,6 +131,14 @@ func (arrayOutput[T]) schema() (string, json.RawMessage, error) {
 		return "", nil, err
 	}
 	return defaultSchemaName, sch, nil
+}
+
+func (arrayOutput[T]) decodePartial(raw string) (any, bool) {
+	wrapper, ok := decodePartialAs[arrayElements[T]](raw)
+	if !ok {
+		return nil, false
+	}
+	return wrapper.Elements, true
 }
 
 func (arrayOutput[T]) decode(rawText string) (any, error) {
@@ -154,6 +199,13 @@ func (c choiceOutput) schema() (string, json.RawMessage, error) {
 	return defaultSchemaName, sch, nil
 }
 
+// decodePartial always reports false: a choice is atomic — every prefix of
+// the streamed {"result":"..."} object either names no choice at all or a
+// truncated string that is not one of the configured choices, so there is no
+// meaningful intermediate value to report (see
+// GenerateTextOpts.OnPartialOutput).
+func (choiceOutput) decodePartial(string) (any, bool) { return nil, false }
+
 func (c choiceOutput) decode(rawText string) (any, error) {
 	wrapper, err := decodeObject[choiceResult](rawText)
 	if err != nil {
@@ -188,6 +240,14 @@ func OutputJSON() Output {
 
 func (jsonOutput) schema() (string, json.RawMessage, error) {
 	return "", nil, nil
+}
+
+func (jsonOutput) decodePartial(raw string) (any, bool) {
+	v, ok := decodePartialAs[any](stripFences(raw))
+	if !ok || v == nil {
+		return nil, false
+	}
+	return v, true
 }
 
 func (jsonOutput) decode(rawText string) (any, error) {

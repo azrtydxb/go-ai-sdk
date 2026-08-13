@@ -15,6 +15,15 @@ type TranslateOpts struct {
 	Prompt          string
 	MaxRetries      *int
 	ProviderOptions map[string]any
+
+	// OnTranslateStart, when non-nil, fires once before the first attempt of
+	// the underlying provider call.
+	OnTranslateStart func(call provider.TranslationCall)
+	// OnTranslateEnd, when non-nil, fires once after the final attempt
+	// (success or retry exhaustion). err, when non-nil, is the SAME error
+	// Translate itself returns (retry exhaustion translated to
+	// *RetryError). resp is nil on error.
+	OnTranslateEnd func(resp *provider.TranslationResponse, err error)
 }
 
 // TranslateResult is the outcome of a Translate call.
@@ -47,11 +56,20 @@ func Translate(ctx context.Context, opts TranslateOpts) (*TranslateResult, error
 		ProviderOptions: opts.ProviderOptions,
 	}
 
+	if opts.OnTranslateStart != nil {
+		opts.OnTranslateStart(call)
+	}
+
 	resp, err := retry.Do(ctx, maxRetries, func() (*provider.TranslationResponse, error) {
 		return opts.Model.Translate(ctx, call)
 	})
-	if err != nil {
-		return nil, translateRetryErr(err)
+	callErr := translateRetryErr(err)
+
+	if opts.OnTranslateEnd != nil {
+		opts.OnTranslateEnd(resp, callErr)
+	}
+	if callErr != nil {
+		return nil, callErr
 	}
 
 	return &TranslateResult{

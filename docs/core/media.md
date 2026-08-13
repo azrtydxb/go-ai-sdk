@@ -11,6 +11,27 @@ retry wrapper (`MaxRetries`, default 2 — see
 (live, bidirectional transcription) is the one exception — see
 [StreamTranscribe](#streamtranscribe) below for why it has no retry.
 
+## Lifecycle callbacks
+
+Each of the five functions' `Opts` has an `On<X>Start`/`On<X>End` callback
+pair, matching `ai.EmbedOpts`'s `OnEmbedStart`/`OnEmbedEnd` pattern
+(see [Embeddings § Embed](embeddings.md#embed)): `Start` fires once, before
+the first attempt of the (retried) underlying provider call, with the
+built `provider.*Call`; `End` fires once, after the final attempt, with
+the SAME error the function itself returns (retry exhaustion already
+translated to `*ai.RetryError`) — the response is `nil` on error.
+
+| Function | `Opts` field | Start | End |
+|---|---|---|---|
+| `GenerateImage` | `GenerateImageOpts` | `OnImageStart(call provider.ImageCall)` | `OnImageEnd(resp *provider.ImageResponse, err error)` |
+| `GenerateVideo` | `GenerateVideoOpts` | `OnVideoStart(call provider.VideoCall)` | `OnVideoEnd(resp *provider.VideoResponse, err error)` |
+| `GenerateSpeech` | `GenerateSpeechOpts` | `OnSpeechStart(call provider.SpeechCall)` | `OnSpeechEnd(resp *provider.SpeechResponse, err error)` |
+| `Transcribe` | `TranscribeOpts` | `OnTranscribeStart(call provider.TranscriptionCall)` | `OnTranscribeEnd(resp *provider.TranscriptionResponse, err error)` |
+| `Translate` | `TranslateOpts` | `OnTranslateStart(call provider.TranslationCall)` | `OnTranslateEnd(resp *provider.TranslationResponse, err error)` |
+
+`ai.StreamTranscribe` has no callback pair of its own — it has no retry to
+bracket (see [StreamTranscribe](#streamtranscribe) below).
+
 ## GenerateImage
 
 ```go

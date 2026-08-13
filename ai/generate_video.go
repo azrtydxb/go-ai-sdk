@@ -17,6 +17,17 @@ type GenerateVideoOpts struct {
 	DurationSec     float64
 	MaxRetries      *int
 	ProviderOptions map[string]any
+
+	// OnVideoStart, when non-nil, fires once before the first attempt of
+	// the underlying provider call (before job submission, for job-based
+	// providers).
+	OnVideoStart func(call provider.VideoCall)
+	// OnVideoEnd, when non-nil, fires once after the final attempt resolves
+	// (success or retry exhaustion; after the final poll, for job-based
+	// providers). err, when non-nil, is the SAME error GenerateVideo itself
+	// returns (retry exhaustion translated to *RetryError). resp is nil on
+	// error.
+	OnVideoEnd func(resp *provider.VideoResponse, err error)
 }
 
 // GenerateVideoResult is the outcome of a GenerateVideo call.
@@ -48,11 +59,20 @@ func GenerateVideo(ctx context.Context, opts GenerateVideoOpts) (*GenerateVideoR
 		ProviderOptions: opts.ProviderOptions,
 	}
 
+	if opts.OnVideoStart != nil {
+		opts.OnVideoStart(call)
+	}
+
 	resp, err := retry.Do(ctx, maxRetries, func() (*provider.VideoResponse, error) {
 		return opts.Model.GenerateVideos(ctx, call)
 	})
-	if err != nil {
-		return nil, translateRetryErr(err)
+	callErr := translateRetryErr(err)
+
+	if opts.OnVideoEnd != nil {
+		opts.OnVideoEnd(resp, callErr)
+	}
+	if callErr != nil {
+		return nil, callErr
 	}
 
 	if len(resp.Videos) == 0 {

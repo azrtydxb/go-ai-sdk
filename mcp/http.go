@@ -229,16 +229,24 @@ type httpTransport struct {
 // their drain goroutines' reads and lets them exit.
 //
 // Close marks the transport closed, closes any response bodies still being
-// drained, and unblocks any blocked Receive; there is no persistent
-// connection or session-termination handshake to perform beyond that.
+// drained, unblocks any blocked Receive, and — if a session id was
+// captured — issues a best-effort DELETE carrying that session id to let
+// the server free session state promptly (see terminateSession's doc). That
+// DELETE is sent synchronously from Close and is bounded by its own 5-second
+// timeout, so against a stalled or unreachable server Close (and therefore
+// mcp.Client.Close, which calls it) can block for up to ~5 seconds; against
+// a session-less transport (no session id ever captured) Close returns
+// immediately.
 //
 // Known deviations from the full 2025-03-26 Streamable HTTP transport spec
 // (v1 is scoped to tools-only MCP clients, which don't need the rest):
-//   - Close does not send a DELETE to terminate the session on the server;
-//     the session, if any, is simply abandoned.
 //   - There is no standalone GET request opening a server-initiated SSE
 //     channel, so server-initiated requests/notifications outside of a
 //     POST response are not supported.
+//
+// url is trusted developer configuration and is not SSRF-filtered — MCP
+// servers legitimately live on localhost/private addresses; callers
+// exposing URL choice to untrusted input must validate it themselves.
 func NewStreamableHTTPTransport(url string, headers map[string]string) Transport {
 	return NewStreamableHTTPTransportWithOptions(url, withStaticHeaders(headers))
 }
@@ -632,7 +640,12 @@ func (t *httpTransport) Receive(ctx context.Context) (json.RawMessage, error) {
 // Close implements Transport. It marks the transport closed (unblocking any
 // pending Receive), closes any SSE response bodies still being drained
 // (unblocking their drain goroutines' reads), and waits for those
-// goroutines to finish before returning.
+// goroutines to finish before returning. If a session id was captured
+// (t.sessionID != ""), it also sends a best-effort DELETE to terminate the
+// session (see terminateSession's doc) before returning — that call is
+// bounded by its own 5-second timeout, so Close can block up to ~5 seconds
+// against a server that accepted the connection but then stalls or is
+// unreachable for the DELETE. mcp.Client.Close inherits this latency.
 //
 // closedFlag is flipped and openBodies snapshotted under mu, the same lock
 // trackBody uses to check closedFlag and register a body — see trackBody's
@@ -646,14 +659,51 @@ func (t *httpTransport) Close() error {
 		for b := range t.openBodies {
 			bodies = append(bodies, b)
 		}
+		sid := t.sessionID
 		t.mu.Unlock()
 		close(t.closed)
 		for _, b := range bodies {
 			_ = b.Close()
 		}
+		if sid != "" {
+			t.terminateSession(sid)
+		}
 	})
 	t.drainWG.Wait()
 	return nil
+}
+
+// terminateSession issues a best-effort DELETE to the server carrying the
+// captured session id, per the Streamable HTTP spec's optional explicit
+// session-termination mechanism. It is purely a courtesy to let the server
+// free session state promptly: the response status and any error are both
+// ignored, since a server MAY reject the DELETE (e.g. respond 405 if it
+// doesn't support client-initiated termination) and Close's own error
+// contract does not depend on this succeeding — the session, from the
+// client's perspective, is abandoned either way. A fresh 5-second-bounded
+// context is used (not t.closed's context, which is already closed by this
+// point, and not any caller ctx, since Close takes none) so a stalled or
+// unreachable server cannot hang Close indefinitely.
+func (t *httpTransport) terminateSession(sid string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, t.url, nil)
+	if err != nil {
+		return
+	}
+	req.Header.Set("Mcp-Session-Id", sid)
+	for k, v := range t.headers {
+		req.Header.Set(k, v)
+	}
+	_ = t.applyAuth(ctx, req)
+
+	resp, err := t.client.Do(req)
+	if err != nil {
+		return
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxDiscardBodyBytes))
+	_ = resp.Body.Close()
 }
 
 // SelfSerializes implements the optional selfSerializingTransport interface

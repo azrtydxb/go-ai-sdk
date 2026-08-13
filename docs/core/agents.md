@@ -103,13 +103,15 @@ default (applied when `Agent.MaxSteps` is `0`) is **8** instead — a
 deliberate divergence, documented on both the package doc comment and the
 `MaxSteps` field. Set `Agent.MaxSteps` explicitly to override it either way.
 
-### Stream and Output: ErrOutputWithStreamText
+### Stream and Output
 
 If `Agent.Output` is set, `Stream` does not intercept or special-case
-`ai.StreamText`'s own restriction: `ai.StreamText` returns
-`ai.ErrOutputWithStreamText` immediately rather than streaming, and that
-same error passes straight through `Agent.Stream` to the caller — it is
-never silently dropped or converted into an empty stream.
+`ai.StreamText`'s own handling of `Output`: `ai.StreamText` streams
+structured output the same way `ai.GenerateText` does, decoding partial
+values as they accumulate (`GenerateTextOpts.OnPartialOutput`,
+`TextStream.Output()`) — `Agent.Stream` passes `Output` straight through
+with no special-casing of its own. See [Generating text § Output
+modes](generating-text.md#output-modes).
 
 ## PrepareOpts runs last
 
