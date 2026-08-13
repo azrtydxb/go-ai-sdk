@@ -252,11 +252,7 @@ func (t *framedTransport) Close() error {
 		if t.closeFn != nil {
 			cerr = t.closeFn()
 		}
-		if werr != nil {
-			err = werr
-		} else {
-			err = cerr
-		}
+		err = errors.Join(werr, cerr)
 	})
 	return err
 }
