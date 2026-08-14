@@ -11,6 +11,13 @@ type StreamTranscriptionCall struct {
 	Language        string
 	SampleRate      int // hint for raw-PCM providers; 0 = provider default
 	ProviderOptions map[string]any
+
+	// Headers carries extra HTTP headers applied to the request(s) this call
+	// makes, after auth; a key matching the provider's auth header is
+	// ignored. Same contract as Call.Headers. For StreamingTranscriptionModel
+	// implementations backed by a WebSocket, these are applied to the
+	// handshake request.
+	Headers map[string]string
 }
 
 // TranscriptEvent is one incremental transcription update delivered by a

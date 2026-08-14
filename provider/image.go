@@ -19,6 +19,11 @@ type ImageCall struct {
 	AspectRatio     string // e.g. "16:9"; providers that use size ignore this and vice versa
 	Seed            *int64
 	ProviderOptions map[string]any
+
+	// Headers carries extra HTTP headers applied to the request(s) this call
+	// makes, after auth; a key matching the provider's auth header is
+	// ignored. Same contract as Call.Headers.
+	Headers map[string]string
 }
 
 // ImageResponse is the outcome of an ImageModel.GenerateImages call.

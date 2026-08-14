@@ -66,7 +66,7 @@ support and wire-name mapping lives in each field's doc comment in
 | `TopK` | anthropic, geminicompat (Google/Vertex), cohere (wire field `k`) | openaicompat-based providers (OpenAI, Azure, Groq, xAI, DeepSeek, Together, Fireworks, Cerebras, Perplexity), mistral, bedrock |
 | `PresencePenalty` / `FrequencyPenalty` | openaicompat-based providers, cohere, mistral (wire fields `presence_penalty`/`frequency_penalty`) | anthropic, geminicompat, bedrock |
 | `Seed` | openaicompat-based providers (`seed`), cohere (`seed`), mistral (`random_seed`) | anthropic, geminicompat, bedrock |
-| `Headers` | every language-model request path: openaicompat, geminicompat, anthropic, cohere, mistral, bedrock | not yet implemented (this wave) by any embedding or media (image/speech/transcription) request path |
+| `Headers` | every language-model request path: openaicompat, geminicompat, anthropic, cohere, mistral, bedrock; and (since v0.4.0) `ai.EmbedOpts`/`ai.EmbedManyOpts`, `ai.GenerateImageOpts`, `ai.GenerateSpeechOpts`, `ai.GenerateVideoOpts`, `ai.TranscribeOpts`, `ai.TranslateOpts`, `ai.RerankOpts`, `ai.UploadFileOpts` — each threaded to its `provider.*Call.Headers` field | for Embed/EmbedMany, a `Model` that does not implement `provider.EmbeddingModelWithOptions` (silently ignored, same as `ProviderOptions`) |
 
 An "ignored by" provider drops the field entirely — nothing is sent on the
 wire, and no error is returned. `ProviderOptions` can still reach an

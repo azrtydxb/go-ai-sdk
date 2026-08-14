@@ -30,6 +30,12 @@ type UploadFileOpts struct {
 	Purpose         string
 	MaxRetries      *int
 	ProviderOptions map[string]any
+
+	// Headers carries extra HTTP headers to send with the request; threaded
+	// through to provider.FileUploadCall.Headers unchanged — see that
+	// field's doc for precedence (it never overrides the provider's auth
+	// header) and which request paths implement it.
+	Headers map[string]string
 }
 
 // UploadFile uploads a file to the given provider.FileStore. It wraps the
@@ -57,6 +63,7 @@ func UploadFile(ctx context.Context, opts UploadFileOpts) (*provider.FileInfo, e
 		MediaType:       opts.MediaType,
 		Purpose:         opts.Purpose,
 		ProviderOptions: opts.ProviderOptions,
+		Headers:         opts.Headers,
 	}
 
 	resp, err := retry.Do(ctx, maxRetries, func() (*provider.FileInfo, error) {

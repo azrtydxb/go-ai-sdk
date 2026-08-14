@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
 type fixturePredictInstance struct {
@@ -142,6 +144,42 @@ func TestEmbeddingModel_ShortResponseErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "2") || !strings.Contains(err.Error(), "1") {
 		t.Errorf("error = %q, want it to mention both counts (requested 2, got 1)", err.Error())
+	}
+}
+
+// TestEmbeddingModel_HeadersApplied verifies call.Headers reach the wire
+// and that an "Authorization"-named entry cannot override the gauth
+// bearer token authorize() set.
+func TestEmbeddingModel_HeadersApplied(t *testing.T) {
+	var gotExtra, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotExtra = r.Header.Get("X-Test")
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"predictions":[{"embeddings":{"values":[0.1],"statistics":{"token_count":1}}}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	const token = "real-token"
+	p := New(WithProject(testProject), WithLocation(testLocation), WithBaseURL(srv.URL), WithAccessToken(token))
+	model := p.EmbeddingModel("text-embedding-test")
+	em, ok := model.(provider.EmbeddingModelWithOptions)
+	if !ok {
+		t.Fatal("embeddingModel does not implement EmbeddingModelWithOptions")
+	}
+
+	_, err := em.EmbedCall(context.Background(), provider.EmbeddingCall{
+		Values:  []string{"a"},
+		Headers: map[string]string{"X-Test": "yes", "Authorization": "attacker-supplied"},
+	})
+	if err != nil {
+		t.Fatalf("EmbedCall: %v", err)
+	}
+	if gotExtra != "yes" {
+		t.Errorf("X-Test header = %q, want %q", gotExtra, "yes")
+	}
+	if gotAuth != "Bearer "+token {
+		t.Errorf("Authorization header = %q, want %q (must not be overridden by Headers)", gotAuth, "Bearer "+token)
 	}
 }
 

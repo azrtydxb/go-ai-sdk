@@ -16,6 +16,12 @@ type TranslateOpts struct {
 	MaxRetries      *int
 	ProviderOptions map[string]any
 
+	// Headers carries extra HTTP headers to send with the request; threaded
+	// through to provider.TranslationCall.Headers unchanged — see that
+	// field's doc for precedence (it never overrides the provider's auth
+	// header) and which request paths implement it.
+	Headers map[string]string
+
 	// OnTranslateStart, when non-nil, fires once before the first attempt of
 	// the underlying provider call.
 	OnTranslateStart func(call provider.TranslationCall)
@@ -54,6 +60,7 @@ func Translate(ctx context.Context, opts TranslateOpts) (*TranslateResult, error
 		MediaType:       opts.MediaType,
 		Prompt:          opts.Prompt,
 		ProviderOptions: opts.ProviderOptions,
+		Headers:         opts.Headers,
 	}
 
 	if opts.OnTranslateStart != nil {

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -45,7 +46,8 @@ func (m *rerankingModel) Rerank(ctx context.Context, call provider.RerankCall) (
 		return nil, fmt.Errorf("voyage: build rerank request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+m.provider.apiKey)
+	httpReq.Header.Set(voyageAuthHeader, "Bearer "+m.provider.apiKey)
+	httpheader.Apply(httpReq, call.Headers, voyageAuthHeader)
 
 	resp, err := m.provider.client().Do(httpReq)
 	if err != nil {

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/internal/websocket"
 	"github.com/azrtydxb/go-ai-sdk/internal/wsstream"
 	"github.com/azrtydxb/go-ai-sdk/provider"
@@ -50,8 +51,10 @@ func (m *streamingTranscriptionModel) StreamTranscribe(ctx context.Context, call
 		return nil, err
 	}
 
+	wsHeader := http.Header{"Authorization": []string{"Token " + m.provider.apiKey}}
+	httpheader.ApplyToHeader(wsHeader, call.Headers, deepgramAuthHeader)
 	conn, err := websocket.Dial(ctx, dialURL, websocket.DialOptions{
-		Header: http.Header{"Authorization": []string{"Token " + m.provider.apiKey}},
+		Header: wsHeader,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("deepgram: dial live transcription: %w", err)

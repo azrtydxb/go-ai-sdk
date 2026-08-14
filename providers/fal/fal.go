@@ -18,6 +18,10 @@ import (
 const (
 	providerName   = "fal"
 	defaultBaseURL = "https://fal.run"
+
+	// falAuthHeader is the HTTP header carrying the API key; extra headers
+	// from a call's Headers must not be able to override it.
+	falAuthHeader = "Authorization"
 )
 
 // Provider is a fal.ai-backed provider.ImageModel factory.

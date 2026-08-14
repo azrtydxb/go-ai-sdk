@@ -9,11 +9,16 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
 // defaultVoiceID is ElevenLabs' documented default voice, "Rachel".
 const defaultVoiceID = "21m00Tcm4TlvDq8ikWAM"
+
+// elevenlabsAuthHeader is the HTTP header carrying the API key; extra
+// headers from provider.Call.Headers must not be able to override it.
+const elevenlabsAuthHeader = "xi-api-key"
 
 // speechModel implements provider.SpeechModel against the ElevenLabs
 // text-to-speech API.
@@ -90,7 +95,8 @@ func (m *speechModel) GenerateSpeech(ctx context.Context, call provider.SpeechCa
 		return nil, fmt.Errorf("elevenlabs: build speech request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("xi-api-key", m.provider.apiKey)
+	httpReq.Header.Set(elevenlabsAuthHeader, m.provider.apiKey)
+	httpheader.Apply(httpReq, call.Headers, elevenlabsAuthHeader)
 
 	resp, err := m.provider.client().Do(httpReq)
 	if err != nil {

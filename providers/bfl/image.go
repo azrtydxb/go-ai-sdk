@@ -12,9 +12,14 @@ import (
 
 	"github.com/azrtydxb/go-ai-sdk/internal/fetchimage"
 	"github.com/azrtydxb/go-ai-sdk/internal/fetchmedia"
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/internal/transcribeutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
+
+// bflAuthHeader is the HTTP header carrying the API key; extra headers from
+// a call's Headers must not be able to override it.
+const bflAuthHeader = "x-key"
 
 // imageModel implements provider.ImageModel against Black Forest Labs'
 // asynchronous image-generation endpoint: a generation is created, then
@@ -89,7 +94,8 @@ func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall
 		return nil, fmt.Errorf("bfl: build image request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("x-key", m.provider.apiKey)
+	httpReq.Header.Set(bflAuthHeader, m.provider.apiKey)
+	httpheader.Apply(httpReq, call.Headers, bflAuthHeader)
 
 	resp, err := m.provider.client().Do(httpReq)
 	if err != nil {
@@ -113,7 +119,7 @@ func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall
 		return nil, fmt.Errorf("bfl: response contained no polling_url: %s", body)
 	}
 
-	poll, rawBody, err := m.poll(ctx, created.PollingURL)
+	poll, rawBody, err := m.poll(ctx, created.PollingURL, call.Headers)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +169,7 @@ const maxPollBodyBytes = 1 << 20 // 1MB
 // for why a pre-connect-only check is vulnerable to DNS-rebind). The poll
 // response body is also capped (maxPollBodyBytes) as a memory-DoS
 // backstop.
-func (m *imageModel) poll(ctx context.Context, pollingURL string) (*pollResponse, []byte, error) {
+func (m *imageModel) poll(ctx context.Context, pollingURL string, headers map[string]string) (*pollResponse, []byte, error) {
 	if !fetchmedia.SameRegistrableDomain(m.provider.baseURL, pollingURL) {
 		return nil, nil, fmt.Errorf("bfl: polling_url %q is not on the same registrable domain as the configured base URL %q; refusing to send the API key to it", pollingURL, m.provider.baseURL)
 	}
@@ -186,7 +192,8 @@ func (m *imageModel) poll(ctx context.Context, pollingURL string) (*pollResponse
 		if err != nil {
 			return nil, nil, fmt.Errorf("bfl: build poll request: %w", err)
 		}
-		httpReq.Header.Set("x-key", m.provider.apiKey)
+		httpReq.Header.Set(bflAuthHeader, m.provider.apiKey)
+		httpheader.Apply(httpReq, headers, bflAuthHeader)
 
 		resp, err := pollClient.Do(httpReq)
 		if err != nil {

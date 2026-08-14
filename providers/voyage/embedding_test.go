@@ -208,3 +208,40 @@ func TestEmbedContextCancel(t *testing.T) {
 		t.Errorf("err = %v, want wrapping context.Canceled", err)
 	}
 }
+
+func TestEmbedCallRequestHeaders(t *testing.T) {
+	var gotCustom, gotAuth string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/embeddings", func(w http.ResponseWriter, r *http.Request) {
+		gotCustom = r.Header.Get("X-Custom-Header")
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(embeddingResponse{
+			Data: []embeddingDataWire{{Embedding: []float64{0.1}, Index: 0}},
+		})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).EmbeddingModel("voyage-3")
+
+	optioned, ok := model.(provider.EmbeddingModelWithOptions)
+	if !ok {
+		t.Fatal("embeddingModel does not implement provider.EmbeddingModelWithOptions")
+	}
+	_, err := optioned.EmbedCall(context.Background(), provider.EmbeddingCall{
+		Values: []string{"a"},
+		Headers: map[string]string{
+			"X-Custom-Header": "custom-value",
+			"authorization":   "should-not-win",
+		},
+	})
+	if err != nil {
+		t.Fatalf("EmbedCall: %v", err)
+	}
+	if gotCustom != "custom-value" {
+		t.Errorf("X-Custom-Header = %q, want custom-value", gotCustom)
+	}
+	if gotAuth != "Bearer k" {
+		t.Errorf("Authorization = %q, want Bearer k (Headers must not clobber auth)", gotAuth)
+	}
+}

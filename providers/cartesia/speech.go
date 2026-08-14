@@ -9,8 +9,13 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
+
+// cartesiaAuthHeader is the HTTP header carrying the API key; extra headers
+// from provider.SpeechCall.Headers must not be able to override it.
+const cartesiaAuthHeader = "Authorization"
 
 // speechModel implements provider.SpeechModel against Cartesia's
 // text-to-speech API.
@@ -140,8 +145,9 @@ func (m *speechModel) GenerateSpeech(ctx context.Context, call provider.SpeechCa
 		return nil, fmt.Errorf("cartesia: build speech request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+m.provider.apiKey)
+	httpReq.Header.Set(cartesiaAuthHeader, "Bearer "+m.provider.apiKey)
 	httpReq.Header.Set("Cartesia-Version", cartesiaVersion)
+	httpheader.Apply(httpReq, call.Headers, cartesiaAuthHeader)
 
 	resp, err := m.provider.client().Do(httpReq)
 	if err != nil {

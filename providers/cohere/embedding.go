@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -21,6 +22,12 @@ func (m *embeddingModel) ProviderName() string { return providerName }
 func (m *embeddingModel) MaxBatchSize() int    { return embeddingBatch }
 
 func (m *embeddingModel) Embed(ctx context.Context, values []string) (*provider.EmbeddingResponse, error) {
+	return m.EmbedCall(ctx, provider.EmbeddingCall{Values: values})
+}
+
+// EmbedCall implements provider.EmbeddingModelWithOptions.
+func (m *embeddingModel) EmbedCall(ctx context.Context, call provider.EmbeddingCall) (*provider.EmbeddingResponse, error) {
+	values := call.Values
 	reqBody, err := json.Marshal(embeddingRequest{
 		Model:          m.modelID,
 		Texts:          values,
@@ -30,6 +37,10 @@ func (m *embeddingModel) Embed(ctx context.Context, values []string) (*provider.
 	if err != nil {
 		return nil, fmt.Errorf("cohere: marshal embedding request: %w", err)
 	}
+	reqBody, err = applyProviderOptions(reqBody, call.ProviderOptions)
+	if err != nil {
+		return nil, fmt.Errorf("cohere: apply provider options: %w", err)
+	}
 
 	url := m.provider.baseURL + "/embed"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
@@ -37,7 +48,8 @@ func (m *embeddingModel) Embed(ctx context.Context, values []string) (*provider.
 		return nil, fmt.Errorf("cohere: build embedding request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+m.provider.apiKey)
+	httpReq.Header.Set(cohereAuthHeader, "Bearer "+m.provider.apiKey)
+	httpheader.Apply(httpReq, call.Headers, cohereAuthHeader)
 
 	resp, err := m.provider.client().Do(httpReq)
 	if err != nil {

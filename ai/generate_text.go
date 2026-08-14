@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"runtime/debug"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/retry"
 	"github.com/azrtydxb/go-ai-sdk/provider"
@@ -548,6 +549,51 @@ func fireOnInputAvailable(ctx context.Context, t Tool, toolCallID string, args j
 	}
 }
 
+// recoverToolPanic runs fn and converts a panic into a *ToolExecutionError
+// with the same shape (*tool).Execute's own internal recover produces (see
+// tool.go), so the conversion is uniform regardless of whether the panic
+// came from a NewTool-built tool's inner recover missing it (it never does)
+// or from a caller-implemented Tool that has no recover of its own at all.
+// This is the loop-level guard: executeToolCall wraps every t.Execute call
+// in it, which is what actually protects hand-rolled ai.Tool implementations
+// — NewTool's own recover only covers tools built through NewTool.
+func recoverToolPanic(toolName string, fn func() (any, error)) (result any, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			var cause error
+			if perr, ok := r.(error); ok {
+				cause = fmt.Errorf("tool panicked: %w", perr)
+			} else {
+				cause = fmt.Errorf("tool panicked: %v", r)
+			}
+			result = nil
+			err = &ToolExecutionError{ToolName: toolName, Cause: cause, Stack: debug.Stack()}
+		}
+	}()
+	return fn()
+}
+
+// recoverApprovalRequiredPanic runs fn (an ApprovalRequirer.ApprovalRequired
+// call) and converts a panic into a *ToolExecutionError using the same shape
+// as recoverToolPanic, so a panicking approval hook fails just that tool
+// call exactly as a panicking Execute would, rather than crashing the loop's
+// goroutine.
+func recoverApprovalRequiredPanic(toolName string, fn func() bool) (required bool, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			var cause error
+			if perr, ok := r.(error); ok {
+				cause = fmt.Errorf("tool panicked: %w", perr)
+			} else {
+				cause = fmt.Errorf("tool panicked: %v", r)
+			}
+			required = false
+			err = &ToolExecutionError{ToolName: toolName, Cause: cause, Stack: debug.Stack()}
+		}
+	}()
+	return fn(), nil
+}
+
 func executeToolCall(ctx context.Context, byName map[string]Tool, c provider.ToolCallPart, decision *ApprovalDecision, repair repairFunc, stepIndex int, onStart func(int, ToolCallRecord), onEnd func(int, ToolResultRecord, error)) ToolResultRecord {
 	if onStart != nil {
 		onStart(stepIndex, ToolCallRecord{ID: c.ID, Name: c.Name, Args: c.Args})
@@ -564,7 +610,7 @@ func executeToolCall(ctx context.Context, byName map[string]Tool, c provider.Too
 
 	t := byName[c.Name]
 	fireOnInputAvailable(ctx, t, c.ID, c.Args)
-	res, err := t.Execute(ctx, c.Args)
+	res, err := recoverToolPanic(c.Name, func() (any, error) { return t.Execute(ctx, c.Args) })
 	if err != nil && repair != nil {
 		var iae *InvalidToolArgumentsError
 		if errors.As(err, &iae) {
@@ -584,11 +630,20 @@ func executeToolCall(ctx context.Context, byName map[string]Tool, c provider.Too
 					// approval is recorded as a denial rather than
 					// executed or silently allowed through. See
 					// GenerateTextOpts.RepairToolCall's doc.
-					if ar, needsApproval := rt.(ApprovalRequirer); needsApproval && ar.ApprovalRequired(ctx, rc.Args) {
-						res, err = nil, &ToolApprovalDeniedError{ToolName: rc.Name, Reason: "approval required for repaired call"}
+					if ar, needsApproval := rt.(ApprovalRequirer); needsApproval {
+						required, apErr := recoverApprovalRequiredPanic(rc.Name, func() bool { return ar.ApprovalRequired(ctx, rc.Args) })
+						switch {
+						case apErr != nil:
+							res, err = nil, apErr
+						case required:
+							res, err = nil, &ToolApprovalDeniedError{ToolName: rc.Name, Reason: "approval required for repaired call"}
+						default:
+							fireOnInputAvailable(ctx, rt, rc.ID, rc.Args)
+							res, err = recoverToolPanic(rc.Name, func() (any, error) { return rt.Execute(ctx, rc.Args) })
+						}
 					} else {
 						fireOnInputAvailable(ctx, rt, rc.ID, rc.Args)
-						res, err = rt.Execute(ctx, rc.Args)
+						res, err = recoverToolPanic(rc.Name, func() (any, error) { return rt.Execute(ctx, rc.Args) })
 					}
 				}
 				// else: repair renamed the call to a tool that isn't in
@@ -646,10 +701,33 @@ func runApprovalAwareToolCalls(ctx context.Context, opts GenerateTextOpts, tools
 	}
 
 	decisions := make(map[string]*ApprovalDecision, len(resolved))
+	// panicErrs holds calls whose ApprovalRequired check itself panicked:
+	// that call is failed outright (a *ToolExecutionError, routed exactly as
+	// an Execute error — see recoverApprovalRequiredPanic) rather than being
+	// added to decisions or pending, so it can't block the rest of the
+	// batch's approval resolution or silently ride through as approved.
+	var panicErrs map[string]*ToolExecutionError
 	var pending []ApprovalRequest
 	for _, c := range resolved {
 		ar, ok := byName[c.Name].(ApprovalRequirer)
-		if !ok || !ar.ApprovalRequired(ctx, c.Args) {
+		if !ok {
+			continue
+		}
+		required, apErr := recoverApprovalRequiredPanic(c.Name, func() bool { return ar.ApprovalRequired(ctx, c.Args) })
+		if apErr != nil {
+			// Deliberate: if this same batch also ends up with len(pending)
+			// > 0 from some OTHER call, this call's recorded outcome is
+			// dropped for this round exactly like every other call in a
+			// pending batch (nothing executes) — see TestApprovalRequiredPanicWithBatchPendingDropsBothOutcomesForRound.
+			var te *ToolExecutionError
+			errors.As(apErr, &te)
+			if panicErrs == nil {
+				panicErrs = make(map[string]*ToolExecutionError)
+			}
+			panicErrs[c.ID] = te
+			continue
+		}
+		if !required {
 			continue
 		}
 		rec := ToolCallRecord{ID: c.ID, Name: c.Name, Args: c.Args}
@@ -674,6 +752,17 @@ func runApprovalAwareToolCalls(ctx context.Context, opts GenerateTextOpts, tools
 
 	results := make([]ToolResultRecord, 0, len(resolved))
 	for _, c := range resolved {
+		if te, panicked := panicErrs[c.ID]; panicked {
+			if opts.OnToolExecutionStart != nil {
+				opts.OnToolExecutionStart(stepIndex, ToolCallRecord{ID: c.ID, Name: c.Name, Args: c.Args})
+			}
+			result := ToolResultRecord{ToolCallID: c.ID, Name: c.Name, Err: te}
+			if opts.OnToolExecutionEnd != nil {
+				opts.OnToolExecutionEnd(stepIndex, result, te)
+			}
+			results = append(results, result)
+			continue
+		}
 		results = append(results, executeToolCall(ctx, byName, c, decisions[c.ID], opts.RepairToolCall, stepIndex, opts.OnToolExecutionStart, opts.OnToolExecutionEnd))
 	}
 	return &toolBatchResult{results: results}, nil

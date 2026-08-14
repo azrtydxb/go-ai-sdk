@@ -114,6 +114,62 @@ func TestStreamTranscribe_HandshakeAndQuery(t *testing.T) {
 	}
 }
 
+func TestStreamTranscribe_HandshakeHeaders(t *testing.T) {
+	l, baseURL := listenerBaseURL(t)
+
+	var gotAuth, gotCustom string
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		br := bufio.NewReader(conn)
+		req, err := http.ReadRequest(br)
+		if err != nil {
+			return
+		}
+		defer req.Body.Close()
+		gotAuth = req.Header.Get("Authorization")
+		gotCustom = req.Header.Get("X-Custom-Header")
+
+		key := req.Header.Get("Sec-WebSocket-Key")
+		accept := websockettest.ComputeAccept(key)
+		resp := "HTTP/1.1 101 Switching Protocols\r\n" +
+			"Upgrade: websocket\r\n" +
+			"Connection: Upgrade\r\n" +
+			"Sec-WebSocket-Accept: " + accept + "\r\n\r\n"
+		conn.Write([]byte(resp))
+		websockettest.WriteMessage(conn, websockettest.OpText, []byte(`{"type":"Metadata"}`))
+	}()
+
+	p := New(WithAPIKey("dg-key"), WithBaseURL(baseURL))
+	m := p.StreamingTranscriptionModel("nova-3")
+	stream, err := m.StreamTranscribe(context.Background(), provider.StreamTranscriptionCall{
+		Headers: map[string]string{
+			"X-Custom-Header": "custom-value",
+			"authorization":   "should-not-win",
+		},
+	})
+	if err != nil {
+		t.Fatalf("StreamTranscribe: %v", err)
+	}
+	defer stream.Close()
+
+	for range stream.Events() {
+	}
+	<-done
+
+	if gotCustom != "custom-value" {
+		t.Errorf("X-Custom-Header = %q, want custom-value", gotCustom)
+	}
+	if gotAuth != "Token dg-key" {
+		t.Errorf("Authorization = %q, want %q (Headers must not clobber auth)", gotAuth, "Token dg-key")
+	}
+}
+
 func TestStreamTranscribe_BinaryAudioPassthrough(t *testing.T) {
 	l, baseURL := listenerBaseURL(t)
 

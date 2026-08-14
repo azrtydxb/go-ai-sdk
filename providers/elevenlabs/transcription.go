@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/internal/multipartutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -85,7 +86,8 @@ func (m *transcriptionModel) Transcribe(ctx context.Context, call provider.Trans
 		return nil, fmt.Errorf("elevenlabs: build transcription request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", mw.FormDataContentType())
-	httpReq.Header.Set("xi-api-key", m.provider.apiKey)
+	httpReq.Header.Set(elevenlabsAuthHeader, m.provider.apiKey)
+	httpheader.Apply(httpReq, call.Headers, elevenlabsAuthHeader)
 
 	resp, err := m.provider.client().Do(httpReq)
 	if err != nil {

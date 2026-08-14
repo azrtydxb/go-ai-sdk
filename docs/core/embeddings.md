@@ -44,6 +44,13 @@ fmt.Println(result.Usage.TotalTokens)
   itself returns (retry exhaustion already translated to `*ai.RetryError`);
   `resp` is `nil` on error. `EmbedManyOpts` has the same pair, firing once
   per batch (see below).
+- **`Headers`** (`map[string]string`) — extra HTTP headers, matching
+  `ai.GenerateTextOpts.Headers`
+  (see [Generating text § Additional call settings](generating-text.md#additional-call-settings-topk-penalties-seed-headers)). Only
+  takes effect if `Model` also implements `provider.EmbeddingModelWithOptions`
+  (same gate as `ProviderOptions`, see [below](#embeddingmodelwithoptions));
+  otherwise silently ignored. `EmbedManyOpts` has the same field, applied
+  to every batch call.
 
 `Embed` wraps a single value into a one-element batch and returns an error
 (`fmt.Errorf`, not one of the typed errors) if the model returns a different
@@ -77,6 +84,33 @@ no partial result.
 `EmbedManyOpts.OnEmbedStart`/`OnEmbedEnd` fire once **per batch**, in batch
 order — same start-before-first-attempt/end-after-final-attempt semantics
 and error-translation guarantee as `EmbedOpts`'s pair.
+
+### Concurrency
+
+`EmbedManyOpts.Concurrency` (`int`) bounds how many batches may be in
+flight at once:
+
+- **`0` or `1` (default)** — batches run sequentially, in order, exactly as
+  described above: unchanged pre-`Concurrency` behavior, and
+  `OnEmbedStart`/`OnEmbedEnd` fire strictly in batch order.
+- **Greater than `1`** — batches fan out over a worker pool of at most
+  `Concurrency` goroutines. Results are still reassembled index-aligned
+  with `Values` regardless of completion order, and `Usage` is still summed
+  across every batch. The first batch error cancels the remaining batches'
+  context and wins — `EmbedMany` returns that (translated) error;
+  in-flight batches are allowed to drain rather than being forcibly
+  abandoned. `OnEmbedStart`/`OnEmbedEnd` fire once per batch from worker
+  goroutines in **completion order, not batch order** — callers using
+  these callbacks with `Concurrency > 1` must make them goroutine-safe
+  (e.g. guard shared state with a mutex or use atomics).
+
+```go
+result, err := ai.EmbedMany(context.Background(), ai.EmbedManyOpts{
+	Model:       model,
+	Values:      manyChunks,
+	Concurrency: 4,
+})
+```
 
 ### MaxBatchSize by provider
 
@@ -202,6 +236,11 @@ for _, r := range result.Results {
 - **`ProviderOptions`** (`map[string]any`) — the usual raw-wire-key escape
   hatch (see [Provider options](provider-options.md)), merged into the
   provider's rerank request the same way as for language-model calls.
+- **`Headers`** (`map[string]string`) — extra HTTP headers, matching
+  `ai.GenerateTextOpts.Headers`
+  (see [Generating text § Additional call settings](generating-text.md#additional-call-settings-topk-penalties-seed-headers)); applied
+  unconditionally (unlike `Embed`'s `EmbeddingModelWithOptions` gate — every
+  `provider.RerankingModel` call threads `Headers` through).
 - **`OnRerankStart`/`OnRerankEnd`** — fire once around the retried call,
   same start/end and error-translation semantics as `Embed`'s pair:
 

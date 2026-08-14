@@ -14,6 +14,10 @@ import (
 const (
 	defaultBaseURL        = "https://api.openai.com/v1"
 	embeddingMaxBatchSize = 2048
+
+	// openaiAuthHeader is the HTTP header carrying the API key; extra
+	// headers from a call's Headers must not be able to override it.
+	openaiAuthHeader = "Authorization"
 )
 
 // Provider is an OpenAI-backed provider.LanguageModel / EmbeddingModel

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/textproto"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/internal/multipartutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -109,6 +110,7 @@ func (s *fileStore) UploadFile(ctx context.Context, call provider.FileUploadCall
 	httpReq.Header.Set(anthropicAuthHeader, s.provider.apiKey)
 	httpReq.Header.Set("anthropic-version", anthropicVersion)
 	httpReq.Header.Set("anthropic-beta", filesBetaHeader)
+	httpheader.Apply(httpReq, call.Headers, anthropicAuthHeader)
 
 	resp, err := s.provider.client().Do(httpReq)
 	if err != nil {

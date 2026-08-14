@@ -9,10 +9,15 @@ import (
 	"mime/multipart"
 	"net/http"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/internal/multipartutil"
 	"github.com/azrtydxb/go-ai-sdk/internal/transcribeutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
+
+// revaiAuthHeader is the HTTP header carrying the API key; extra headers
+// from provider.TranscriptionCall.Headers must not be able to override it.
+const revaiAuthHeader = "Authorization"
 
 // transcriptionModel implements provider.TranscriptionModel against Rev.ai's
 // asynchronous transcription flow: create a job from the uploaded audio,
@@ -64,11 +69,11 @@ func (m *transcriptionModel) Transcribe(ctx context.Context, call provider.Trans
 		return nil, err
 	}
 
-	if err := m.pollJob(ctx, id); err != nil {
+	if err := m.pollJob(ctx, id, call.Headers); err != nil {
 		return nil, err
 	}
 
-	tr, rawBody, err := m.fetchTranscript(ctx, id)
+	tr, rawBody, err := m.fetchTranscript(ctx, id, call.Headers)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +173,8 @@ func (m *transcriptionModel) createJob(ctx context.Context, call provider.Transc
 		return "", fmt.Errorf("revai: build job request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", mw.FormDataContentType())
-	httpReq.Header.Set("Authorization", "Bearer "+m.provider.apiKey)
+	httpReq.Header.Set(revaiAuthHeader, "Bearer "+m.provider.apiKey)
+	httpheader.Apply(httpReq, call.Headers, revaiAuthHeader)
 
 	resp, err := m.provider.client().Do(httpReq)
 	if err != nil {
@@ -215,7 +221,7 @@ func buildJobOptions(call provider.TranscriptionCall) ([]byte, error) {
 // state ("transcribed" or "failed"), sleeping p.provider.poll() between
 // requests. The sleep is ctx-aware: cancellation returns ctx.Err()
 // immediately instead of waiting out the interval.
-func (m *transcriptionModel) pollJob(ctx context.Context, id string) error {
+func (m *transcriptionModel) pollJob(ctx context.Context, id string, headers map[string]string) error {
 	reqURL := m.provider.baseURL + "/speechtotext/v1/jobs/" + id
 
 	// Poll immediately on entry (a job may already be transcribed by the
@@ -227,7 +233,8 @@ func (m *transcriptionModel) pollJob(ctx context.Context, id string) error {
 		if err != nil {
 			return fmt.Errorf("revai: build poll request: %w", err)
 		}
-		httpReq.Header.Set("Authorization", "Bearer "+m.provider.apiKey)
+		httpReq.Header.Set(revaiAuthHeader, "Bearer "+m.provider.apiKey)
+		httpheader.Apply(httpReq, headers, revaiAuthHeader)
 
 		resp, err := m.provider.client().Do(httpReq)
 		if err != nil {
@@ -271,14 +278,15 @@ func (m *transcriptionModel) pollJob(ctx context.Context, id string) error {
 // GET .../jobs/{id}/transcript with
 // "Accept: application/vnd.rev.transcript.v1.0+json" so Rev.ai returns the
 // structured JSON transcript instead of plain text.
-func (m *transcriptionModel) fetchTranscript(ctx context.Context, id string) (*transcriptResponse, []byte, error) {
+func (m *transcriptionModel) fetchTranscript(ctx context.Context, id string, headers map[string]string) (*transcriptResponse, []byte, error) {
 	reqURL := m.provider.baseURL + "/speechtotext/v1/jobs/" + id + "/transcript"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("revai: build transcript request: %w", err)
 	}
-	httpReq.Header.Set("Authorization", "Bearer "+m.provider.apiKey)
+	httpReq.Header.Set(revaiAuthHeader, "Bearer "+m.provider.apiKey)
 	httpReq.Header.Set("Accept", "application/vnd.rev.transcript.v1.0+json")
+	httpheader.Apply(httpReq, headers, revaiAuthHeader)
 
 	resp, err := m.provider.client().Do(httpReq)
 	if err != nil {

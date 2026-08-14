@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/internal/websocket"
 	"github.com/azrtydxb/go-ai-sdk/internal/wsstream"
 	"github.com/azrtydxb/go-ai-sdk/provider"
@@ -46,11 +47,13 @@ func (m *streamingTranscriptionModel) StreamTranscribe(ctx context.Context, call
 		return nil, err
 	}
 
+	wsHeader := http.Header{
+		openaiAuthHeader: []string{"Bearer " + m.provider.apiKey},
+		"OpenAI-Beta":    []string{"realtime=v1"},
+	}
+	httpheader.ApplyToHeader(wsHeader, call.Headers, openaiAuthHeader)
 	conn, err := websocket.Dial(ctx, dialURL, websocket.DialOptions{
-		Header: http.Header{
-			"Authorization": []string{"Bearer " + m.provider.apiKey},
-			"OpenAI-Beta":   []string{"realtime=v1"},
-		},
+		Header: wsHeader,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("openai: dial realtime transcription: %w", err)

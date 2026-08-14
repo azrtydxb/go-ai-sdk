@@ -12,6 +12,11 @@ type TranscriptionCall struct {
 	Language        string // optional hint
 	Prompt          string // optional context prompt
 	ProviderOptions map[string]any
+
+	// Headers carries extra HTTP headers applied to the request(s) this call
+	// makes, after auth; a key matching the provider's auth header is
+	// ignored. Same contract as Call.Headers.
+	Headers map[string]string
 }
 
 // TranscriptSegment is a single timed segment of a transcription.

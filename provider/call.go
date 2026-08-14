@@ -106,15 +106,23 @@ type Call struct {
 	// authentication (e.g. "Authorization", "x-api-key", "x-goog-api-key")
 	// is silently skipped, all other entries win over anything the SDK
 	// would otherwise set. Implemented by every language-model request path
-	// (openaicompat, geminicompat, anthropic, cohere, mistral, bedrock).
-	// Not implemented (this wave) by any embedding or media (image/speech/
-	// transcription) request path.
+	// (openaicompat, geminicompat, anthropic, cohere, mistral, bedrock) and
+	// (since v0.4.0) every embedding/media/rerank/file request path via the
+	// per-modality call structs' Headers field (EmbeddingCall, ImageCall,
+	// SpeechCall, TranscriptionCall, StreamTranscriptionCall,
+	// TranslationCall, VideoCall, RerankCall, FileUploadCall).
 	//
 	// bedrock is a special case because requests are SigV4-signed: an entry
 	// whose key case-insensitively starts with "x-amz-" is set BEFORE
 	// signing, so it participates in the signature (SigV4 signs every
 	// x-amz-* header present on the request); every other entry is set
 	// AFTER signing, so it reaches the wire unsigned.
+	//
+	// Only the provider's auth header is protected this way — a Headers
+	// entry CAN override any other header the SDK would otherwise set,
+	// including provider-fixed non-auth headers such as Content-Type on
+	// multipart request paths, Rev.ai's Accept, Replicate's Prefer, or
+	// Cartesia's Cartesia-Version.
 	Headers map[string]string
 
 	// ProviderOptions is an escape hatch for provider-specific parameters.

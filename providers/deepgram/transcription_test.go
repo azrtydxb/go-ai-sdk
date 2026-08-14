@@ -405,3 +405,35 @@ func TestTranscribe_ContextCancellation(t *testing.T) {
 		t.Fatal("expected error from cancelled context")
 	}
 }
+
+func TestTranscribe_RequestHeaders(t *testing.T) {
+	var gotCustom, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCustom = r.Header.Get("X-Custom-Header")
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"results":{"channels":[{"alternatives":[{"transcript":"hi","words":[]}]}]}}`))
+	}))
+	defer srv.Close()
+
+	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL))
+	m := p.TranscriptionModel("nova-3")
+
+	_, err := m.Transcribe(context.Background(), provider.TranscriptionCall{
+		Audio:     []byte("x"),
+		MediaType: "audio/wav",
+		Headers: map[string]string{
+			"X-Custom-Header": "custom-value",
+			"authorization":   "should-not-win",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Transcribe: %v", err)
+	}
+	if gotCustom != "custom-value" {
+		t.Errorf("X-Custom-Header = %q, want custom-value", gotCustom)
+	}
+	if gotAuth != "Token test-key" {
+		t.Errorf("Authorization = %q, want %q (Headers must not clobber auth)", gotAuth, "Token test-key")
+	}
+}

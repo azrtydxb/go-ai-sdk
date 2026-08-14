@@ -21,6 +21,12 @@ type TranscribeOpts struct {
 	MaxRetries      *int
 	ProviderOptions map[string]any
 
+	// Headers carries extra HTTP headers to send with the request; threaded
+	// through to provider.TranscriptionCall.Headers unchanged — see that
+	// field's doc for precedence (it never overrides the provider's auth
+	// header) and which request paths implement it.
+	Headers map[string]string
+
 	// OnTranscribeStart, when non-nil, fires once before the first attempt
 	// of the underlying provider call.
 	OnTranscribeStart func(call provider.TranscriptionCall)
@@ -60,6 +66,7 @@ func Transcribe(ctx context.Context, opts TranscribeOpts) (*TranscribeResult, er
 		Language:        opts.Language,
 		Prompt:          opts.Prompt,
 		ProviderOptions: opts.ProviderOptions,
+		Headers:         opts.Headers,
 	}
 
 	if opts.OnTranscribeStart != nil {

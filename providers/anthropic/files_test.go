@@ -22,6 +22,7 @@ type anthFilesFixture struct {
 	uploadFile        []byte
 	uploadName        string
 	uploadContentType string
+	uploadCustom      string
 
 	deleteMethod string
 	deletePath   string
@@ -40,6 +41,7 @@ func newAnthFilesFixture(t *testing.T, uploadStatus int, uploadBody string, dele
 		f.uploadAPIKey = r.Header.Get("x-api-key")
 		f.uploadVersion = r.Header.Get("anthropic-version")
 		f.uploadBeta = r.Header.Get("anthropic-beta")
+		f.uploadCustom = r.Header.Get("X-Custom-Header")
 		_, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 		if err == nil {
 			mr := multipart.NewReader(r.Body, params["boundary"])
@@ -174,6 +176,33 @@ func TestFilesUploadFileCtxCanceled(t *testing.T) {
 	_, err := store.UploadFile(ctx, provider.FileUploadCall{Data: []byte("d"), Filename: "a"})
 	if err == nil {
 		t.Fatal("UploadFile: want error for canceled context")
+	}
+}
+
+// TestFilesUploadFileHeadersApplied covers Fix wave MINOR/CRITICAL 2:
+// FileUploadCall.Headers must reach the wire on the upload request, and a
+// caller-supplied x-api-key entry must not override the provider's own
+// auth header.
+func TestFilesUploadFileHeadersApplied(t *testing.T) {
+	srv, f := newAnthFilesFixture(t, http.StatusOK, `{"id":"file_1","filename":"a","size_bytes":1}`, http.StatusOK, "")
+	store := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Files()
+
+	_, err := store.UploadFile(context.Background(), provider.FileUploadCall{
+		Data:     []byte("a"),
+		Filename: "a",
+		Headers: map[string]string{
+			"X-Custom-Header": "custom-value",
+			"x-api-key":       "attacker-supplied",
+		},
+	})
+	if err != nil {
+		t.Fatalf("UploadFile: %v", err)
+	}
+	if f.uploadCustom != "custom-value" {
+		t.Errorf("X-Custom-Header = %q, want custom-value", f.uploadCustom)
+	}
+	if f.uploadAPIKey != "k" {
+		t.Errorf("x-api-key = %q, want k (Headers must not override auth)", f.uploadAPIKey)
 	}
 }
 

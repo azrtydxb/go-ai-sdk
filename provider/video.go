@@ -19,6 +19,11 @@ type VideoCall struct {
 	Resolution      string  // e.g. "720p"; empty = provider default
 	DurationSec     float64 // 0 = provider default
 	ProviderOptions map[string]any
+
+	// Headers carries extra HTTP headers applied to the request(s) this call
+	// makes, after auth; a key matching the provider's auth header is
+	// ignored. Same contract as Call.Headers.
+	Headers map[string]string
 }
 
 // VideoResponse is the outcome of a VideoModel.GenerateVideos call.

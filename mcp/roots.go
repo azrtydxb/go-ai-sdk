@@ -28,15 +28,13 @@ type rootsListResultWire struct {
 }
 
 // handleRootsList responds to a server-initiated "roots/list" request with
-// the roots installed via SetRoots. It is only reachable when roots have
-// been set — the "roots" capability is only declared to the server in that
-// case, and dispatchServerRequest gates the "roots/list" case on rootsSet,
-// falling through to -32601 "Method not found" otherwise, mirroring the
-// unknown-method path.
-func (c *Client) handleRootsList(req serverRequest) {
-	c.mu.Lock()
-	roots := c.roots
-	c.mu.Unlock()
-
+// roots, a snapshot of the client's installed roots taken by the caller
+// (dispatchServerRequest) under a single mu acquisition that also covers
+// the rootsSet gate check — handleRootsList itself takes no lock. It is
+// only reachable when roots have been set — the "roots" capability is only
+// declared to the server in that case, and dispatchServerRequest gates the
+// "roots/list" case on rootsSet, falling through to -32601 "Method not
+// found" otherwise, mirroring the unknown-method path.
+func (c *Client) handleRootsList(req serverRequest, roots []Root) {
 	c.respondServerResult(req.ID, rootsListResultWire{Roots: roots})
 }

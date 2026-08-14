@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/fetchmedia"
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/internal/transcribeutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -79,7 +80,8 @@ func (m *videoModel) GenerateVideos(ctx context.Context, call provider.VideoCall
 		return nil, fmt.Errorf("luma: build video request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+m.provider.apiKey)
+	httpReq.Header.Set(lumaAuthHeader, "Bearer "+m.provider.apiKey)
+	httpheader.Apply(httpReq, call.Headers, lumaAuthHeader)
 
 	resp, err := m.provider.client().Do(httpReq)
 	if err != nil {
@@ -103,7 +105,7 @@ func (m *videoModel) GenerateVideos(ctx context.Context, call provider.VideoCall
 		return nil, fmt.Errorf("luma: response contained no generation id: %s", body)
 	}
 
-	gen, rawBody, err := m.poll(ctx, created.ID)
+	gen, rawBody, err := m.poll(ctx, created.ID, call.Headers)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +132,7 @@ func (m *videoModel) GenerateVideos(ctx context.Context, call provider.VideoCall
 // terminal state ("completed" or "failed"), sleeping p.provider.poll()
 // between requests. The sleep is ctx-aware: cancellation returns
 // ctx.Err() immediately instead of waiting out the interval.
-func (m *videoModel) poll(ctx context.Context, id string) (*videoGenerationResponse, []byte, error) {
+func (m *videoModel) poll(ctx context.Context, id string, headers map[string]string) (*videoGenerationResponse, []byte, error) {
 	reqURL := m.provider.baseURL + "/dream-machine/v1/generations/" + id
 
 	for {
@@ -138,7 +140,8 @@ func (m *videoModel) poll(ctx context.Context, id string) (*videoGenerationRespo
 		if err != nil {
 			return nil, nil, fmt.Errorf("luma: build poll request: %w", err)
 		}
-		httpReq.Header.Set("Authorization", "Bearer "+m.provider.apiKey)
+		httpReq.Header.Set(lumaAuthHeader, "Bearer "+m.provider.apiKey)
+		httpheader.Apply(httpReq, headers, lumaAuthHeader)
 
 		resp, err := m.provider.client().Do(httpReq)
 		if err != nil {

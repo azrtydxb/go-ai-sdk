@@ -377,7 +377,7 @@ func TestGenerateImages_ForeignRegistrableDomainPollingURLRejected(t *testing.T)
 	p := New(WithAPIKey("secret-key"), WithBaseURL("https://api.bfl.ai"), WithHTTPClient(&http.Client{Transport: rt}))
 	m := p.ImageModel("flux-pro-1.1").(*imageModel)
 
-	_, _, err := m.poll(context.Background(), "https://attacker.evil.tld/poll")
+	_, _, err := m.poll(context.Background(), "https://attacker.evil.tld/poll", nil)
 	if err == nil {
 		t.Fatal("expected error for foreign-registrable-domain polling_url")
 	}
@@ -423,7 +423,7 @@ func TestGenerateImages_RegionalPollingURLSameRegistrableDomainWorks(t *testing.
 	p := New(WithAPIKey("secret-key"), WithBaseURL("https://api.bfl.ai"), WithHTTPClient(&http.Client{Transport: rt}))
 	m := p.ImageModel("flux-pro-1.1").(*imageModel)
 
-	poll, _, err := m.poll(context.Background(), "https://api.us1.bfl.ai/poll")
+	poll, _, err := m.poll(context.Background(), "https://api.us1.bfl.ai/poll", nil)
 	if err != nil {
 		t.Fatalf("poll: %v", err)
 	}
@@ -489,7 +489,7 @@ func TestGenerateImages_PollingURLLinkLocalRejected(t *testing.T) {
 	p := New(WithAPIKey("k"), WithBaseURL("http://169.254.169.254"))
 	m := p.ImageModel("flux-pro-1.1").(*imageModel)
 
-	_, _, err := m.poll(context.Background(), "http://169.254.169.254/poll")
+	_, _, err := m.poll(context.Background(), "http://169.254.169.254/poll", nil)
 	if err == nil {
 		t.Fatal("expected error for link-local polling_url")
 	}
@@ -515,5 +515,59 @@ func TestGenerateImages_EmptyPollingURLError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "polling_url") {
 		t.Errorf("error = %q, want it to mention the missing polling_url", err.Error())
+	}
+}
+
+// TestGenerateImages_RequestHeaders verifies call.Headers reach both the
+// create request and the poll follow-up request.
+func TestGenerateImages_RequestHeaders(t *testing.T) {
+	var srv *httptest.Server
+	var createCustom, createAuth, pollCustom, pollAuth string
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/flux-pro-1.1", func(w http.ResponseWriter, r *http.Request) {
+		createCustom = r.Header.Get("X-Custom-Header")
+		createAuth = r.Header.Get("x-key")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"gen-1","polling_url":"` + srv.URL + `/poll"}`))
+	})
+	mux.HandleFunc("/poll", func(w http.ResponseWriter, r *http.Request) {
+		pollCustom = r.Header.Get("X-Custom-Header")
+		pollAuth = r.Header.Get("x-key")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"gen-1","status":"Ready","result":{"sample":"` + srv.URL + `/sample"}}`))
+	})
+	mux.HandleFunc("/sample", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.Write([]byte("bytes"))
+	})
+	srv = httptest.NewServer(mux)
+	defer srv.Close()
+
+	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
+	m := p.ImageModel("flux-pro-1.1")
+
+	_, err := m.GenerateImages(context.Background(), provider.ImageCall{
+		Prompt: "a cat",
+		Headers: map[string]string{
+			"X-Custom-Header": "custom-value",
+			"x-key":           "should-not-win",
+		},
+	})
+	if err != nil {
+		t.Fatalf("GenerateImages: %v", err)
+	}
+
+	if createCustom != "custom-value" {
+		t.Errorf("create X-Custom-Header = %q, want custom-value", createCustom)
+	}
+	if createAuth != "test-key" {
+		t.Errorf("create x-key = %q, want test-key", createAuth)
+	}
+	if pollCustom != "custom-value" {
+		t.Errorf("poll X-Custom-Header = %q, want custom-value", pollCustom)
+	}
+	if pollAuth != "test-key" {
+		t.Errorf("poll x-key = %q, want test-key", pollAuth)
 	}
 }

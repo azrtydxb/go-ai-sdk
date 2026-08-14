@@ -79,6 +79,19 @@ type createMessageResultWire struct {
 	StopReason string          `json:"stopReason"`
 }
 
+// samplingMessagesFromWire copies a wire-shaped sampling message list into
+// the public SamplingMessage type, preserving Role and Content verbatim.
+// Factored out of handleSamplingCreateMessage so the index-copy loop has a
+// single, independently readable home rather than being inlined amid the
+// rest of the request-handling flow.
+func samplingMessagesFromWire(wire []samplingMessageWire) []SamplingMessage {
+	messages := make([]SamplingMessage, len(wire))
+	for i, m := range wire {
+		messages[i] = SamplingMessage{Role: m.Role, Content: m.Content}
+	}
+	return messages
+}
+
 // handleSamplingCreateMessage decodes the request params, invokes the
 // installed SamplingHandler, and sends the result back to the server with
 // the matching id. A nil handler is unreachable in practice — the
@@ -105,13 +118,8 @@ func (c *Client) handleSamplingCreateMessage(req serverRequest) {
 		return
 	}
 
-	messages := make([]SamplingMessage, len(params.Messages))
-	for i, m := range params.Messages {
-		messages[i] = SamplingMessage{Role: m.Role, Content: m.Content}
-	}
-
 	result, err := h(c.ctx, CreateMessageRequest{
-		Messages:         messages,
+		Messages:         samplingMessagesFromWire(params.Messages),
 		SystemPrompt:     params.SystemPrompt,
 		MaxTokens:        params.MaxTokens,
 		ModelPreferences: params.ModelPreferences,

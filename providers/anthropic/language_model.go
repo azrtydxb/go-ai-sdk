@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/internal/sse"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -86,12 +87,7 @@ func (m *languageModel) doRequest(ctx context.Context, req messagesRequest, prov
 	if callToolsNeedInputExamplesBeta(tools) && !headerIsSet(headers, "anthropic-beta") {
 		httpReq.Header.Set("anthropic-beta", toolInputExamplesBetaHeader)
 	}
-	for k, v := range headers {
-		if strings.EqualFold(k, anthropicAuthHeader) {
-			continue
-		}
-		httpReq.Header.Set(k, v)
-	}
+	httpheader.Apply(httpReq, headers, anthropicAuthHeader)
 
 	return m.provider.client().Do(httpReq)
 }

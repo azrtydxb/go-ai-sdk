@@ -445,3 +445,56 @@ func TestTranscribe_MediaTypeCRLFRejected(t *testing.T) {
 		t.Error("Transcribe: request was sent despite invalid MediaType")
 	}
 }
+
+// TestTranscribe_RequestHeaders verifies call.Headers reach the job-create,
+// poll, and transcript-fetch requests alike.
+func TestTranscribe_RequestHeaders(t *testing.T) {
+	var createCustom, createAuth, pollCustom, pollAuth, fetchCustom, fetchAuth string
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/speechtotext/v1/jobs", func(w http.ResponseWriter, r *http.Request) {
+		createCustom = r.Header.Get("X-Custom-Header")
+		createAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"job-1"}`))
+	})
+	mux.HandleFunc("/speechtotext/v1/jobs/job-1", func(w http.ResponseWriter, r *http.Request) {
+		pollCustom = r.Header.Get("X-Custom-Header")
+		pollAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"job-1","status":"transcribed"}`))
+	})
+	mux.HandleFunc("/speechtotext/v1/jobs/job-1/transcript", func(w http.ResponseWriter, r *http.Request) {
+		fetchCustom = r.Header.Get("X-Custom-Header")
+		fetchAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"monologues":[]}`))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
+	model := p.TranscriptionModel("machine")
+
+	_, err := model.Transcribe(context.Background(), provider.TranscriptionCall{
+		Audio:     []byte("audio"),
+		MediaType: "audio/mpeg",
+		Headers: map[string]string{
+			"X-Custom-Header": "custom-value",
+			"authorization":   "should-not-win",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Transcribe: %v", err)
+	}
+
+	if createCustom != "custom-value" || createAuth != "Bearer test-key" {
+		t.Errorf("create headers: custom=%q auth=%q", createCustom, createAuth)
+	}
+	if pollCustom != "custom-value" || pollAuth != "Bearer test-key" {
+		t.Errorf("poll headers: custom=%q auth=%q", pollCustom, pollAuth)
+	}
+	if fetchCustom != "custom-value" || fetchAuth != "Bearer test-key" {
+		t.Errorf("fetch headers: custom=%q auth=%q", fetchCustom, fetchAuth)
+	}
+}

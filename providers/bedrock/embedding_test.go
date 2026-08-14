@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
+	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
 // embedFixtureState records the last embedding request the fixture server
@@ -172,6 +173,95 @@ func TestEmbeddingModel_EmptyValuesErrors(t *testing.T) {
 	_, err := model.Embed(context.Background(), nil)
 	if err == nil {
 		t.Fatal("Embed: want error for zero values, got nil")
+	}
+}
+
+// TestEmbeddingModel_HeadersApplied verifies call.Headers reach the wire
+// (as unsigned headers, since "X-Test" is not an x-amz-* header) and that
+// an "Authorization"-named entry cannot override the SigV4-computed
+// signature.
+func TestEmbeddingModel_HeadersApplied(t *testing.T) {
+	var gotExtra, gotAuth string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/model/{id}/invoke", func(w http.ResponseWriter, r *http.Request) {
+		gotExtra = r.Header.Get("X-Test")
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(titanEmbedResponse{Embedding: []float64{0.1}})
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	p := New(
+		WithRegion("us-east-1"),
+		WithCredentials("AKIDEXAMPLE", "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY", ""),
+		WithBaseURL(server.URL),
+		WithHTTPClient(server.Client()),
+	)
+	model := p.EmbeddingModel("amazon.titan-embed-text-v2:0")
+	em, ok := model.(provider.EmbeddingModelWithOptions)
+	if !ok {
+		t.Fatal("embeddingModel does not implement EmbeddingModelWithOptions")
+	}
+
+	_, err := em.EmbedCall(context.Background(), provider.EmbeddingCall{
+		Values:  []string{"hello"},
+		Headers: map[string]string{"X-Test": "yes", "Authorization": "attacker-supplied"},
+	})
+	if err != nil {
+		t.Fatalf("EmbedCall: %v", err)
+	}
+	if gotExtra != "yes" {
+		t.Errorf("X-Test header = %q, want %q", gotExtra, "yes")
+	}
+	if !strings.Contains(gotAuth, "AWS4-HMAC-SHA256") {
+		t.Errorf("Authorization header = %q, want SigV4 signature (must not be overridden by Headers)", gotAuth)
+	}
+}
+
+// TestEmbeddingModel_ProviderOptionsMerged verifies
+// EmbeddingCall.ProviderOptions["bedrock"] is merged into the Titan
+// /invoke request body as extra top-level fields (e.g. "dimensions"),
+// alongside the SDK-built "inputText".
+func TestEmbeddingModel_ProviderOptionsMerged(t *testing.T) {
+	var gotBody map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("/model/{id}/invoke", func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("fixture: decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(titanEmbedResponse{Embedding: []float64{0.1}})
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	p := New(
+		WithRegion("us-east-1"),
+		WithCredentials("AKIDEXAMPLE", "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY", ""),
+		WithBaseURL(server.URL),
+		WithHTTPClient(server.Client()),
+	)
+	model := p.EmbeddingModel("amazon.titan-embed-text-v2:0")
+	em, ok := model.(provider.EmbeddingModelWithOptions)
+	if !ok {
+		t.Fatal("embeddingModel does not implement EmbeddingModelWithOptions")
+	}
+
+	_, err := em.EmbedCall(context.Background(), provider.EmbeddingCall{
+		Values: []string{"hello"},
+		ProviderOptions: map[string]any{
+			"bedrock": map[string]any{"dimensions": float64(256)},
+		},
+	})
+	if err != nil {
+		t.Fatalf("EmbedCall: %v", err)
+	}
+	if gotBody["inputText"] != "hello" {
+		t.Errorf(`request body inputText = %v, want "hello"`, gotBody["inputText"])
+	}
+	if gotBody["dimensions"] != float64(256) {
+		t.Errorf("request body dimensions = %v, want 256 (from ProviderOptions)", gotBody["dimensions"])
 	}
 }
 

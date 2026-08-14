@@ -231,6 +231,15 @@ func (t *tool) Execute(ctx context.Context, args json.RawMessage) (result any, e
 	// Placed after arg-decoding so decode failures keep returning
 	// *InvalidToolArgumentsError untouched by recover.
 	//
+	// This recover is redundant-but-harmless double cover: executeToolCall
+	// wraps every t.Execute call (any Tool implementation, not just ones
+	// built with NewTool, and including ApprovalRequirer.ApprovalRequired
+	// hooks) in its own loop-level recoverToolPanic/recoverApprovalRequiredPanic
+	// guard, which is what actually protects hand-rolled ai.Tool
+	// implementations that have no recover of their own. This one stays so
+	// (*tool).Execute remains independently panic-safe for callers that
+	// invoke it directly, outside the GenerateText/StreamText loop.
+	//
 	// The captured stack goes on ToolExecutionError.Stack, NOT into Cause:
 	// Cause feeds Error(), and Error() can be shipped back to the provider
 	// as a tool result (generate_text.go's toolResultValue), so embedding a

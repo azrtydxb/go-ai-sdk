@@ -435,3 +435,46 @@ func TestGenerateVideos_ContextCancellation(t *testing.T) {
 		t.Fatal("expected error for cancelled context")
 	}
 }
+
+// TestGenerateVideos_RequestHeaders verifies call.Headers reach both the
+// create request and the poll follow-up request.
+func TestGenerateVideos_RequestHeaders(t *testing.T) {
+	var createCustom, createAuth, pollCustom, pollAuth string
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models/minimax/video-01/predictions", func(w http.ResponseWriter, r *http.Request) {
+		createCustom = r.Header.Get("X-Custom-Header")
+		createAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"pred-1","status":"starting"}`))
+	})
+	mux.HandleFunc("/v1/predictions/pred-1", func(w http.ResponseWriter, r *http.Request) {
+		pollCustom = r.Header.Get("X-Custom-Header")
+		pollAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"pred-1","status":"succeeded","output":"https://example.test/vid.mp4"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
+	m := p.VideoModel("minimax/video-01")
+
+	_, err := m.GenerateVideos(context.Background(), provider.VideoCall{
+		Prompt: "a cat",
+		Headers: map[string]string{
+			"X-Custom-Header": "custom-value",
+			"authorization":   "should-not-win",
+		},
+	})
+	// The fetchVideo download to a non-fixture host will fail; the
+	// request-headers assertions below don't depend on the final response.
+	_ = err
+
+	if createCustom != "custom-value" || createAuth != "Bearer test-key" {
+		t.Errorf("create headers: custom=%q auth=%q", createCustom, createAuth)
+	}
+	if pollCustom != "custom-value" || pollAuth != "Bearer test-key" {
+		t.Errorf("poll headers: custom=%q auth=%q", pollCustom, pollAuth)
+	}
+}

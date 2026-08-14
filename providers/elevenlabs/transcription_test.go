@@ -305,3 +305,34 @@ func TestTranscribe_ProviderOptionKeyNewlineRejected(t *testing.T) {
 		t.Error("Transcribe: request was sent despite invalid provider option key")
 	}
 }
+
+func TestTranscribe_RequestHeaders(t *testing.T) {
+	var gotCustom, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCustom = r.Header.Get("X-Custom-Header")
+		gotAuth = r.Header.Get("xi-api-key")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"text":"hi","language_code":"en","words":[]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL))
+	model := p.TranscriptionModel("scribe_v1")
+
+	_, err := model.Transcribe(context.Background(), provider.TranscriptionCall{
+		Audio: []byte("audio"),
+		Headers: map[string]string{
+			"X-Custom-Header": "custom-value",
+			"xi-api-key":      "should-not-win",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Transcribe: %v", err)
+	}
+	if gotCustom != "custom-value" {
+		t.Errorf("X-Custom-Header = %q, want custom-value", gotCustom)
+	}
+	if gotAuth != "test-key" {
+		t.Errorf("xi-api-key = %q, want test-key (Headers must not clobber auth)", gotAuth)
+	}
+}

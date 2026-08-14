@@ -8,6 +8,95 @@ once it reaches 1.0.
 
 ## [Unreleased]
 
+## v0.4.0 (2026-08-14)
+
+A follow-up wave closing every item carried in v0.3.0's Notes section, plus
+one item from the v0.2.1 hardening baseline: `Call.Headers`'s reach
+extended to every embed/media/rerank/upload call path and to WebSocket
+handshakes, universal tool-panic recovery, `EmbedMany` batch concurrency,
+and a partial-JSON-parsing performance pass on `StreamText`/`StreamObject`.
+No public API removed.
+
+### Added
+
+- **`Call.Headers` now applies to embed, media, rerank, and file-upload
+  requests, not just language-model calls.** `ai.EmbedOpts`/
+  `ai.EmbedManyOpts`, `ai.GenerateImageOpts`, `ai.GenerateSpeechOpts`,
+  `ai.GenerateVideoOpts`, `ai.TranscribeOpts`, `ai.TranslateOpts`,
+  `ai.RerankOpts`, and `ai.UploadFileOpts` each gain a `Headers
+  map[string]string` field, threaded through to the corresponding
+  `provider.*Call.Headers` field and applied to the outgoing request after
+  the provider's own auth header (a `Headers` entry that
+  case-insensitively matches the auth header name is skipped, so it can
+  never override auth — same precedence contract as the existing
+  language-model path). Coverage includes async poll/download follow-up
+  requests against the same host (BFL image poll, fal/Replicate/Luma video
+  poll) and the WebSocket handshake for streaming transcription (Deepgram
+  live, OpenAI realtime transcription); it does not extend to
+  `internal/gauth` token exchange or `internal/fetchmedia`'s
+  server-returned result-URL downloads. For `Embed`/`EmbedMany`, `Headers`
+  only takes effect when `Model` implements
+  `provider.EmbeddingModelWithOptions` (same gate as `ProviderOptions`;
+  silently ignored otherwise) — cohere, mistral, and bedrock's embedding
+  models now implement that interface (bedrock also gained
+  `ProviderOptions` passthrough) specifically so their `Headers` isn't
+  silently dropped. `internal/httpheader.Apply` is the one helper now
+  shared by every provider's header-application site (previously
+  duplicated per language-model provider). See
+  [Generating text § Additional call settings](docs/core/generating-text.md#additional-call-settings-topk-penalties-seed-headers),
+  [Embeddings § Embed](docs/core/embeddings.md#embed), and
+  [Media § Headers](docs/core/media.md#headers).
+- **`EmbedManyOpts.Concurrency`** bounds how many batches `EmbedMany` runs
+  in flight at once. `0` or `1` (default) keeps the existing sequential,
+  in-order behavior verbatim; a value greater than `1` fans batches out
+  over a worker pool, reassembles results index-aligned with `Values`
+  regardless of completion order, sums `Usage` across every batch, and
+  cancels the remaining batches on the first batch error (that error wins,
+  in-flight batches are allowed to drain rather than abandoned).
+  `OnEmbedStart`/`OnEmbedEnd` fire once per batch from worker goroutines in
+  **completion order, not batch order**, under `Concurrency > 1` — callers
+  relying on these callbacks must make them goroutine-safe. See
+  [Embeddings § Concurrency](docs/core/embeddings.md#concurrency).
+
+### Fixed
+
+- **Panics from any `Tool.Execute` implementation, and from
+  `ApprovalRequirer.ApprovalRequired` hooks, are recovered into
+  `*ai.ToolExecutionError`.** Previously only `(*tool).Execute` — the
+  `Tool` built by `NewTool` — recovered its own panics; a hand-written
+  `Tool` implementation, or a panic inside an `ApprovalRequired` approval
+  hook, unwound the whole `GenerateText`/`StreamText` call (and the
+  caller's goroutine) with it. Both are now wrapped at the tool-loop level
+  (`recoverToolPanic`/`recoverApprovalRequiredPanic`), converting a panic
+  to the same `*ToolExecutionError{ToolName, Cause, Stack}` shape
+  `NewTool`'s own recover already produced — a panic fails only that tool
+  call; other calls in the same batch are unaffected. `NewTool`'s internal
+  recover stays in place as harmless double coverage.
+
+### Performance
+
+- **`StreamText`/`StreamObject`'s partial-output decoding runs JSON repair
+  once per delta, shared across every consumer of that delta**, instead of
+  the text-partial path, the tool-call partial tap, and `TextStream.Output()`
+  each independently re-running repair over the same accumulated text.
+  Benchmarked ~24% faster and ~21MB fewer bytes allocated per full stream
+  (`BenchmarkPartialTrackerFeed`: 38.2ms/786k allocs vs. 49.9ms/792k
+  allocs for the old double-repair path). The tool-call partial tap is now
+  keyed by tool-call ID (re-keying late-arriving IDs as they appear)
+  instead of by array index, and partial parsing tolerates a code-fenced
+  accumulation-so-far in every mode, not just the final decode. A fast
+  path skips the tracker entirely when `Output` is atomic (no partial
+  decoding requested).
+
+### Notes — carried minors
+
+- **`StreamObject`'s repair-based partial parsing still scans the
+  accumulated buffer once per delta.** This wave removed the redundant
+  re-repairs and re-decodes across a single delta's consumers (see
+  Performance above); the O(n) scan per delta is inherent to the
+  repair-from-scratch approach and is not planned to change without a
+  different parsing strategy (e.g. incremental/streaming JSON parsing).
+
 ## v0.3.0 (2026-08-14)
 
 A follow-up wave closing the deferred/documented-not-fixed items from the
@@ -49,7 +138,7 @@ No public API removed.
   server-initiated notifications (`notifications/message`,
   `notifications/resources/updated`, etc.) to an installable handler
   instead of silently dropping them. See
-  [MCP § Notifications](docs/mcp.md).
+  [MCP § Notifications](docs/mcp.md#notifications).
 - **`mcp.ToolResult.Content`** preserves every content part of a
   `tools/call` result verbatim, in wire order (text, image, audio,
   embedded resource) — `ToolResult.Text` still concatenates only the
@@ -954,7 +1043,8 @@ smoke-tested against live APIs yet (see the
 - [Migrating from the Vercel AI SDK](docs/migrating-from-vercel-ai-sdk.md)
   and [Architecture](docs/architecture.md).
 
-[Unreleased]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.1...v0.2.2

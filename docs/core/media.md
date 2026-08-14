@@ -32,6 +32,25 @@ translated to `*ai.RetryError`) — the response is `nil` on error.
 `ai.StreamTranscribe` has no callback pair of its own — it has no retry to
 bracket (see [StreamTranscribe](#streamtranscribe) below).
 
+## Headers
+
+Each of the five `Opts` types (plus `ai.EmbedOpts`/`ai.EmbedManyOpts`,
+`ai.RerankOpts`, and `ai.UploadFileOpts`) has a `Headers map[string]string`
+field, matching `ai.GenerateTextOpts.Headers`
+(see [Generating text § Additional call settings](generating-text.md#additional-call-settings-topk-penalties-seed-headers)). Entries are
+threaded unchanged to the request's `provider.*Call.Headers` field and
+applied to the outgoing HTTP request AFTER the provider sets its own
+authentication header — a `Headers` entry whose key case-insensitively
+matches the provider's auth header name is skipped, so a caller can never
+override auth via `Headers`. This includes async poll/download follow-up
+requests issued against the same host (e.g. BFL's image poll, fal/Replicate/
+Luma's video poll) and WebSocket handshake requests for streaming
+transcription (Deepgram live, OpenAI realtime transcription) — it does NOT
+apply to `internal/gauth` token exchange or `internal/fetchmedia`'s
+server-returned result-URL downloads (see
+[§ Server-returned result-URL fetches](#server-returned-result-url-fetches-ssrf-hardening)
+below), which are not caller-issued requests.
+
 ## GenerateImage
 
 ```go

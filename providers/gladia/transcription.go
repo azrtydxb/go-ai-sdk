@@ -9,10 +9,15 @@ import (
 	"mime/multipart"
 	"net/http"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/internal/multipartutil"
 	"github.com/azrtydxb/go-ai-sdk/internal/transcribeutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
+
+// gladiaAuthHeader is the HTTP header carrying the API key; extra headers
+// from provider.TranscriptionCall.Headers must not be able to override it.
+const gladiaAuthHeader = "x-gladia-key"
 
 // transcriptionModel implements provider.TranscriptionModel against
 // Gladia's three-endpoint asynchronous transcription flow: upload the
@@ -93,7 +98,7 @@ func (m *transcriptionModel) Transcribe(ctx context.Context, call provider.Trans
 		return nil, err
 	}
 
-	pr, rawBody, err := m.poll(ctx, id)
+	pr, rawBody, err := m.poll(ctx, id, call.Headers)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +166,8 @@ func (m *transcriptionModel) upload(ctx context.Context, call provider.Transcrip
 		return "", fmt.Errorf("gladia: build upload request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", mw.FormDataContentType())
-	httpReq.Header.Set("x-gladia-key", m.provider.apiKey)
+	httpReq.Header.Set(gladiaAuthHeader, m.provider.apiKey)
+	httpheader.Apply(httpReq, call.Headers, gladiaAuthHeader)
 
 	resp, err := m.provider.client().Do(httpReq)
 	if err != nil {
@@ -209,7 +215,8 @@ func (m *transcriptionModel) create(ctx context.Context, call provider.Transcrip
 		return "", fmt.Errorf("gladia: build pre-recorded request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("x-gladia-key", m.provider.apiKey)
+	httpReq.Header.Set(gladiaAuthHeader, m.provider.apiKey)
+	httpheader.Apply(httpReq, call.Headers, gladiaAuthHeader)
 
 	resp, err := m.provider.client().Do(httpReq)
 	if err != nil {
@@ -239,7 +246,7 @@ func (m *transcriptionModel) create(ctx context.Context, call provider.Transcrip
 // ("done" or "error"), sleeping p.provider.poll() between requests. The
 // sleep is ctx-aware: cancellation returns ctx.Err() immediately instead of
 // waiting out the interval.
-func (m *transcriptionModel) poll(ctx context.Context, id string) (*pollResponse, []byte, error) {
+func (m *transcriptionModel) poll(ctx context.Context, id string, headers map[string]string) (*pollResponse, []byte, error) {
 	reqURL := m.provider.baseURL + "/v2/pre-recorded/" + id
 
 	// Poll immediately on entry (a job may already be done by the time we
@@ -251,7 +258,8 @@ func (m *transcriptionModel) poll(ctx context.Context, id string) (*pollResponse
 		if err != nil {
 			return nil, nil, fmt.Errorf("gladia: build poll request: %w", err)
 		}
-		httpReq.Header.Set("x-gladia-key", m.provider.apiKey)
+		httpReq.Header.Set(gladiaAuthHeader, m.provider.apiKey)
+		httpheader.Apply(httpReq, headers, gladiaAuthHeader)
 
 		resp, err := m.provider.client().Do(httpReq)
 		if err != nil {

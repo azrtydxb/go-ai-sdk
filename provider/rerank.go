@@ -11,6 +11,11 @@ type RerankCall struct {
 	Documents       []string
 	TopN            int // 0 = provider default (all documents)
 	ProviderOptions map[string]any
+
+	// Headers carries extra HTTP headers applied to the request(s) this call
+	// makes, after auth; a key matching the provider's auth header is
+	// ignored. Same contract as Call.Headers.
+	Headers map[string]string
 }
 
 // RankedDocument is one scored entry in a rerank response. Index refers to

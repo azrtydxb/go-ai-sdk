@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -54,6 +55,7 @@ func (m *embeddingModel) EmbedCall(ctx context.Context, call provider.EmbeddingC
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	m.cfg.setAuthHeader(httpReq)
+	httpheader.Apply(httpReq, call.Headers, m.cfg.authHeaderName())
 
 	resp, err := m.cfg.client().Do(httpReq)
 	if err != nil {

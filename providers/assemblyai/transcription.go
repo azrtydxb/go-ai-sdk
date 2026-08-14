@@ -8,9 +8,15 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/internal/transcribeutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
+
+// assemblyaiAuthHeader is the HTTP header carrying the API key; extra
+// headers from provider.TranscriptionCall.Headers must not be able to
+// override it.
+const assemblyaiAuthHeader = "authorization"
 
 // transcriptionModel implements provider.TranscriptionModel against
 // AssemblyAI's three-endpoint asynchronous transcription flow: upload the
@@ -74,7 +80,7 @@ func (m *transcriptionModel) Transcribe(ctx context.Context, call provider.Trans
 		return nil, err
 	}
 
-	tr, rawBody, err := m.poll(ctx, id)
+	tr, rawBody, err := m.poll(ctx, id, call.Headers)
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +116,8 @@ func (m *transcriptionModel) upload(ctx context.Context, call provider.Transcrip
 		contentType = "application/octet-stream"
 	}
 	httpReq.Header.Set("Content-Type", contentType)
-	httpReq.Header.Set("authorization", m.provider.apiKey)
+	httpReq.Header.Set(assemblyaiAuthHeader, m.provider.apiKey)
+	httpheader.Apply(httpReq, call.Headers, assemblyaiAuthHeader)
 
 	resp, err := m.provider.client().Do(httpReq)
 	if err != nil {
@@ -159,7 +166,8 @@ func (m *transcriptionModel) create(ctx context.Context, call provider.Transcrip
 		return "", fmt.Errorf("assemblyai: build transcript request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("authorization", m.provider.apiKey)
+	httpReq.Header.Set(assemblyaiAuthHeader, m.provider.apiKey)
+	httpheader.Apply(httpReq, call.Headers, assemblyaiAuthHeader)
 
 	resp, err := m.provider.client().Do(httpReq)
 	if err != nil {
@@ -189,7 +197,7 @@ func (m *transcriptionModel) create(ctx context.Context, call provider.Transcrip
 // terminal state ("completed" or "error"), sleeping p.provider.poll()
 // between requests. The sleep is ctx-aware: cancellation returns
 // ctx.Err() immediately instead of waiting out the interval.
-func (m *transcriptionModel) poll(ctx context.Context, id string) (*transcriptResponse, []byte, error) {
+func (m *transcriptionModel) poll(ctx context.Context, id string, headers map[string]string) (*transcriptResponse, []byte, error) {
 	reqURL := m.provider.baseURL + "/v2/transcript/" + id
 
 	// Poll immediately on entry (a transcript may already be complete by
@@ -201,7 +209,8 @@ func (m *transcriptionModel) poll(ctx context.Context, id string) (*transcriptRe
 		if err != nil {
 			return nil, nil, fmt.Errorf("assemblyai: build poll request: %w", err)
 		}
-		httpReq.Header.Set("authorization", m.provider.apiKey)
+		httpReq.Header.Set(assemblyaiAuthHeader, m.provider.apiKey)
+		httpheader.Apply(httpReq, headers, assemblyaiAuthHeader)
 
 		resp, err := m.provider.client().Do(httpReq)
 		if err != nil {

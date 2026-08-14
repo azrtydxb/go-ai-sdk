@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/internal/sse"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -54,7 +55,7 @@ func (m *languageModel) doRequest(ctx context.Context, req chatRequest, provider
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	m.cfg.setAuthHeader(httpReq)
-	applyExtraHeaders(httpReq, headers, m.cfg.authHeaderName())
+	httpheader.Apply(httpReq, headers, m.cfg.authHeaderName())
 
 	return m.cfg.client().Do(httpReq)
 }

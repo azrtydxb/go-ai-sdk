@@ -248,3 +248,35 @@ func TestRerankContextCancel(t *testing.T) {
 		t.Errorf("err = %v, want wrapping context.Canceled", err)
 	}
 }
+
+func TestRerankRequestHeaders(t *testing.T) {
+	var gotCustom, gotAuth string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/rerank", func(w http.ResponseWriter, r *http.Request) {
+		gotCustom = r.Header.Get("X-Custom-Header")
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(rerankResponse{})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).RerankingModel("rerank-v3.5")
+
+	_, err := model.Rerank(context.Background(), provider.RerankCall{
+		Query:     "q",
+		Documents: []string{"a"},
+		Headers: map[string]string{
+			"X-Custom-Header": "custom-value",
+			"authorization":   "should-not-win",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Rerank: %v", err)
+	}
+	if gotCustom != "custom-value" {
+		t.Errorf("X-Custom-Header = %q, want custom-value", gotCustom)
+	}
+	if gotAuth != "Bearer k" {
+		t.Errorf("Authorization = %q, want Bearer k (Headers must not clobber auth)", gotAuth)
+	}
+}
