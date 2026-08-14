@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/internal/imagesniff"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -94,6 +95,7 @@ func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	m.cfg.setAuthHeader(httpReq)
+	httpheader.Apply(httpReq, call.Headers, m.cfg.authHeaderName())
 
 	resp, err := m.cfg.client().Do(httpReq)
 	if err != nil {

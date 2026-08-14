@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/internal/multipartutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -138,6 +139,7 @@ func (m *transcriptionModel) Transcribe(ctx context.Context, call provider.Trans
 	}
 	httpReq.Header.Set("Content-Type", mw.FormDataContentType())
 	m.cfg.setAuthHeader(httpReq)
+	httpheader.Apply(httpReq, call.Headers, m.cfg.authHeaderName())
 
 	resp, err := m.cfg.client().Do(httpReq)
 	if err != nil {

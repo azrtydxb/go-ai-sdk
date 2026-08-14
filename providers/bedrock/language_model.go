@@ -75,9 +75,7 @@ const bedrockAuthHeader = "Authorization"
 
 // doRequest builds a SigV4-signed POST request against path with the given
 // body and executes it. Shared by the language model (converse /
-// converse-stream) and the embedding model (Titan /invoke, which always
-// passes nil headers — extra headers are not implemented on the embedding
-// path this wave).
+// converse-stream) and the embedding model (Titan /invoke).
 //
 // Unlike every other provider (which apply extra headers via the shared
 // internal/httpheader.Apply helper), bedrock cannot use that helper directly

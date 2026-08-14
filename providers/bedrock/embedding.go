@@ -49,6 +49,12 @@ func (m *embeddingModel) MaxBatchSize() int    { return embeddingMaxBatchSize }
 // ai.EmbedMany respects MaxBatchSize() and never does this itself, but a
 // direct caller of Embed could.
 func (m *embeddingModel) Embed(ctx context.Context, values []string) (*provider.EmbeddingResponse, error) {
+	return m.EmbedCall(ctx, provider.EmbeddingCall{Values: values})
+}
+
+// EmbedCall implements provider.EmbeddingModelWithOptions.
+func (m *embeddingModel) EmbedCall(ctx context.Context, call provider.EmbeddingCall) (*provider.EmbeddingResponse, error) {
+	values := call.Values
 	if len(values) != 1 {
 		return nil, fmt.Errorf("bedrock: Titan embeddings accept exactly one text per call, got %d", len(values))
 	}
@@ -59,9 +65,7 @@ func (m *embeddingModel) Embed(ctx context.Context, values []string) (*provider.
 	}
 
 	path := m.provider.modelPath(m.modelID, "/invoke")
-	// Headers is not implemented on the embedding path this wave (nil ->
-	// no extra headers).
-	resp, err := m.provider.doRequest(ctx, path, reqBody, nil)
+	resp, err := m.provider.doRequest(ctx, path, reqBody, call.Headers)
 	if err != nil {
 		return nil, err
 	}

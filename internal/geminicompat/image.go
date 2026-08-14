@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/internal/imagesniff"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -91,6 +92,7 @@ func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall
 	if err := m.cfg.Authorize(ctx, httpReq); err != nil {
 		return nil, fmt.Errorf("%s: authorize request: %w", m.cfg.Name, err)
 	}
+	httpheader.Apply(httpReq, call.Headers, m.cfg.authHeaderName())
 
 	resp, err := m.cfg.client().Do(httpReq)
 	if err != nil {

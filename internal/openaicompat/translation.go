@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/internal/multipartutil"
 	"github.com/azrtydxb/go-ai-sdk/internal/transcribeutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
@@ -101,6 +102,7 @@ func (m *translationModel) Translate(ctx context.Context, call provider.Translat
 	}
 	httpReq.Header.Set("Content-Type", mw.FormDataContentType())
 	m.cfg.setAuthHeader(httpReq)
+	httpheader.Apply(httpReq, call.Headers, m.cfg.authHeaderName())
 
 	resp, err := m.cfg.client().Do(httpReq)
 	if err != nil {

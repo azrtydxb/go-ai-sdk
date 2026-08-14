@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -124,6 +125,7 @@ func (m *embeddingModel) EmbedCall(ctx context.Context, call provider.EmbeddingC
 	if err := m.p.authorize(ctx, httpReq); err != nil {
 		return nil, fmt.Errorf("vertex: authorize request: %w", err)
 	}
+	httpheader.Apply(httpReq, call.Headers, "Authorization")
 
 	client := m.p.httpClient
 	if client == nil {
