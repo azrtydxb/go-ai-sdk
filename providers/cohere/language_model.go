@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/internal/sse"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -48,12 +49,7 @@ func (m *languageModel) doRequest(ctx context.Context, req chatRequest, provider
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set(cohereAuthHeader, "Bearer "+m.provider.apiKey)
-	for k, v := range headers {
-		if strings.EqualFold(k, cohereAuthHeader) {
-			continue
-		}
-		httpReq.Header.Set(k, v)
-	}
+	httpheader.Apply(httpReq, headers, cohereAuthHeader)
 
 	return m.provider.client().Do(httpReq)
 }

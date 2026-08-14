@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/internal/sse"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -41,7 +42,7 @@ func (m *languageModel) doRequest(ctx context.Context, url string, body []byte, 
 	if err := m.cfg.Authorize(ctx, httpReq); err != nil {
 		return nil, fmt.Errorf("%s: authorize request: %w", m.cfg.Name, err)
 	}
-	applyExtraHeaders(httpReq, headers, m.cfg.authHeaderName())
+	httpheader.Apply(httpReq, headers, m.cfg.authHeaderName())
 
 	return m.cfg.client().Do(httpReq)
 }

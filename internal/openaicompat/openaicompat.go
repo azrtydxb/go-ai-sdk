@@ -6,7 +6,6 @@ package openaicompat
 
 import (
 	"net/http"
-	"strings"
 )
 
 // Config parameterizes an OpenAI-compatible provider.
@@ -64,17 +63,4 @@ func (c Config) authHeaderName() string {
 		return c.APIKeyHeader
 	}
 	return "Authorization"
-}
-
-// applyExtraHeaders sets each entry of headers on req, skipping any entry
-// whose key case-insensitively matches authHeaderName — the caller must not
-// be able to override the provider's own authentication header via
-// provider.Call.Headers.
-func applyExtraHeaders(req *http.Request, headers map[string]string, authHeaderName string) {
-	for k, v := range headers {
-		if strings.EqualFold(k, authHeaderName) {
-			continue
-		}
-		req.Header.Set(k, v)
-	}
 }

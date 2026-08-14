@@ -79,6 +79,11 @@ const bedrockAuthHeader = "Authorization"
 // passes nil headers — extra headers are not implemented on the embedding
 // path this wave).
 //
+// Unlike every other provider (which apply extra headers via the shared
+// internal/httpheader.Apply helper), bedrock cannot use that helper directly
+// because SigV4 signing requires headers to be split into two groups
+// depending on whether they participate in the signature — see below.
+//
 // headers entries are split by whether they participate in SigV4 signing:
 // an entry whose key case-insensitively starts with "x-amz-" is set on the
 // request BEFORE signing, so sigv4.Sign includes it in the canonical
