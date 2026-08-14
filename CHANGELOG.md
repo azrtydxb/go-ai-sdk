@@ -8,7 +8,7 @@ once it reaches 1.0.
 
 ## [Unreleased]
 
-## v0.4.0 (unreleased)
+## v0.4.0 (2026-08-14)
 
 A follow-up wave closing every item carried in v0.3.0's Notes section, plus
 one item from the v0.2.1 hardening baseline: `Call.Headers`'s reach
@@ -1043,7 +1043,8 @@ smoke-tested against live APIs yet (see the
 - [Migrating from the Vercel AI SDK](docs/migrating-from-vercel-ai-sdk.md)
   and [Architecture](docs/architecture.md).
 
-[Unreleased]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.1...v0.2.2
