@@ -45,6 +45,26 @@ func TestGenerateImageHappyPath(t *testing.T) {
 	}
 }
 
+func TestGenerateImageHeaders(t *testing.T) {
+	m := &aitest.MockImageModel{Response: &provider.ImageResponse{
+		Images: []provider.GeneratedImage{{Data: []byte("img1"), MediaType: "image/png"}},
+	}}
+	_, err := GenerateImage(t.Context(), GenerateImageOpts{
+		Model:   m,
+		Prompt:  "a cat",
+		Headers: map[string]string{"x-request-id": "abc123"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Calls) != 1 {
+		t.Fatalf("calls = %d, want 1", len(m.Calls))
+	}
+	if got := m.Calls[0].Headers; got["x-request-id"] != "abc123" {
+		t.Fatalf("call.Headers = %+v, want x-request-id=abc123", got)
+	}
+}
+
 func TestGenerateImageNilModel(t *testing.T) {
 	_, err := GenerateImage(t.Context(), GenerateImageOpts{Prompt: "a cat"})
 	if !errors.Is(err, ErrModelRequired) {

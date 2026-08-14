@@ -23,6 +23,12 @@ type RerankOpts struct {
 	MaxRetries      *int
 	ProviderOptions map[string]any
 
+	// Headers carries extra HTTP headers to send with the request; threaded
+	// through to provider.RerankCall.Headers unchanged — see that field's
+	// doc for precedence (it never overrides the provider's auth header)
+	// and which request paths implement it.
+	Headers map[string]string
+
 	// OnRerankStart, when non-nil, fires once before the first attempt.
 	OnRerankStart func(query string, documents []string)
 	// OnRerankEnd, when non-nil, fires once after the final attempt
@@ -74,6 +80,7 @@ func Rerank(ctx context.Context, opts RerankOpts) (*RerankResult, error) {
 			Documents:       opts.Documents,
 			TopN:            opts.TopN,
 			ProviderOptions: opts.ProviderOptions,
+			Headers:         opts.Headers,
 		})
 	})
 	callErr := translateRetryErr(err)

@@ -23,6 +23,12 @@ type GenerateImageOpts struct {
 	MaxRetries      *int
 	ProviderOptions map[string]any
 
+	// Headers carries extra HTTP headers to send with the request; threaded
+	// through to provider.ImageCall.Headers unchanged — see that field's
+	// doc for precedence (it never overrides the provider's auth header)
+	// and which request paths implement it.
+	Headers map[string]string
+
 	// OnImageStart, when non-nil, fires once before the first attempt of
 	// the underlying provider call.
 	OnImageStart func(call provider.ImageCall)
@@ -61,6 +67,7 @@ func GenerateImage(ctx context.Context, opts GenerateImageOpts) (*GenerateImageR
 		AspectRatio:     opts.AspectRatio,
 		Seed:            opts.Seed,
 		ProviderOptions: opts.ProviderOptions,
+		Headers:         opts.Headers,
 	}
 
 	if opts.OnImageStart != nil {

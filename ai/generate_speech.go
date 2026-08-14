@@ -23,6 +23,12 @@ type GenerateSpeechOpts struct {
 	MaxRetries      *int
 	ProviderOptions map[string]any
 
+	// Headers carries extra HTTP headers to send with the request; threaded
+	// through to provider.SpeechCall.Headers unchanged — see that field's
+	// doc for precedence (it never overrides the provider's auth header)
+	// and which request paths implement it.
+	Headers map[string]string
+
 	// OnSpeechStart, when non-nil, fires once before the first attempt of
 	// the underlying provider call.
 	OnSpeechStart func(call provider.SpeechCall)
@@ -61,6 +67,7 @@ func GenerateSpeech(ctx context.Context, opts GenerateSpeechOpts) (*GenerateSpee
 		Speed:           opts.Speed,
 		Language:        opts.Language,
 		ProviderOptions: opts.ProviderOptions,
+		Headers:         opts.Headers,
 	}
 
 	if opts.OnSpeechStart != nil {

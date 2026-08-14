@@ -23,6 +23,14 @@ type EmbedOpts struct {
 	// provider.EmbeddingModelWithOptions; it is silently ignored otherwise.
 	ProviderOptions map[string]any
 
+	// Headers carries extra HTTP headers to send with the request; threaded
+	// through to provider.EmbeddingCall.Headers unchanged — see that
+	// field's doc for precedence (it never overrides the provider's auth
+	// header) and which request paths implement it. It only has an effect
+	// when Model implements provider.EmbeddingModelWithOptions; it is
+	// silently ignored otherwise.
+	Headers map[string]string
+
 	// OnEmbedStart, when non-nil, fires once before the first attempt of
 	// the underlying provider call.
 	OnEmbedStart func(values []string)
@@ -57,7 +65,7 @@ func Embed(ctx context.Context, opts EmbedOpts) (*EmbedResult, error) {
 	}
 
 	resp, err := retry.Do(ctx, maxRetries, func() (*provider.EmbeddingResponse, error) {
-		return embedCall(ctx, opts.Model, values, opts.ProviderOptions)
+		return embedCall(ctx, opts.Model, values, opts.ProviderOptions, opts.Headers)
 	})
 	callErr := translateRetryErr(err)
 
@@ -89,6 +97,14 @@ type EmbedManyOpts struct {
 	// provider.EmbeddingModelWithOptions; it is silently ignored otherwise.
 	ProviderOptions map[string]any
 
+	// Headers carries extra HTTP headers to send with the request; threaded
+	// through to provider.EmbeddingCall.Headers unchanged — see that
+	// field's doc for precedence (it never overrides the provider's auth
+	// header) and which request paths implement it. It only has an effect
+	// when Model implements provider.EmbeddingModelWithOptions; it is
+	// silently ignored otherwise.
+	Headers map[string]string
+
 	// OnEmbedStart, when non-nil, fires once per underlying provider call —
 	// once per batch, in batch order — before the first attempt of that
 	// batch.
@@ -101,13 +117,14 @@ type EmbedManyOpts struct {
 	OnEmbedEnd func(resp *provider.EmbeddingResponse, err error)
 }
 
-// embedCall calls model.Embed, or model.EmbedCall (with providerOptions)
-// when model implements provider.EmbeddingModelWithOptions and providerOptions is
-// non-empty.
-func embedCall(ctx context.Context, model provider.EmbeddingModel, values []string, providerOptions map[string]any) (*provider.EmbeddingResponse, error) {
-	if len(providerOptions) > 0 {
+// embedCall calls model.Embed, or model.EmbedCall (with providerOptions and
+// headers) when model implements provider.EmbeddingModelWithOptions and
+// either providerOptions or headers is non-empty. A model that does not
+// implement provider.EmbeddingModelWithOptions silently ignores both.
+func embedCall(ctx context.Context, model provider.EmbeddingModel, values []string, providerOptions map[string]any, headers map[string]string) (*provider.EmbeddingResponse, error) {
+	if len(providerOptions) > 0 || len(headers) > 0 {
 		if optioned, ok := model.(provider.EmbeddingModelWithOptions); ok {
-			return optioned.EmbedCall(ctx, provider.EmbeddingCall{Values: values, ProviderOptions: providerOptions})
+			return optioned.EmbedCall(ctx, provider.EmbeddingCall{Values: values, ProviderOptions: providerOptions, Headers: headers})
 		}
 	}
 	return model.Embed(ctx, values)
@@ -162,7 +179,7 @@ func EmbedMany(ctx context.Context, opts EmbedManyOpts) (*EmbedManyResult, error
 		}
 
 		resp, err := retry.Do(ctx, maxRetries, func() (*provider.EmbeddingResponse, error) {
-			return embedCall(ctx, opts.Model, batch, opts.ProviderOptions)
+			return embedCall(ctx, opts.Model, batch, opts.ProviderOptions, opts.Headers)
 		})
 		callErr := translateRetryErr(err)
 

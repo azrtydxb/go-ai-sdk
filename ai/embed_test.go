@@ -49,6 +49,73 @@ func TestEmbedSingle(t *testing.T) {
 	}
 }
 
+// withOptionsEmbedder is a provider.EmbeddingModelWithOptions test double
+// that records the EmbeddingCall it receives via EmbedCall.
+type withOptionsEmbedder struct {
+	calls []provider.EmbeddingCall
+}
+
+func (m *withOptionsEmbedder) Embed(ctx context.Context, values []string) (*provider.EmbeddingResponse, error) {
+	return m.EmbedCall(ctx, provider.EmbeddingCall{Values: values})
+}
+
+func (m *withOptionsEmbedder) EmbedCall(ctx context.Context, call provider.EmbeddingCall) (*provider.EmbeddingResponse, error) {
+	m.calls = append(m.calls, call)
+	embeddings := make([][]float64, len(call.Values))
+	for i := range embeddings {
+		embeddings[i] = []float64{3}
+	}
+	return &provider.EmbeddingResponse{Embeddings: embeddings}, nil
+}
+
+func (m *withOptionsEmbedder) MaxBatchSize() int { return 1000 }
+func (m *withOptionsEmbedder) ModelID() string   { return "with-options" }
+func (m *withOptionsEmbedder) ProviderName() string {
+	return "test"
+}
+
+// TestEmbedHeadersReachEmbedCallEvenWithoutProviderOptions verifies the
+// widened embedCall gate: Headers alone (no ProviderOptions) must route
+// through EmbeddingModelWithOptions.EmbedCall so call.Headers arrives.
+func TestEmbedHeadersReachEmbedCallEvenWithoutProviderOptions(t *testing.T) {
+	m := &withOptionsEmbedder{}
+	_, err := Embed(t.Context(), EmbedOpts{
+		Model:   m,
+		Value:   "abc",
+		Headers: map[string]string{"x-request-id": "abc123"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.calls) != 1 {
+		t.Fatalf("calls = %d, want 1", len(m.calls))
+	}
+	if got := m.calls[0].Headers; got["x-request-id"] != "abc123" {
+		t.Fatalf("call.Headers = %+v, want x-request-id=abc123", got)
+	}
+	if m.calls[0].ProviderOptions != nil {
+		t.Fatalf("ProviderOptions = %+v, want nil (not set)", m.calls[0].ProviderOptions)
+	}
+}
+
+// TestEmbedHeadersSilentlyIgnoredByPlainModel verifies that a plain
+// provider.EmbeddingModel (no EmbedCall support) does not panic or error
+// when Headers is set — it is silently ignored, same as ProviderOptions.
+func TestEmbedHeadersSilentlyIgnoredByPlainModel(t *testing.T) {
+	m := &aitest.MockEmbedder{}
+	res, err := Embed(t.Context(), EmbedOpts{
+		Model:   m,
+		Value:   "abc",
+		Headers: map[string]string{"x-request-id": "abc123"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res == nil {
+		t.Fatal("want non-nil result")
+	}
+}
+
 // fullUsageEmbedder is a provider.EmbeddingModel test double whose Embed
 // returns a Usage with every field populated (including CachedInputTokens
 // and ReasoningTokens), one call per batch, so EmbedMany's per-batch usage

@@ -18,6 +18,12 @@ type GenerateVideoOpts struct {
 	MaxRetries      *int
 	ProviderOptions map[string]any
 
+	// Headers carries extra HTTP headers to send with the request; threaded
+	// through to provider.VideoCall.Headers unchanged — see that field's
+	// doc for precedence (it never overrides the provider's auth header)
+	// and which request paths implement it.
+	Headers map[string]string
+
 	// OnVideoStart, when non-nil, fires once before the first attempt of
 	// the underlying provider call (before job submission, for job-based
 	// providers).
@@ -57,6 +63,7 @@ func GenerateVideo(ctx context.Context, opts GenerateVideoOpts) (*GenerateVideoR
 		Resolution:      opts.Resolution,
 		DurationSec:     opts.DurationSec,
 		ProviderOptions: opts.ProviderOptions,
+		Headers:         opts.Headers,
 	}
 
 	if opts.OnVideoStart != nil {
