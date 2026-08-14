@@ -37,7 +37,7 @@ bracket (see [StreamTranscribe](#streamtranscribe) below).
 Each of the five `Opts` types (plus `ai.EmbedOpts`/`ai.EmbedManyOpts`,
 `ai.RerankOpts`, and `ai.UploadFileOpts`) has a `Headers map[string]string`
 field, matching `ai.GenerateTextOpts.Headers`
-(see [Generating text § Settings](generating-text.md#settings)). Entries are
+(see [Generating text § Additional call settings](generating-text.md#additional-call-settings-topk-penalties-seed-headers)). Entries are
 threaded unchanged to the request's `provider.*Call.Headers` field and
 applied to the outgoing HTTP request AFTER the provider sets its own
 authentication header — a `Headers` entry whose key case-insensitively

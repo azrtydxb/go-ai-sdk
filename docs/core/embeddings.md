@@ -46,7 +46,7 @@ fmt.Println(result.Usage.TotalTokens)
   per batch (see below).
 - **`Headers`** (`map[string]string`) — extra HTTP headers, matching
   `ai.GenerateTextOpts.Headers`
-  (see [Generating text § Settings](generating-text.md#settings)). Only
+  (see [Generating text § Additional call settings](generating-text.md#additional-call-settings-topk-penalties-seed-headers)). Only
   takes effect if `Model` also implements `provider.EmbeddingModelWithOptions`
   (same gate as `ProviderOptions`, see [below](#embeddingmodelwithoptions));
   otherwise silently ignored. `EmbedManyOpts` has the same field, applied
@@ -238,7 +238,7 @@ for _, r := range result.Results {
   provider's rerank request the same way as for language-model calls.
 - **`Headers`** (`map[string]string`) — extra HTTP headers, matching
   `ai.GenerateTextOpts.Headers`
-  (see [Generating text § Settings](generating-text.md#settings)); applied
+  (see [Generating text § Additional call settings](generating-text.md#additional-call-settings-topk-penalties-seed-headers)); applied
   unconditionally (unlike `Embed`'s `EmbeddingModelWithOptions` gate — every
   `provider.RerankingModel` call threads `Headers` through).
 - **`OnRerankStart`/`OnRerankEnd`** — fire once around the retried call,

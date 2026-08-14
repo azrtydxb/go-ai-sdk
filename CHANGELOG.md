@@ -43,7 +43,7 @@ No public API removed.
   silently dropped. `internal/httpheader.Apply` is the one helper now
   shared by every provider's header-application site (previously
   duplicated per language-model provider). See
-  [Generating text § Settings](docs/core/generating-text.md#settings),
+  [Generating text § Additional call settings](docs/core/generating-text.md#additional-call-settings-topk-penalties-seed-headers),
   [Embeddings § Embed](docs/core/embeddings.md#embed), and
   [Media § Headers](docs/core/media.md#headers).
 - **`EmbedManyOpts.Concurrency`** bounds how many batches `EmbedMany` runs
