@@ -240,6 +240,37 @@ func TestGenerateSpeech_ContextCancellation(t *testing.T) {
 	}
 }
 
+func TestGenerateSpeech_RequestHeaders(t *testing.T) {
+	var gotCustom, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCustom = r.Header.Get("X-Custom-Header")
+		gotAuth = r.Header.Get("xi-api-key")
+		w.Header().Set("Content-Type", "audio/mpeg")
+		w.Write([]byte("audio"))
+	}))
+	defer srv.Close()
+
+	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL))
+	m := p.SpeechModel("eleven_multilingual_v2")
+
+	_, err := m.GenerateSpeech(context.Background(), provider.SpeechCall{
+		Text: "hi",
+		Headers: map[string]string{
+			"X-Custom-Header": "custom-value",
+			"xi-api-key":      "should-not-win",
+		},
+	})
+	if err != nil {
+		t.Fatalf("GenerateSpeech: %v", err)
+	}
+	if gotCustom != "custom-value" {
+		t.Errorf("X-Custom-Header = %q, want custom-value", gotCustom)
+	}
+	if gotAuth != "test-key" {
+		t.Errorf("xi-api-key = %q, want test-key (Headers must not clobber auth)", gotAuth)
+	}
+}
+
 // asAPICallError is a small helper to keep error-assertion terse in tests.
 func asAPICallError(err error, target **ai.APICallError) bool {
 	ae, ok := err.(*ai.APICallError)

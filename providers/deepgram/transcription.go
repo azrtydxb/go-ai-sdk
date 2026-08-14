@@ -9,8 +9,13 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
+
+// deepgramAuthHeader is the HTTP header carrying the API key; extra headers
+// from provider.Call.Headers must not be able to override it.
+const deepgramAuthHeader = "Authorization"
 
 // transcriptionModel implements provider.TranscriptionModel against
 // Deepgram's /v1/listen endpoint.
@@ -111,7 +116,8 @@ func (m *transcriptionModel) Transcribe(ctx context.Context, call provider.Trans
 		contentType = "application/octet-stream"
 	}
 	httpReq.Header.Set("Content-Type", contentType)
-	httpReq.Header.Set("Authorization", "Token "+m.provider.apiKey)
+	httpReq.Header.Set(deepgramAuthHeader, "Token "+m.provider.apiKey)
+	httpheader.Apply(httpReq, call.Headers, deepgramAuthHeader)
 
 	resp, err := m.provider.client().Do(httpReq)
 	if err != nil {

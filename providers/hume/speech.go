@@ -10,8 +10,13 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
+
+// humeAuthHeader is the HTTP header carrying the API key; extra headers
+// from provider.SpeechCall.Headers must not be able to override it.
+const humeAuthHeader = "X-Hume-Api-Key"
 
 // speechModel implements provider.SpeechModel against Hume's Octave
 // text-to-speech API.
@@ -160,7 +165,8 @@ func (m *speechModel) GenerateSpeech(ctx context.Context, call provider.SpeechCa
 		return nil, fmt.Errorf("hume: build speech request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("X-Hume-Api-Key", m.provider.apiKey)
+	httpReq.Header.Set(humeAuthHeader, m.provider.apiKey)
+	httpheader.Apply(httpReq, call.Headers, humeAuthHeader)
 
 	resp, err := m.provider.client().Do(httpReq)
 	if err != nil {

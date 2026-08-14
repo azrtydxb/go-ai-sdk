@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
+	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
 func newEmbeddingFixtureServer(t *testing.T, capture *embeddingRequest) *httptest.Server {
@@ -57,6 +58,44 @@ func TestEmbedRequestShape(t *testing.T) {
 	}
 	if len(captured.Texts) != 3 {
 		t.Errorf("texts = %v, want 3 entries", captured.Texts)
+	}
+}
+
+func TestEmbedCallRequestHeaders(t *testing.T) {
+	var gotCustom, gotAuth string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/embed", func(w http.ResponseWriter, r *http.Request) {
+		gotCustom = r.Header.Get("X-Custom-Header")
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		resp := embeddingResponse{
+			Embeddings: embeddingsWire{Float: [][]float64{{0.1, 0.1}}},
+		}
+		json.NewEncoder(w).Encode(resp)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).EmbeddingModel("embed-test")
+
+	optioned, ok := model.(provider.EmbeddingModelWithOptions)
+	if !ok {
+		t.Fatal("embeddingModel does not implement provider.EmbeddingModelWithOptions")
+	}
+	_, err := optioned.EmbedCall(context.Background(), provider.EmbeddingCall{
+		Values: []string{"a"},
+		Headers: map[string]string{
+			"X-Custom-Header": "custom-value",
+			"authorization":   "should-not-win",
+		},
+	})
+	if err != nil {
+		t.Fatalf("EmbedCall: %v", err)
+	}
+	if gotCustom != "custom-value" {
+		t.Errorf("X-Custom-Header = %q, want custom-value", gotCustom)
+	}
+	if gotAuth != "Bearer k" {
+		t.Errorf("Authorization = %q, want Bearer k (Headers must not clobber auth)", gotAuth)
 	}
 }
 

@@ -20,6 +20,10 @@ const (
 	providerName        = "luma"
 	defaultBaseURL      = "https://api.lumalabs.ai"
 	defaultPollInterval = 500 * time.Millisecond
+
+	// lumaAuthHeader is the HTTP header carrying the API key; extra headers
+	// from a call's Headers must not be able to override it.
+	lumaAuthHeader = "Authorization"
 )
 
 // Provider is a Luma Dream Machine-backed provider.ImageModel factory.

@@ -380,3 +380,34 @@ func TestGenerateSpeech_ContextCancellation(t *testing.T) {
 		t.Fatal("expected error from cancelled context")
 	}
 }
+
+func TestGenerateSpeech_RequestHeaders(t *testing.T) {
+	var gotCustom, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCustom = r.Header.Get("X-Custom-Header")
+		gotAuth = r.Header.Get("X-Hume-Api-Key")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"generations":[{"audio":"` + base64.StdEncoding.EncodeToString([]byte("audio")) + `"}]}`))
+	}))
+	defer srv.Close()
+
+	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL))
+	m := p.SpeechModel("some-model")
+
+	_, err := m.GenerateSpeech(context.Background(), provider.SpeechCall{
+		Text: "hi",
+		Headers: map[string]string{
+			"X-Custom-Header": "custom-value",
+			"X-Hume-Api-Key":  "should-not-win",
+		},
+	})
+	if err != nil {
+		t.Fatalf("GenerateSpeech: %v", err)
+	}
+	if gotCustom != "custom-value" {
+		t.Errorf("X-Custom-Header = %q, want custom-value", gotCustom)
+	}
+	if gotAuth != "test-key" {
+		t.Errorf("X-Hume-Api-Key = %q, want test-key (Headers must not clobber auth)", gotAuth)
+	}
+}

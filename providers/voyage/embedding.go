@@ -9,8 +9,14 @@ import (
 	"net/http"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
+
+// voyageAuthHeader is the HTTP header carrying the API key; extra headers
+// from provider.Call.Headers/EmbeddingCall.Headers must not be able to
+// override it.
+const voyageAuthHeader = "Authorization"
 
 type embeddingModel struct {
 	provider *Provider
@@ -48,7 +54,8 @@ func (m *embeddingModel) EmbedCall(ctx context.Context, call provider.EmbeddingC
 		return nil, fmt.Errorf("voyage: build embedding request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+m.provider.apiKey)
+	httpReq.Header.Set(voyageAuthHeader, "Bearer "+m.provider.apiKey)
+	httpheader.Apply(httpReq, call.Headers, voyageAuthHeader)
 
 	resp, err := m.provider.client().Do(httpReq)
 	if err != nil {

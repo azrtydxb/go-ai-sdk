@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -21,9 +22,19 @@ func (m *embeddingModel) ProviderName() string { return providerName }
 func (m *embeddingModel) MaxBatchSize() int    { return embeddingBatch }
 
 func (m *embeddingModel) Embed(ctx context.Context, values []string) (*provider.EmbeddingResponse, error) {
+	return m.EmbedCall(ctx, provider.EmbeddingCall{Values: values})
+}
+
+// EmbedCall implements provider.EmbeddingModelWithOptions.
+func (m *embeddingModel) EmbedCall(ctx context.Context, call provider.EmbeddingCall) (*provider.EmbeddingResponse, error) {
+	values := call.Values
 	reqBody, err := json.Marshal(embeddingRequest{Model: m.modelID, Input: values})
 	if err != nil {
 		return nil, fmt.Errorf("mistral: marshal embedding request: %w", err)
+	}
+	reqBody, err = applyProviderOptions(reqBody, call.ProviderOptions)
+	if err != nil {
+		return nil, fmt.Errorf("mistral: apply provider options: %w", err)
 	}
 
 	url := m.provider.baseURL + "/embeddings"
@@ -32,7 +43,8 @@ func (m *embeddingModel) Embed(ctx context.Context, values []string) (*provider.
 		return nil, fmt.Errorf("mistral: build embedding request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+m.provider.apiKey)
+	httpReq.Header.Set(mistralAuthHeader, "Bearer "+m.provider.apiKey)
+	httpheader.Apply(httpReq, call.Headers, mistralAuthHeader)
 
 	resp, err := m.provider.client().Do(httpReq)
 	if err != nil {

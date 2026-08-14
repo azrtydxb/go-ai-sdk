@@ -442,3 +442,57 @@ func TestGenerateVideos_EmptyCreateIDError(t *testing.T) {
 		t.Errorf("error = %q, want it to mention the missing generation id", err.Error())
 	}
 }
+
+// TestGenerateVideos_RequestHeaders verifies call.Headers reach both the
+// create request and the poll follow-up request.
+func TestGenerateVideos_RequestHeaders(t *testing.T) {
+	var createCustom, createAuth, pollCustom, pollAuth string
+
+	var srv *httptest.Server
+	mux := http.NewServeMux()
+	mux.HandleFunc("/dream-machine/v1/generations", func(w http.ResponseWriter, r *http.Request) {
+		createCustom = r.Header.Get("X-Custom-Header")
+		createAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"gen-1"}`))
+	})
+	mux.HandleFunc("/dream-machine/v1/generations/gen-1", func(w http.ResponseWriter, r *http.Request) {
+		pollCustom = r.Header.Get("X-Custom-Header")
+		pollAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"gen-1","state":"completed","assets":{"video":"` + srv.URL + `/vid.mp4"}}`))
+	})
+	mux.HandleFunc("/vid.mp4", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "video/mp4")
+		w.Write([]byte("mp4data"))
+	})
+	srv = httptest.NewServer(mux)
+	defer srv.Close()
+
+	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
+	m := p.VideoModel("ray-2")
+
+	_, err := m.GenerateVideos(context.Background(), provider.VideoCall{
+		Prompt: "a cat",
+		Headers: map[string]string{
+			"X-Custom-Header": "custom-value",
+			"authorization":   "should-not-win",
+		},
+	})
+	if err != nil {
+		t.Fatalf("GenerateVideos: %v", err)
+	}
+
+	if createCustom != "custom-value" {
+		t.Errorf("create X-Custom-Header = %q, want custom-value", createCustom)
+	}
+	if createAuth != "Bearer test-key" {
+		t.Errorf("create Authorization = %q, want %q", createAuth, "Bearer test-key")
+	}
+	if pollCustom != "custom-value" {
+		t.Errorf("poll X-Custom-Header = %q, want custom-value", pollCustom)
+	}
+	if pollAuth != "Bearer test-key" {
+		t.Errorf("poll Authorization = %q, want %q", pollAuth, "Bearer test-key")
+	}
+}

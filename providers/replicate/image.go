@@ -10,6 +10,7 @@ import (
 	"net/http"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/fetchimage"
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -110,8 +111,9 @@ func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall
 		return nil, fmt.Errorf("replicate: build image request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+m.provider.apiKey)
+	httpReq.Header.Set(replicateAuthHeader, "Bearer "+m.provider.apiKey)
 	httpReq.Header.Set("Prefer", "wait")
+	httpheader.Apply(httpReq, call.Headers, replicateAuthHeader)
 
 	resp, err := m.provider.client().Do(httpReq)
 	if err != nil {

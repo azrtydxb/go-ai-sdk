@@ -10,8 +10,13 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
+
+// prodiaAuthHeader is the HTTP header carrying the API key; extra headers
+// from provider.ImageCall.Headers must not be able to override it.
+const prodiaAuthHeader = "Authorization"
 
 // imageModel implements provider.ImageModel against Prodia's v2
 // synchronous /job endpoint, which returns the generated image bytes
@@ -74,7 +79,8 @@ func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "image/jpeg")
-	httpReq.Header.Set("Authorization", "Bearer "+m.provider.apiKey)
+	httpReq.Header.Set(prodiaAuthHeader, "Bearer "+m.provider.apiKey)
+	httpheader.Apply(httpReq, call.Headers, prodiaAuthHeader)
 
 	resp, err := m.provider.client().Do(httpReq)
 	if err != nil {

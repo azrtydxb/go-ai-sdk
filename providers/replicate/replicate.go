@@ -19,6 +19,10 @@ const (
 	providerName        = "replicate"
 	defaultBaseURL      = "https://api.replicate.com"
 	defaultPollInterval = 500 * time.Millisecond
+
+	// replicateAuthHeader is the HTTP header carrying the API key; extra
+	// headers from a call's Headers must not be able to override it.
+	replicateAuthHeader = "Authorization"
 )
 
 // Provider is a Replicate-backed provider.ImageModel factory.

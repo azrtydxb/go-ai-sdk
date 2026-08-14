@@ -215,3 +215,34 @@ func TestGenerateImages_ContextCancellation(t *testing.T) {
 		t.Fatal("expected error for cancelled context")
 	}
 }
+
+func TestGenerateImages_RequestHeaders(t *testing.T) {
+	var gotCustom, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCustom = r.Header.Get("X-Custom-Header")
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("bytes"))
+	}))
+	defer srv.Close()
+
+	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL))
+	m := p.ImageModel("inference.flux.schnell.txt2img")
+
+	_, err := m.GenerateImages(context.Background(), provider.ImageCall{
+		Prompt: "a cat",
+		Headers: map[string]string{
+			"X-Custom-Header": "custom-value",
+			"authorization":   "should-not-win",
+		},
+	})
+	if err != nil {
+		t.Fatalf("GenerateImages: %v", err)
+	}
+	if gotCustom != "custom-value" {
+		t.Errorf("X-Custom-Header = %q, want custom-value", gotCustom)
+	}
+	if gotAuth != "Bearer test-key" {
+		t.Errorf("Authorization = %q, want %q (Headers must not clobber auth)", gotAuth, "Bearer test-key")
+	}
+}

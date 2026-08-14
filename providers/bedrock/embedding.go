@@ -63,6 +63,14 @@ func (m *embeddingModel) EmbedCall(ctx context.Context, call provider.EmbeddingC
 	if err != nil {
 		return nil, fmt.Errorf("bedrock: marshal embedding request: %w", err)
 	}
+	// Titan Embed v2 accepts optional top-level fields beyond inputText
+	// (e.g. "dimensions", "normalize"); applyProviderOptions's plain
+	// top-level JSON merge — the same helper the Converse/ConverseStream
+	// language paths use — is wire-compatible here too.
+	reqBody, err = applyProviderOptions(reqBody, call.ProviderOptions)
+	if err != nil {
+		return nil, fmt.Errorf("bedrock: apply provider options: %w", err)
+	}
 
 	path := m.provider.modelPath(m.modelID, "/invoke")
 	resp, err := m.provider.doRequest(ctx, path, reqBody, call.Headers)

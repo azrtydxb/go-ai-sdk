@@ -8,8 +8,13 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
+
+// mixedbreadAuthHeader is the HTTP header carrying the API key; extra
+// headers from provider.RerankCall.Headers must not be able to override it.
+const mixedbreadAuthHeader = "Authorization"
 
 // rerankRequest is Mixedbread's rerank request shape. Note the field names
 // differ from Cohere/Voyage: "input" (not "documents") and "return_input"
@@ -70,7 +75,8 @@ func (m *rerankingModel) Rerank(ctx context.Context, call provider.RerankCall) (
 		return nil, fmt.Errorf("mixedbread: build rerank request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+m.provider.apiKey)
+	httpReq.Header.Set(mixedbreadAuthHeader, "Bearer "+m.provider.apiKey)
+	httpheader.Apply(httpReq, call.Headers, mixedbreadAuthHeader)
 
 	resp, err := m.provider.client().Do(httpReq)
 	if err != nil {

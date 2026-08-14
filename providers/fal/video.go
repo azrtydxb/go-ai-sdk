@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/fetchmedia"
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -74,7 +75,8 @@ func (m *videoModel) GenerateVideos(ctx context.Context, call provider.VideoCall
 		return nil, fmt.Errorf("fal: build video request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Key "+m.provider.apiKey)
+	httpReq.Header.Set(falAuthHeader, "Key "+m.provider.apiKey)
+	httpheader.Apply(httpReq, call.Headers, falAuthHeader)
 
 	resp, err := m.provider.client().Do(httpReq)
 	if err != nil {

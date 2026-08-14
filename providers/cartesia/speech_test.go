@@ -320,3 +320,35 @@ func TestGenerateSpeech_ContextCancellation(t *testing.T) {
 		t.Fatal("expected error from cancelled context")
 	}
 }
+
+func TestGenerateSpeech_RequestHeaders(t *testing.T) {
+	var gotCustom, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCustom = r.Header.Get("X-Custom-Header")
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "audio/mpeg")
+		w.Write([]byte("audio"))
+	}))
+	defer srv.Close()
+
+	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL))
+	m := p.SpeechModel("sonic-2")
+
+	_, err := m.GenerateSpeech(context.Background(), provider.SpeechCall{
+		Text:  "hi",
+		Voice: "v1",
+		Headers: map[string]string{
+			"X-Custom-Header": "custom-value",
+			"authorization":   "should-not-win",
+		},
+	})
+	if err != nil {
+		t.Fatalf("GenerateSpeech: %v", err)
+	}
+	if gotCustom != "custom-value" {
+		t.Errorf("X-Custom-Header = %q, want custom-value", gotCustom)
+	}
+	if gotAuth != "Bearer test-key" {
+		t.Errorf("Authorization = %q, want %q (Headers must not clobber auth)", gotAuth, "Bearer test-key")
+	}
+}

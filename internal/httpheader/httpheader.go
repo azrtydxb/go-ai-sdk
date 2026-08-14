@@ -15,10 +15,19 @@ import (
 // extra headers. An empty authHeaderName means no key is skipped. A nil (or
 // empty) headers map is a no-op.
 func Apply(req *http.Request, headers map[string]string, authHeaderName string) {
+	ApplyToHeader(req.Header, headers, authHeaderName)
+}
+
+// ApplyToHeader is Apply's underlying implementation, operating directly on
+// an http.Header rather than an *http.Request — for callers building a
+// handshake header set (e.g. a WebSocket dial's DialOptions.Header) rather
+// than an *http.Request. Same contract as Apply: entries are set via
+// h.Set, skipping any key that case-insensitively matches authHeaderName.
+func ApplyToHeader(h http.Header, headers map[string]string, authHeaderName string) {
 	for k, v := range headers {
 		if authHeaderName != "" && strings.EqualFold(k, authHeaderName) {
 			continue
 		}
-		req.Header.Set(k, v)
+		h.Set(k, v)
 	}
 }

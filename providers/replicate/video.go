@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/fetchmedia"
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/internal/transcribeutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -56,8 +57,9 @@ func (m *videoModel) GenerateVideos(ctx context.Context, call provider.VideoCall
 		return nil, fmt.Errorf("replicate: build video request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+m.provider.apiKey)
+	httpReq.Header.Set(replicateAuthHeader, "Bearer "+m.provider.apiKey)
 	httpReq.Header.Set("Prefer", "wait")
+	httpheader.Apply(httpReq, call.Headers, replicateAuthHeader)
 
 	resp, err := m.provider.client().Do(httpReq)
 	if err != nil {
@@ -79,7 +81,7 @@ func (m *videoModel) GenerateVideos(ctx context.Context, call provider.VideoCall
 		return nil, fmt.Errorf("replicate: decode video response: %w", err)
 	}
 
-	wire, body, err = m.resolvePrediction(ctx, wire, body)
+	wire, body, err = m.resolvePrediction(ctx, wire, body, call.Headers)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +121,7 @@ func (m *videoModel) GenerateVideos(ctx context.Context, call provider.VideoCall
 // retry, creating a second (paid) prediction instead of just waiting
 // longer for the first one. Polling mirrors providers/luma's discipline:
 // a ctx-aware sleep between polls, terminal on succeeded/failed/canceled.
-func (m *videoModel) resolvePrediction(ctx context.Context, wire predictionResponse, body []byte) (predictionResponse, []byte, error) {
+func (m *videoModel) resolvePrediction(ctx context.Context, wire predictionResponse, body []byte, headers map[string]string) (predictionResponse, []byte, error) {
 	for {
 		switch wire.Status {
 		case "succeeded":
@@ -140,7 +142,7 @@ func (m *videoModel) resolvePrediction(ctx context.Context, wire predictionRespo
 		}
 
 		var err error
-		wire, body, err = m.fetchPrediction(ctx, wire.ID)
+		wire, body, err = m.fetchPrediction(ctx, wire.ID, headers)
 		if err != nil {
 			return predictionResponse{}, nil, err
 		}
@@ -148,13 +150,14 @@ func (m *videoModel) resolvePrediction(ctx context.Context, wire predictionRespo
 }
 
 // fetchPrediction issues one GET /v1/predictions/{id} poll request.
-func (m *videoModel) fetchPrediction(ctx context.Context, id string) (predictionResponse, []byte, error) {
+func (m *videoModel) fetchPrediction(ctx context.Context, id string, headers map[string]string) (predictionResponse, []byte, error) {
 	reqURL := m.provider.baseURL + "/v1/predictions/" + id
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		return predictionResponse{}, nil, fmt.Errorf("replicate: build poll request: %w", err)
 	}
-	httpReq.Header.Set("Authorization", "Bearer "+m.provider.apiKey)
+	httpReq.Header.Set(replicateAuthHeader, "Bearer "+m.provider.apiKey)
+	httpheader.Apply(httpReq, headers, replicateAuthHeader)
 
 	resp, err := m.provider.client().Do(httpReq)
 	if err != nil {

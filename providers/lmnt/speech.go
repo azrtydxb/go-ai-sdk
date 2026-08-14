@@ -8,11 +8,16 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
 // defaultVoice is LMNT's documented default voice.
 const defaultVoice = "leah"
+
+// lmntAuthHeader is the HTTP header carrying the API key; extra headers
+// from provider.SpeechCall.Headers must not be able to override it.
+const lmntAuthHeader = "X-API-Key"
 
 // speechModel implements provider.SpeechModel against the LMNT
 // text-to-speech API.
@@ -81,7 +86,8 @@ func (m *speechModel) GenerateSpeech(ctx context.Context, call provider.SpeechCa
 		return nil, fmt.Errorf("lmnt: build speech request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("X-API-Key", m.provider.apiKey)
+	httpReq.Header.Set(lmntAuthHeader, m.provider.apiKey)
+	httpheader.Apply(httpReq, call.Headers, lmntAuthHeader)
 
 	resp, err := m.provider.client().Do(httpReq)
 	if err != nil {

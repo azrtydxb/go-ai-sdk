@@ -442,3 +442,56 @@ func TestTranscribe_MediaTypeCRLFRejected(t *testing.T) {
 		t.Error("Transcribe: request was sent despite invalid MediaType")
 	}
 }
+
+// TestTranscribe_RequestHeaders verifies call.Headers reach the upload,
+// create, and poll requests alike.
+func TestTranscribe_RequestHeaders(t *testing.T) {
+	var uploadCustom, uploadAuth, createCustom, createAuth, pollCustom, pollAuth string
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/upload", func(w http.ResponseWriter, r *http.Request) {
+		uploadCustom = r.Header.Get("X-Custom-Header")
+		uploadAuth = r.Header.Get("x-gladia-key")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"audio_url":"https://cdn.gladia.test/audio123"}`))
+	})
+	mux.HandleFunc("/v2/pre-recorded", func(w http.ResponseWriter, r *http.Request) {
+		createCustom = r.Header.Get("X-Custom-Header")
+		createAuth = r.Header.Get("x-gladia-key")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"job-1"}`))
+	})
+	mux.HandleFunc("/v2/pre-recorded/job-1", func(w http.ResponseWriter, r *http.Request) {
+		pollCustom = r.Header.Get("X-Custom-Header")
+		pollAuth = r.Header.Get("x-gladia-key")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"job-1","status":"done","result":{"transcription":{"full_transcript":"hi"}}}`))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
+	model := p.TranscriptionModel("solaria-1")
+
+	_, err := model.Transcribe(context.Background(), provider.TranscriptionCall{
+		Audio:     []byte("audio"),
+		MediaType: "audio/mpeg",
+		Headers: map[string]string{
+			"X-Custom-Header": "custom-value",
+			"x-gladia-key":    "should-not-win",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Transcribe: %v", err)
+	}
+
+	if uploadCustom != "custom-value" || uploadAuth != "test-key" {
+		t.Errorf("upload headers: custom=%q auth=%q", uploadCustom, uploadAuth)
+	}
+	if createCustom != "custom-value" || createAuth != "test-key" {
+		t.Errorf("create headers: custom=%q auth=%q", createCustom, createAuth)
+	}
+	if pollCustom != "custom-value" || pollAuth != "test-key" {
+		t.Errorf("poll headers: custom=%q auth=%q", pollCustom, pollAuth)
+	}
+}
