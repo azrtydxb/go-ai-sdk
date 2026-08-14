@@ -715,6 +715,10 @@ func runApprovalAwareToolCalls(ctx context.Context, opts GenerateTextOpts, tools
 		}
 		required, apErr := recoverApprovalRequiredPanic(c.Name, func() bool { return ar.ApprovalRequired(ctx, c.Args) })
 		if apErr != nil {
+			// Deliberate: if this same batch also ends up with len(pending)
+			// > 0 from some OTHER call, this call's recorded outcome is
+			// dropped for this round exactly like every other call in a
+			// pending batch (nothing executes) — see TestApprovalRequiredPanicWithBatchPendingDropsBothOutcomesForRound.
 			var te *ToolExecutionError
 			errors.As(apErr, &te)
 			if panicErrs == nil {

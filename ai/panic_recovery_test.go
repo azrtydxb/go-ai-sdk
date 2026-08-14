@@ -144,3 +144,51 @@ func TestApprovalRequiredPanicRecoveredBatchMatesUnaffected(t *testing.T) {
 		t.Fatal("plain tool should have executed despite panicky's approval check panicking")
 	}
 }
+
+// TestApprovalRequiredPanicWithBatchPendingDropsBothOutcomesForRound pins the
+// deliberate interaction between an ApprovalRequired panic and ordinary
+// batch-pending atomicity: when one call's ApprovalRequired panics AND
+// another call in the SAME batch independently goes pending (no decision
+// available), the whole batch is reported as pending — nothing executes, and
+// the panicked call is NOT separately reported as a *ToolExecutionError for
+// this round (it isn't in PendingApprovals either, since its own approval
+// check never resolved to a decision). This matches ordinary batch atomicity
+// (see TestMixedBatchApprovalAndPlainToolSuspendsEverything): a resume with
+// a decision for the pending call re-evaluates the whole batch, including
+// panicky's ApprovalRequired, from scratch. This test locks the CURRENT
+// behavior so it isn't changed by accident later.
+func TestApprovalRequiredPanicWithBatchPendingDropsBothOutcomesForRound(t *testing.T) {
+	var panickyExecuted, guardedExecuted bool
+	panicky := &handRolledApprovalPanicTool{handRolledPanicTool: handRolledPanicTool{name: "panicky"}, executed: &panickyExecuted}
+	guarded := RequireApproval(NewTool("guarded", "", func(_ context.Context, a weatherArgs) (any, error) {
+		guardedExecuted = true
+		return "r", nil
+	}))
+
+	m := &aitest.MockModel{Responses: []*provider.Response{
+		{
+			Content: []provider.ContentPart{
+				provider.ToolCallPart{ID: "c1", Name: "panicky", Args: []byte(`{}`)},
+				provider.ToolCallPart{ID: "c2", Name: "guarded", Args: []byte(`{"city":"Ghent"}`)},
+			},
+			FinishReason: provider.FinishToolCalls,
+		},
+	}}
+	res, err := GenerateText(t.Context(), GenerateTextOpts{
+		Model: m, Prompt: "x", Tools: []Tool{panicky, guarded}, MaxSteps: 3,
+		// No ApproveToolCall, no Approvals: c2 has no way to get a decision,
+		// so the batch goes pending.
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if panickyExecuted || guardedExecuted {
+		t.Fatal("neither tool should execute when the batch has a pending call")
+	}
+	if len(res.PendingApprovals) != 1 || res.PendingApprovals[0].Call.ID != "c2" {
+		t.Fatalf("PendingApprovals = %+v, want only c2 pending (c1's panic outcome dropped for this round)", res.PendingApprovals)
+	}
+	if len(res.Steps) != 1 || res.Steps[0].ToolResults != nil {
+		t.Fatalf("Steps = %+v, want one tool-result-less step (nothing executed, no error reported either)", res.Steps)
+	}
+}
