@@ -333,6 +333,20 @@ func embedManyConcurrent(ctx context.Context, opts EmbedManyOpts, batchSize, max
 
 	wg.Wait()
 
+	// If the parent context was cancelled (or deadline-exceeded) after every
+	// dispatched batch had already succeeded, firstErr is still nil here even
+	// though not all Values were embedded — the dispatch loop above breaks
+	// out of the for-range without processing the remaining batches. Without
+	// this check, EmbedMany would silently return a truncated Embeddings
+	// slice with a nil error. Surface the parent ctx's error the same way
+	// the sequential path does (retry.Do returns ctx.Err() unwrapped, and
+	// translateRetryErr passes it through unchanged).
+	if firstErr == nil {
+		if cerr := ctx.Err(); cerr != nil {
+			firstErr = translateRetryErr(cerr)
+		}
+	}
+
 	if firstErr != nil {
 		return nil, firstErr
 	}

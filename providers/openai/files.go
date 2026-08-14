@@ -11,6 +11,7 @@ import (
 	"net/textproto"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/internal/multipartutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -140,6 +141,7 @@ func (s *fileStore) UploadFile(ctx context.Context, call provider.FileUploadCall
 	}
 	httpReq.Header.Set("Content-Type", mw.FormDataContentType())
 	httpReq.Header.Set("Authorization", "Bearer "+s.provider.apiKey)
+	httpheader.Apply(httpReq, call.Headers, openaiAuthHeader)
 
 	resp, err := s.client().Do(httpReq)
 	if err != nil {

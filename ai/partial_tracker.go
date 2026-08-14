@@ -134,6 +134,13 @@ func stripPartialFences(s string) string {
 	}
 	t = strings.TrimPrefix(t, "```")
 	t = strings.TrimPrefix(t, "json")
+	// This TrimSuffix can't distinguish a genuine closing fence from a
+	// "```" that is string CONTENT inside the still-streaming document
+	// (e.g. the model emitting a code block within its JSON output): a
+	// mid-stream partial ending in such content gets its trailing "```"
+	// mis-stripped for that one delta. It self-corrects on the next delta
+	// once more content arrives after the embedded "```", since the suffix
+	// no longer matches.
 	t = strings.TrimSuffix(strings.TrimSpace(t), "```")
 	return strings.TrimSpace(t)
 }

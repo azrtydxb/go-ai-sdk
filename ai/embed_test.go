@@ -525,3 +525,92 @@ func TestEmbedManyConcurrencyCallbacksFireOncePerBatch(t *testing.T) {
 		t.Fatalf("OnEmbedEnd calls = %d, want %d", got, len(values))
 	}
 }
+
+// TestEmbedManyConcurrencyPreCancelledContextReturnsError is a permanent
+// regression test for the bug where embedManyConcurrent's dispatch loop
+// breaking on an already-cancelled parent context left firstErr nil (no
+// batch was ever dispatched to set it), so EmbedMany silently returned an
+// empty Embeddings slice with a nil error instead of surfacing the
+// cancellation. A pre-cancelled context must return a non-nil error and
+// must never produce a "successful" truncated/empty result.
+func TestEmbedManyConcurrencyPreCancelledContextReturnsError(t *testing.T) {
+	m := &aitest.MockEmbedder{BatchSize: 1}
+	values := []string{"a", "bb", "ccc", "dddd", "eeeee", "ffffff"}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	res, err := EmbedMany(ctx, EmbedManyOpts{Model: m, Values: values, Concurrency: 2})
+	if err == nil {
+		t.Fatalf("err = nil, res = %+v, want a non-nil error (pre-cancelled context must not yield a silent empty success)", res)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled (or wrapping it)", err)
+	}
+	if res != nil {
+		t.Fatalf("res = %+v, want nil on error", res)
+	}
+}
+
+// slowEmbedder is a provider.EmbeddingModel test double (batch size 1) that
+// always succeeds, but sleeps briefly before returning so a test can cancel
+// the context mid-flight, after some batches have already completed
+// successfully but before all of them have.
+type slowEmbedder struct {
+	delay time.Duration
+	calls int32
+}
+
+func (m *slowEmbedder) Embed(ctx context.Context, values []string) (*provider.EmbeddingResponse, error) {
+	atomic.AddInt32(&m.calls, 1)
+	select {
+	case <-time.After(m.delay):
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	embeddings := make([][]float64, len(values))
+	for i := range values {
+		embeddings[i] = []float64{1}
+	}
+	return &provider.EmbeddingResponse{Embeddings: embeddings, Usage: provider.Usage{TotalTokens: len(values)}}, nil
+}
+
+func (m *slowEmbedder) MaxBatchSize() int    { return 1 }
+func (m *slowEmbedder) ModelID() string      { return "slow" }
+func (m *slowEmbedder) ProviderName() string { return "test" }
+
+// TestEmbedManyConcurrencyMidStreamCancelReturnsError is a permanent
+// regression test for the bug where cancelling the PARENT context after some
+// (but not all) batches had already completed successfully caused
+// embedManyConcurrent to return a nil error alongside a truncated
+// Embeddings slice — because the successful batches never set firstErr, and
+// the dispatch loop breaking on cancellation left the remaining batches
+// simply missing rather than erroring. EmbedMany must never return a nil
+// error together with a short/incomplete result.
+func TestEmbedManyConcurrencyMidStreamCancelReturnsError(t *testing.T) {
+	m := &slowEmbedder{delay: 20 * time.Millisecond}
+	values := []string{"a", "b", "c", "d", "e", "f"}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	// Cancel shortly after the first wave of batches (Concurrency: 2) would
+	// have completed, but before the whole set has, so at least one batch
+	// succeeds while others are still outstanding.
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		cancel()
+	}()
+
+	res, err := EmbedMany(ctx, EmbedManyOpts{Model: m, Values: values, Concurrency: 2})
+	if err == nil {
+		t.Fatalf("err = nil, res = %+v, want a non-nil error (mid-stream cancel must not yield a silent short success)", res)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled (or wrapping it)", err)
+	}
+	if res != nil {
+		t.Fatalf("res = %+v, want nil on error", res)
+	}
+	if calls := atomic.LoadInt32(&m.calls); calls >= int32(len(values)) {
+		t.Fatalf("calls = %d, want < %d (remaining batches must be cancelled, not all dispatched)", calls, len(values))
+	}
+}

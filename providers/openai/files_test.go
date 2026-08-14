@@ -21,6 +21,7 @@ type filesFixture struct {
 	uploadPurpose     string
 	uploadData        []byte
 	uploadContentType string
+	uploadCustom      string
 
 	deleteMethod string
 	deletePath   string
@@ -36,6 +37,7 @@ func newFilesFixture(t *testing.T, uploadStatus int, uploadBody string, deleteSt
 			return
 		}
 		f.uploadAuth = r.Header.Get("Authorization")
+		f.uploadCustom = r.Header.Get("X-Custom-Header")
 		_, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 		if err == nil {
 			mr := multipart.NewReader(r.Body, params["boundary"])
@@ -187,6 +189,33 @@ func TestFilesUploadFileCtxCanceled(t *testing.T) {
 	_, err := store.UploadFile(ctx, provider.FileUploadCall{Data: []byte("d"), Filename: "a"})
 	if err == nil {
 		t.Fatal("UploadFile: want error for canceled context")
+	}
+}
+
+// TestFilesUploadFileHeadersApplied covers Fix wave MINOR/CRITICAL 2:
+// FileUploadCall.Headers must reach the wire on the upload request, and a
+// caller-supplied Authorization entry must not override the provider's own
+// bearer auth header.
+func TestFilesUploadFileHeadersApplied(t *testing.T) {
+	srv, f := newFilesFixture(t, http.StatusOK, `{"id":"file-1","filename":"a","bytes":1}`, http.StatusOK, "")
+	store := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Files()
+
+	_, err := store.UploadFile(context.Background(), provider.FileUploadCall{
+		Data:     []byte("a"),
+		Filename: "a",
+		Headers: map[string]string{
+			"X-Custom-Header": "custom-value",
+			"Authorization":   "Bearer attacker-supplied",
+		},
+	})
+	if err != nil {
+		t.Fatalf("UploadFile: %v", err)
+	}
+	if f.uploadCustom != "custom-value" {
+		t.Errorf("X-Custom-Header = %q, want custom-value", f.uploadCustom)
+	}
+	if f.uploadAuth != "Bearer k" {
+		t.Errorf("Authorization = %q, want Bearer k (Headers must not override auth)", f.uploadAuth)
 	}
 }
 

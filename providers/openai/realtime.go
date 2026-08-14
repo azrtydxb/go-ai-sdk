@@ -32,6 +32,12 @@ type RealtimeConfig struct {
 	ProviderOptions map[string]any
 }
 
+// RealtimeConfig has no Headers field: unlike the nine call structs in
+// package provider, this path has no per-call HTTP header escape hatch —
+// RealtimeSession dials a WebSocket handshake outside that Headers
+// contract. Callers needing per-request headers on the dial must go via
+// Provider.WithHTTPClient or a custom dialer instead.
+
 // RealtimeSession is an open OpenAI Realtime API voice session over a
 // WebSocket connection, as a thin wrapper over the shared wsstream
 // machinery (dial/readLoop/Close/Err/Events).
