@@ -8,6 +8,13 @@ once it reaches 1.0.
 
 ## [Unreleased]
 
+## v0.4.1 (2026-08-14)
+
+A repo-wide de-duplication and simplification pass (ponytail audit):
+~1,900 production lines deleted with no public API changes and no
+behavior changes beyond the two noted below (tool-message `name`,
+transcription upload filenames).
+
 ### Changed
 
 - **Repo-wide de-duplication pass (~2,300 lines deleted, no public API
