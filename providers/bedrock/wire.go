@@ -168,25 +168,7 @@ type wireUsage struct {
 	TotalTokens  int `json:"totalTokens"`
 }
 
-// ---- Error wire type ----
-
-type wireError struct {
-	Message string `json:"message"`
-}
-
-func errorMessage(body []byte) string {
-	var we wireError
-	if err := json.Unmarshal(body, &we); err == nil && we.Message != "" {
-		return we.Message
-	}
-	return string(body)
-}
-
 // ---- Streaming event payload wire types ----
-
-type eventMessageStart struct {
-	Role string `json:"role"`
-}
 
 type eventContentBlockStart struct {
 	ContentBlockIndex int                         `json:"contentBlockIndex"`
@@ -251,6 +233,11 @@ type eventException struct {
 // the Converse API's additionalModelRequestFields wholesale. Returns
 // reqBytes unchanged (no unmarshal/marshal round trip) when there's
 // nothing to merge, which is the common case.
+//
+// Deliberately not delegating to providerutil.ApplyProviderOptions: the
+// additionalModelRequestFields sub-merge needs the decoded request map,
+// so delegating only the plain top-level path would keep this whole
+// function anyway and split the merge across two decode round trips.
 func applyProviderOptions(reqBytes []byte, providerOptions map[string]any) ([]byte, error) {
 	opts, _ := providerOptions["bedrock"].(map[string]any)
 	if len(opts) == 0 {

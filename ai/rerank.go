@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/azrtydxb/go-ai-sdk/internal/retry"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -65,35 +64,26 @@ func Rerank(ctx context.Context, opts RerankOpts) (*RerankResult, error) {
 		return nil, ErrDocumentsRequired
 	}
 
+	call := provider.RerankCall{
+		Query:           opts.Query,
+		Documents:       opts.Documents,
+		TopN:            opts.TopN,
+		ProviderOptions: opts.ProviderOptions,
+		Headers:         opts.Headers,
+	}
+
+	// OnRerankStart takes (query, documents) rather than the call struct, so
+	// adapt it to mediaCall's onStart shape. OnRerankEnd sees the SAME error
+	// the caller gets (the translated *RetryError on retry exhaustion) — not
+	// the raw *retry.ExhaustedError from retry.Do.
+	var onStart func(provider.RerankCall)
 	if opts.OnRerankStart != nil {
-		opts.OnRerankStart(opts.Query, opts.Documents)
+		onStart = func(c provider.RerankCall) { opts.OnRerankStart(c.Query, c.Documents) }
 	}
 
-	maxRetries := defaultMaxRetries
-	if opts.MaxRetries != nil {
-		maxRetries = *opts.MaxRetries
-	}
-
-	resp, err := retry.Do(ctx, maxRetries, func() (*provider.RerankResponse, error) {
-		return opts.Model.Rerank(ctx, provider.RerankCall{
-			Query:           opts.Query,
-			Documents:       opts.Documents,
-			TopN:            opts.TopN,
-			ProviderOptions: opts.ProviderOptions,
-			Headers:         opts.Headers,
-		})
-	})
-	callErr := translateRetryErr(err)
-
-	if opts.OnRerankEnd != nil {
-		// OnRerankEnd sees the SAME error the caller gets (callErr, the
-		// translated *RetryError on retry exhaustion) — not the raw
-		// *retry.ExhaustedError from retry.Do.
-		opts.OnRerankEnd(resp, callErr)
-	}
-
-	if callErr != nil {
-		return nil, callErr
+	resp, err := mediaCall(ctx, opts.MaxRetries, call, onStart, opts.Model.Rerank, opts.OnRerankEnd)
+	if err != nil {
+		return nil, err
 	}
 
 	results := make([]RankedDocument, 0, len(resp.Results))

@@ -135,13 +135,13 @@ var maxSuccessBodyBytes int64 = 16 << 20
 // read unboundedly, so this is a modest cap rather than maxSuccessBodyBytes.
 const maxDiscardBodyBytes = 64 * 1024
 
-// errTransportClosedBody is returned by readTrackedBody when the transport
-// was already closed before the read could even start (trackBody's
-// closed-check — see its doc for the atomicity rationale). Kept as a
-// package-level sentinel (rather than a fresh errors.New at each call site)
-// so callers can errors.Is it to distinguish "never started" from "started
-// and failed/was interrupted mid-read".
-var errTransportClosedBody = errors.New("mcp: transport closed")
+// errTransportClosed is the package-level sentinel for "the transport was
+// already closed" across the HTTP and stdio transports. A single sentinel
+// (rather than a fresh errors.New at each site) lets callers errors.Is it —
+// e.g. sendOnce distinguishes readTrackedBody's "never started because
+// closed" (trackBody's closed-check; see its doc for the atomicity
+// rationale) from "started and failed/was interrupted mid-read".
+var errTransportClosed = errors.New("mcp: transport closed")
 
 // readTrackedBody registers b in openBodies for the duration of the read
 // (so a concurrent Close can interrupt it — see trackBody's doc), reads up
@@ -157,7 +157,7 @@ var errTransportClosedBody = errors.New("mcp: transport closed")
 func (t *httpTransport) readTrackedBody(b io.ReadCloser, limit int64) ([]byte, error) {
 	if !t.trackBody(b) {
 		b.Close()
-		return nil, errTransportClosedBody
+		return nil, errTransportClosed
 	}
 	defer func() {
 		t.untrackBody(b)
@@ -327,7 +327,7 @@ func isNotDeliveredErr(err error) bool {
 func (t *httpTransport) Send(ctx context.Context, msg json.RawMessage) error {
 	select {
 	case <-t.closed:
-		return errors.New("mcp: transport closed")
+		return errTransportClosed
 	default:
 	}
 
@@ -361,7 +361,7 @@ func (t *httpTransport) Send(ctx context.Context, msg json.RawMessage) error {
 			return ctx.Err()
 		case <-t.closed:
 			timer.Stop()
-			return errors.New("mcp: transport closed")
+			return errTransportClosed
 		}
 	}
 	return lastErr
@@ -417,7 +417,7 @@ func (t *httpTransport) sendOnce(ctx context.Context, msg json.RawMessage) error
 		// see readTrackedBody's doc) rather than left dangling. This path
 		// runs on every session's "notifications/initialized" handshake
 		// step, so a stall here is not a rare edge case.
-		if _, err := t.readTrackedBody(resp.Body, maxDiscardBodyBytes); err != nil && errors.Is(err, errTransportClosedBody) {
+		if _, err := t.readTrackedBody(resp.Body, maxDiscardBodyBytes); err != nil && errors.Is(err, errTransportClosed) {
 			return err
 		}
 		return nil
@@ -425,7 +425,7 @@ func (t *httpTransport) sendOnce(ctx context.Context, msg json.RawMessage) error
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable {
 		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
 		body, bodyErr := t.readTrackedBody(resp.Body, 64*1024)
-		if bodyErr != nil && errors.Is(bodyErr, errTransportClosedBody) {
+		if bodyErr != nil && errors.Is(bodyErr, errTransportClosed) {
 			return bodyErr
 		}
 		return &retryableHTTPError{
@@ -435,7 +435,7 @@ func (t *httpTransport) sendOnce(ctx context.Context, msg json.RawMessage) error
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, bodyErr := t.readTrackedBody(resp.Body, 64*1024)
-		if bodyErr != nil && errors.Is(bodyErr, errTransportClosedBody) {
+		if bodyErr != nil && errors.Is(bodyErr, errTransportClosed) {
 			return bodyErr
 		}
 		return fmt.Errorf("mcp: http status %d: %s", resp.StatusCode, string(body))
@@ -460,7 +460,7 @@ func (t *httpTransport) sendOnce(ctx context.Context, msg json.RawMessage) error
 		// never see it swept.
 		if !t.trackBody(resp.Body) {
 			resp.Body.Close()
-			return errors.New("mcp: transport closed")
+			return errTransportClosed
 		}
 		go t.drainSSE(resp.Body)
 		return nil
@@ -471,7 +471,7 @@ func (t *httpTransport) sendOnce(ctx context.Context, msg json.RawMessage) error
 		// not interrupted by Close, which only sweeps bodies it knows about.
 		body, err := t.readTrackedBody(resp.Body, maxSuccessBodyBytes+1)
 		if err != nil {
-			if errors.Is(err, errTransportClosedBody) {
+			if errors.Is(err, errTransportClosed) {
 				return err
 			}
 			return fmt.Errorf("mcp: read response body: %w", err)
@@ -567,17 +567,14 @@ func (t *httpTransport) drainSSE(body io.ReadCloser) {
 		if ev.Data == "" {
 			continue
 		}
-		if t.enqueue(t.drainCtx(), json.RawMessage(ev.Data)) != nil {
+		// Background ctx: a drain goroutine has no caller-supplied ctx of
+		// its own; it's cancelled only via t.closed (handled inside
+		// enqueue), so drains never block Receive/Close forever.
+		if t.enqueue(context.Background(), json.RawMessage(ev.Data)) != nil {
 			return
 		}
 	}
 }
-
-// drainCtx is the context used to enqueue messages from a background drain
-// goroutine, which has no caller-supplied ctx of its own. It's cancelled
-// only via t.closed (handled inside enqueue), so drains never block
-// Receive/Close forever.
-func (t *httpTransport) drainCtx() context.Context { return context.Background() }
 
 // trackBody registers b as an open SSE response body and reserves a
 // drainWG slot for the goroutine about to drain it, unless the transport is
@@ -621,7 +618,7 @@ func (t *httpTransport) enqueue(ctx context.Context, msg json.RawMessage) error 
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-t.closed:
-		return errors.New("mcp: transport closed")
+		return errTransportClosed
 	}
 }
 
@@ -633,7 +630,7 @@ func (t *httpTransport) Receive(ctx context.Context) (json.RawMessage, error) {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case <-t.closed:
-		return nil, errors.New("mcp: transport closed")
+		return nil, errTransportClosed
 	}
 }
 

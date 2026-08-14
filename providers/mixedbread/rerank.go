@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
+	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -64,7 +65,7 @@ func (m *rerankingModel) Rerank(ctx context.Context, call provider.RerankCall) (
 	if err != nil {
 		return nil, fmt.Errorf("mixedbread: marshal rerank request: %w", err)
 	}
-	body, err = applyProviderOptions(body, call.ProviderOptions)
+	body, err = providerutil.ApplyProviderOptions(body, call.ProviderOptions, providerName)
 	if err != nil {
 		return nil, fmt.Errorf("mixedbread: apply provider options: %w", err)
 	}

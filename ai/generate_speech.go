@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/azrtydxb/go-ai-sdk/internal/retry"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -55,11 +54,6 @@ func GenerateSpeech(ctx context.Context, opts GenerateSpeechOpts) (*GenerateSpee
 		return nil, ErrTextRequired
 	}
 
-	maxRetries := defaultMaxRetries
-	if opts.MaxRetries != nil {
-		maxRetries = *opts.MaxRetries
-	}
-
 	call := provider.SpeechCall{
 		Text:            opts.Text,
 		Voice:           opts.Voice,
@@ -70,20 +64,9 @@ func GenerateSpeech(ctx context.Context, opts GenerateSpeechOpts) (*GenerateSpee
 		Headers:         opts.Headers,
 	}
 
-	if opts.OnSpeechStart != nil {
-		opts.OnSpeechStart(call)
-	}
-
-	resp, err := retry.Do(ctx, maxRetries, func() (*provider.SpeechResponse, error) {
-		return opts.Model.GenerateSpeech(ctx, call)
-	})
-	callErr := translateRetryErr(err)
-
-	if opts.OnSpeechEnd != nil {
-		opts.OnSpeechEnd(resp, callErr)
-	}
-	if callErr != nil {
-		return nil, callErr
+	resp, err := mediaCall(ctx, opts.MaxRetries, call, opts.OnSpeechStart, opts.Model.GenerateSpeech, opts.OnSpeechEnd)
+	if err != nil {
+		return nil, err
 	}
 
 	if len(resp.Audio) == 0 {

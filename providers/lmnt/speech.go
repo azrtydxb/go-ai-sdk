@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
+	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -75,7 +76,7 @@ func (m *speechModel) GenerateSpeech(ctx context.Context, call provider.SpeechCa
 	if err != nil {
 		return nil, fmt.Errorf("lmnt: marshal speech request: %w", err)
 	}
-	reqBody, err = applyProviderOptions(reqBody, call.ProviderOptions)
+	reqBody, err = providerutil.ApplyProviderOptions(reqBody, call.ProviderOptions, "lmnt")
 	if err != nil {
 		return nil, fmt.Errorf("lmnt: apply provider options: %w", err)
 	}

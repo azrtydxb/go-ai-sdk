@@ -13,6 +13,7 @@ import (
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
 	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
+	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
 	"github.com/azrtydxb/go-ai-sdk/internal/sse"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -66,7 +67,7 @@ func (m *languageModel) doRequest(ctx context.Context, req messagesRequest, prov
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: marshal request: %w", err)
 	}
-	body, err = applyProviderOptions(body, providerOptions)
+	body, err = providerutil.ApplyProviderOptions(body, providerOptions, "anthropic")
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: apply provider options: %w", err)
 	}
@@ -93,7 +94,7 @@ func (m *languageModel) doRequest(ctx context.Context, req messagesRequest, prov
 }
 
 func apiError(resp *http.Response, body []byte) error {
-	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), errorMessage(body))
+	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), providerutil.ErrorMessage(body))
 }
 
 func (m *languageModel) Generate(ctx context.Context, call provider.Call) (*provider.Response, error) {
@@ -348,9 +349,7 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 				return
 
 			case "error":
-				var we wireError
-				json.Unmarshal([]byte(data), &we)
-				s.err = fmt.Errorf("anthropic: stream error: %s", we.Error.Message)
+				s.err = fmt.Errorf("anthropic: stream error: %s", providerutil.ErrorMessage([]byte(data)))
 				return
 
 			default:

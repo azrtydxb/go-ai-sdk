@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/azrtydxb/go-ai-sdk/internal/retry"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -52,11 +51,6 @@ func GenerateVideo(ctx context.Context, opts GenerateVideoOpts) (*GenerateVideoR
 		return nil, ErrPromptRequired
 	}
 
-	maxRetries := defaultMaxRetries
-	if opts.MaxRetries != nil {
-		maxRetries = *opts.MaxRetries
-	}
-
 	call := provider.VideoCall{
 		Prompt:          opts.Prompt,
 		AspectRatio:     opts.AspectRatio,
@@ -66,20 +60,9 @@ func GenerateVideo(ctx context.Context, opts GenerateVideoOpts) (*GenerateVideoR
 		Headers:         opts.Headers,
 	}
 
-	if opts.OnVideoStart != nil {
-		opts.OnVideoStart(call)
-	}
-
-	resp, err := retry.Do(ctx, maxRetries, func() (*provider.VideoResponse, error) {
-		return opts.Model.GenerateVideos(ctx, call)
-	})
-	callErr := translateRetryErr(err)
-
-	if opts.OnVideoEnd != nil {
-		opts.OnVideoEnd(resp, callErr)
-	}
-	if callErr != nil {
-		return nil, callErr
+	resp, err := mediaCall(ctx, opts.MaxRetries, call, opts.OnVideoStart, opts.Model.GenerateVideos, opts.OnVideoEnd)
+	if err != nil {
+		return nil, err
 	}
 
 	if len(resp.Videos) == 0 {

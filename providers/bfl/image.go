@@ -10,9 +10,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/azrtydxb/go-ai-sdk/internal/fetchimage"
 	"github.com/azrtydxb/go-ai-sdk/internal/fetchmedia"
 	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
+	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
 	"github.com/azrtydxb/go-ai-sdk/internal/transcribeutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -83,7 +83,7 @@ func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall
 	if err != nil {
 		return nil, fmt.Errorf("bfl: marshal image request: %w", err)
 	}
-	reqBody, err = applyProviderOptions(reqBody, call.ProviderOptions)
+	reqBody, err = providerutil.ApplyProviderOptions(reqBody, call.ProviderOptions, "bfl")
 	if err != nil {
 		return nil, fmt.Errorf("bfl: apply provider options: %w", err)
 	}
@@ -128,7 +128,7 @@ func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall
 		return nil, fmt.Errorf("bfl: ready generation contained no sample url: %s", rawBody)
 	}
 
-	data, mediaType, err := fetchimage.Fetch(ctx, m.provider.client(), poll.Result.Sample, "bfl")
+	data, mediaType, err := fetchmedia.FetchImage(ctx, m.provider.client(), poll.Result.Sample, "bfl")
 	if err != nil {
 		return nil, err
 	}

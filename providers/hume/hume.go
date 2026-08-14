@@ -6,11 +6,11 @@
 package hume
 
 import (
-	"encoding/json"
 	"net/http"
 	"os"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
+	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -75,53 +75,6 @@ func (p *Provider) client() *http.Client {
 	return http.DefaultClient
 }
 
-// ---- shared error handling ----
-
-// wireError matches Hume's error body shapes: {"message":"..."} or
-// {"error":"..."}.
-type wireError struct {
-	Message string `json:"message"`
-	Error   string `json:"error"`
-}
-
-// errorMessage tries to parse Hume's error body shapes: {"message":"..."}
-// or {"error":"..."}. Falls back to the raw body if parsing fails or no
-// message is present.
-func errorMessage(body []byte) string {
-	var we wireError
-	if err := json.Unmarshal(body, &we); err == nil {
-		if we.Message != "" {
-			return we.Message
-		}
-		if we.Error != "" {
-			return we.Error
-		}
-	}
-	return string(body)
-}
-
 func apiError(resp *http.Response, body []byte) error {
-	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), errorMessage(body))
-}
-
-// ---- provider options ----
-
-// applyProviderOptions merges providerOptions["hume"] (when it is a
-// non-empty map[string]any) top-level into the already-marshaled JSON
-// request object reqBytes, entries from the option map winning over
-// whatever the SDK built. Returns reqBytes unchanged (no unmarshal/marshal
-// round trip) when there's nothing to merge, which is the common case.
-func applyProviderOptions(reqBytes []byte, providerOptions map[string]any) ([]byte, error) {
-	opts, _ := providerOptions["hume"].(map[string]any)
-	if len(opts) == 0 {
-		return reqBytes, nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(reqBytes, &m); err != nil {
-		return nil, err
-	}
-	for k, v := range opts {
-		m[k] = v
-	}
-	return json.Marshal(m)
+	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), providerutil.ErrorMessage(body))
 }

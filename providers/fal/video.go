@@ -10,6 +10,7 @@ import (
 
 	"github.com/azrtydxb/go-ai-sdk/internal/fetchmedia"
 	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
+	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -64,7 +65,7 @@ func (m *videoModel) GenerateVideos(ctx context.Context, call provider.VideoCall
 	if err != nil {
 		return nil, fmt.Errorf("fal: marshal video request: %w", err)
 	}
-	reqBody, err = applyProviderOptions(reqBody, call.ProviderOptions)
+	reqBody, err = providerutil.ApplyProviderOptions(reqBody, call.ProviderOptions, providerName)
 	if err != nil {
 		return nil, fmt.Errorf("fal: apply provider options: %w", err)
 	}
@@ -105,7 +106,7 @@ func (m *videoModel) GenerateVideos(ctx context.Context, call provider.VideoCall
 
 	videos := make([]provider.GeneratedVideo, 0, len(entries))
 	for _, v := range entries {
-		data, mediaType, err := fetchmedia.Fetch(ctx, m.provider.client(), v.URL, "fal", 0)
+		data, mediaType, err := fetchmedia.Fetch(ctx, m.provider.client(), v.URL, "fal")
 		if err != nil {
 			return nil, err
 		}

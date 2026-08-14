@@ -9,7 +9,6 @@ import (
 	"iter"
 	"net/http"
 	"net/url"
-	"strings"
 	"sync"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
@@ -74,7 +73,7 @@ func (m *streamingTranscriptionModel) StreamTranscribe(ctx context.Context, call
 		Conn:   conn,
 		Decode: decodeRealtimeTranscriptionMessage,
 	})
-	return &realtimeStream{stream: ws, readLoopDone: ws.Done()}, nil
+	return &realtimeStream{stream: ws}, nil
 }
 
 // realtimeDialURL derives the wss:// (or ws://, for test fixtures) URL for
@@ -120,28 +119,11 @@ func buildSessionUpdate(modelID string, call provider.StreamTranscriptionCall) (
 }
 
 // audioFormatFor maps a MediaType to OpenAI's input_audio_format. OpenAI's
-// Realtime API only supports "pcm16" as of this writing, so every
-// recognized raw-PCM MediaType ("audio/pcm" or "audio/l16"; params such as
-// ";rate=..." are ignored since the Realtime API always expects 24kHz mono
-// PCM16 regardless) — and anything else, including an empty MediaType —
-// all map to "pcm16". The switch stays explicit (rather than collapsing to
-// an unconditional return) so a future second format is a one-line add,
-// not a rewrite.
-func audioFormatFor(mediaType string) string {
-	base := mediaType
-	if i := strings.IndexByte(mediaType, ';'); i >= 0 {
-		base = mediaType[:i]
-	}
-	base = strings.ToLower(strings.TrimSpace(base))
-	switch base {
-	case "audio/pcm", "audio/l16":
-		return "pcm16"
-	default:
-		// Includes "" and any unrecognized MediaType: OpenAI's Realtime
-		// API has no other supported input_audio_format today.
-		return "pcm16"
-	}
-}
+// Realtime API only supports "pcm16" as of this writing (24kHz mono PCM16
+// regardless of MediaType or its params), so every MediaType — including
+// empty or unrecognized — maps to "pcm16". Reintroduce a switch on the
+// parsed base type if a second format ever ships.
+func audioFormatFor(string) string { return "pcm16" }
 
 // realtimeStream implements provider.TranscriptionStream against an open
 // OpenAI Realtime WebSocket connection in transcription mode, as a thin
@@ -155,11 +137,6 @@ type realtimeStream struct {
 	// serialized against Close inside stream.Send.
 	writeMu       sync.Mutex
 	closeSendSent bool
-
-	// readLoopDone mirrors stream.Done(): not part of the public
-	// interface, but tests observe it directly to confirm the reader
-	// goroutine has actually exited, not just that Events() stopped.
-	readLoopDone <-chan struct{}
 }
 
 // Send implements provider.TranscriptionStream by base64-encoding audio

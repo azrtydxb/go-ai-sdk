@@ -48,14 +48,11 @@ func (m *transcriptionModel) Transcribe(ctx context.Context, call provider.Trans
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 
-	fileHeader := make(map[string][]string)
-	fileHeader["Content-Disposition"] = []string{`form-data; name="file"; filename="audio"`}
 	contentType := call.MediaType
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-	fileHeader["Content-Type"] = []string{contentType}
-	part, err := mw.CreatePart(fileHeader)
+	part, err := multipartutil.CreateFilePart(mw, "file", "audio", contentType)
 	if err != nil {
 		return nil, fmt.Errorf("elevenlabs: create transcription file part: %w", err)
 	}
@@ -72,7 +69,7 @@ func (m *transcriptionModel) Transcribe(ctx context.Context, call provider.Trans
 		}
 	}
 
-	if err := applyProviderOptionsForm(mw, call.ProviderOptions); err != nil {
+	if err := multipartutil.ApplyProviderOptionsForm(mw, call.ProviderOptions, providerName); err != nil {
 		return nil, fmt.Errorf("elevenlabs: apply provider options: %w", err)
 	}
 

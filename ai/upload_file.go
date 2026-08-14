@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/azrtydxb/go-ai-sdk/internal/retry"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -52,11 +51,6 @@ func UploadFile(ctx context.Context, opts UploadFileOpts) (*provider.FileInfo, e
 		return nil, ErrFilenameRequired
 	}
 
-	maxRetries := defaultMaxRetries
-	if opts.MaxRetries != nil {
-		maxRetries = *opts.MaxRetries
-	}
-
 	call := provider.FileUploadCall{
 		Data:            opts.Data,
 		Filename:        opts.Filename,
@@ -66,13 +60,7 @@ func UploadFile(ctx context.Context, opts UploadFileOpts) (*provider.FileInfo, e
 		Headers:         opts.Headers,
 	}
 
-	resp, err := retry.Do(ctx, maxRetries, func() (*provider.FileInfo, error) {
-		return opts.Store.UploadFile(ctx, call)
-	})
-	if err != nil {
-		return nil, translateRetryErr(err)
-	}
-	return resp, nil
+	return mediaCall(ctx, opts.MaxRetries, call, nil, opts.Store.UploadFile, nil)
 }
 
 // DeleteFileOpts options for the DeleteFile function.
@@ -93,16 +81,8 @@ func DeleteFile(ctx context.Context, opts DeleteFileOpts) error {
 		return ErrIDRequired
 	}
 
-	maxRetries := defaultMaxRetries
-	if opts.MaxRetries != nil {
-		maxRetries = *opts.MaxRetries
-	}
-
-	_, err := retry.Do(ctx, maxRetries, func() (struct{}, error) {
-		return struct{}{}, opts.Store.DeleteFile(ctx, opts.ID)
-	})
-	if err != nil {
-		return translateRetryErr(err)
-	}
-	return nil
+	_, err := mediaCall(ctx, opts.MaxRetries, opts.ID, nil, func(ctx context.Context, id string) (struct{}, error) {
+		return struct{}{}, opts.Store.DeleteFile(ctx, id)
+	}, nil)
+	return err
 }

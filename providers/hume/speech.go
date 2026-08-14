@@ -11,6 +11,7 @@ import (
 	"net/http"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
+	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -154,7 +155,7 @@ func (m *speechModel) GenerateSpeech(ctx context.Context, call provider.SpeechCa
 	if err != nil {
 		return nil, fmt.Errorf("hume: marshal speech request: %w", err)
 	}
-	reqBody, err = applyProviderOptions(reqBody, providerOptions)
+	reqBody, err = providerutil.ApplyProviderOptions(reqBody, providerOptions, providerName)
 	if err != nil {
 		return nil, fmt.Errorf("hume: apply provider options: %w", err)
 	}

@@ -73,11 +73,11 @@ type ServiceAccountTokenSource struct {
 	expiry      time.Time
 }
 
-// NewServiceAccountTokenSource parses a service-account JSON key (as
+// newServiceAccountTokenSource parses a service-account JSON key (as
 // produced by the Google Cloud console: must contain at least
 // client_email and private_key) and returns a TokenSource that mints
 // access tokens on demand.
-func NewServiceAccountTokenSource(keyJSON []byte) (*ServiceAccountTokenSource, error) {
+func newServiceAccountTokenSource(keyJSON []byte) (*ServiceAccountTokenSource, error) {
 	var key serviceAccountKey
 	if err := json.Unmarshal(keyJSON, &key); err != nil {
 		return nil, fmt.Errorf("gauth: parse service account key: %w", err)
@@ -134,7 +134,7 @@ func NewServiceAccountTokenSourceFromFile(path string) (*ServiceAccountTokenSour
 	if err != nil {
 		return nil, fmt.Errorf("gauth: read service account key file: %w", err)
 	}
-	return NewServiceAccountTokenSource(b)
+	return newServiceAccountTokenSource(b)
 }
 
 // SetTokenURL overrides the OAuth2 token endpoint URL. Intended for tests;

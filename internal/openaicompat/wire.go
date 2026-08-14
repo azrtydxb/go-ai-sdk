@@ -5,11 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"mime"
-	"mime/multipart"
 	"strings"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
-	"github.com/azrtydxb/go-ai-sdk/internal/multipartutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -20,6 +18,9 @@ type wireMessage struct {
 	Content    json.RawMessage `json:"content,omitempty"`
 	ToolCalls  []wireToolCall  `json:"tool_calls,omitempty"`
 	ToolCallID string          `json:"tool_call_id,omitempty"`
+	// Name carries the function name on role:"tool" messages. Optional for
+	// OpenAI, required by Mistral; harmless everywhere it's optional.
+	Name string `json:"name,omitempty"`
 }
 
 type wireToolCall struct {
@@ -104,27 +105,31 @@ type chatRequest struct {
 	// wire field name varies per provider (see Config.MaxTokensParam).
 	MaxTokens        *int `json:"-"`
 	maxTokensParam   string
-	Temperature      *float64       `json:"temperature,omitempty"`
-	TopP             *float64       `json:"top_p,omitempty"`
-	PresencePenalty  *float64       `json:"presence_penalty,omitempty"`
-	FrequencyPenalty *float64       `json:"frequency_penalty,omitempty"`
-	Seed             *int64         `json:"seed,omitempty"`
-	ReasoningEffort  string         `json:"reasoning_effort,omitempty"`
-	Stop             []string       `json:"stop,omitempty"`
-	Stream           bool           `json:"stream,omitempty"`
-	StreamOptions    *streamOptions `json:"stream_options,omitempty"`
+	Temperature      *float64 `json:"temperature,omitempty"`
+	TopP             *float64 `json:"top_p,omitempty"`
+	PresencePenalty  *float64 `json:"presence_penalty,omitempty"`
+	FrequencyPenalty *float64 `json:"frequency_penalty,omitempty"`
+	// Seed is marshaled by MarshalJSON under seedParam (default "seed") —
+	// the field name varies per provider (see Config.SeedParam).
+	Seed            *int64 `json:"-"`
+	seedParam       string
+	ReasoningEffort string         `json:"reasoning_effort,omitempty"`
+	Stop            []string       `json:"stop,omitempty"`
+	Stream          bool           `json:"stream,omitempty"`
+	StreamOptions   *streamOptions `json:"stream_options,omitempty"`
 }
 
-// MarshalJSON marshals chatRequest normally, then adds the max-tokens value
-// (if any) under the provider-specific field name in r.maxTokensParam
-// (falling back to defaultMaxTokensParam when empty).
+// MarshalJSON marshals chatRequest normally, then adds the max-tokens and
+// seed values (if any) under their provider-specific field names in
+// r.maxTokensParam / r.seedParam (falling back to defaultMaxTokensParam /
+// "seed" when empty).
 func (r chatRequest) MarshalJSON() ([]byte, error) {
 	type alias chatRequest
 	b, err := json.Marshal(alias(r))
 	if err != nil {
 		return nil, err
 	}
-	if r.MaxTokens == nil {
+	if r.MaxTokens == nil && r.Seed == nil {
 		return b, nil
 	}
 
@@ -132,15 +137,28 @@ func (r chatRequest) MarshalJSON() ([]byte, error) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		return nil, err
 	}
-	paramName := r.maxTokensParam
-	if paramName == "" {
-		paramName = defaultMaxTokensParam
+	if r.MaxTokens != nil {
+		paramName := r.maxTokensParam
+		if paramName == "" {
+			paramName = defaultMaxTokensParam
+		}
+		mt, err := json.Marshal(*r.MaxTokens)
+		if err != nil {
+			return nil, err
+		}
+		m[paramName] = mt
 	}
-	mt, err := json.Marshal(*r.MaxTokens)
-	if err != nil {
-		return nil, err
+	if r.Seed != nil {
+		paramName := r.seedParam
+		if paramName == "" {
+			paramName = "seed"
+		}
+		sv, err := json.Marshal(*r.Seed)
+		if err != nil {
+			return nil, err
+		}
+		m[paramName] = sv
 	}
-	m[paramName] = mt
 	return json.Marshal(m)
 }
 
@@ -214,65 +232,6 @@ type wireToolCallDelta struct {
 	Function wireToolCallFunc `json:"function"`
 }
 
-// ---- Error wire type ----
-
-type wireError struct {
-	Error struct {
-		Message string `json:"message"`
-	} `json:"error"`
-}
-
-// errorMessage tries to parse OpenAI's {"error":{"message":...}} shape.
-// Falls back to the raw body if parsing fails or message is empty.
-func errorMessage(body []byte) string {
-	var we wireError
-	if err := json.Unmarshal(body, &we); err == nil && we.Error.Message != "" {
-		return we.Error.Message
-	}
-	return string(body)
-}
-
-// applyProviderOptions merges providerOptions[name] (when it is a non-empty
-// map[string]any) into the already-marshaled JSON object reqBytes, entries
-// from the option map winning over whatever the SDK built. Returns reqBytes
-// unchanged (no unmarshal/marshal round trip) when there's nothing to
-// merge, which is the common case.
-func applyProviderOptions(reqBytes []byte, providerOptions map[string]any, name string) ([]byte, error) {
-	opts, _ := providerOptions[name].(map[string]any)
-	if len(opts) == 0 {
-		return reqBytes, nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(reqBytes, &m); err != nil {
-		return nil, fmt.Errorf("openaicompat: unmarshal request for provider options merge: %w", err)
-	}
-	for k, v := range opts {
-		m[k] = v
-	}
-	return json.Marshal(m)
-}
-
-// applyProviderOptionsForm writes providerOptions[name] (when it is a
-// non-empty map[string]any) as extra multipart form fields, each value
-// stringified with fmt.Sprint. Used for multipart-body requests
-// (transcription), where there's no single JSON object to merge into.
-func applyProviderOptionsForm(mw *multipart.Writer, providerOptions map[string]any, name string) error {
-	opts, _ := providerOptions[name].(map[string]any)
-	for k, v := range opts {
-		if err := multipartutil.ValidField("provider option field name", k); err != nil {
-			return err
-		}
-		sv := fmt.Sprint(v)
-		if err := multipartutil.ValidField("provider option field value", sv); err != nil {
-			return err
-		}
-		if err := mw.WriteField(k, sv); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // ---- Request building ----
 
 func buildChatRequest(cfg Config, modelID string, call provider.Call, stream bool) (chatRequest, error) {
@@ -289,6 +248,7 @@ func buildChatRequest(cfg Config, modelID string, call provider.Call, stream boo
 		PresencePenalty:  call.PresencePenalty,
 		FrequencyPenalty: call.FrequencyPenalty,
 		Seed:             call.Seed,
+		seedParam:        cfg.SeedParam,
 		Stop:             call.StopSequences,
 		MaxTokens:        call.MaxTokens,
 		maxTokensParam:   cfg.MaxTokensParam,
@@ -297,19 +257,24 @@ func buildChatRequest(cfg Config, modelID string, call provider.Call, stream boo
 	// every OpenAI-compatible server this package targets) has no top_k
 	// parameter.
 
-	if call.Reasoning != nil && call.Reasoning.Effort != "" {
+	if call.Reasoning != nil && call.Reasoning.Effort != "" && !cfg.NoReasoningEffort {
 		req.ReasoningEffort = call.Reasoning.Effort
 	}
 	// call.Reasoning.BudgetTokens is intentionally ignored: OpenAI's
 	// chat-completions wire has no token-budget equivalent to
 	// reasoning_effort, only the effort string itself.
 
-	if len(call.Tools) > 0 {
-		req.Tools = convertTools(call.Tools)
-	}
+	// Some servers (Mistral) reject tool_choice without a non-empty tools
+	// array, so ToolChoiceNone there means: omit tools entirely.
+	omitTools := cfg.OmitToolsOnNone && call.ToolChoice != nil && call.ToolChoice.Mode == provider.ToolChoiceNone
 
-	if call.ToolChoice != nil {
-		req.ToolChoice = convertToolChoice(*call.ToolChoice)
+	if !omitTools {
+		if len(call.Tools) > 0 {
+			req.Tools = convertTools(call.Tools)
+		}
+		if call.ToolChoice != nil {
+			req.ToolChoice = convertToolChoice(*call.ToolChoice, cfg.RequiredToolChoice)
+		}
 	}
 
 	if call.ResponseFormat != nil {
@@ -322,7 +287,9 @@ func buildChatRequest(cfg Config, modelID string, call provider.Call, stream boo
 
 	if stream {
 		req.Stream = true
-		req.StreamOptions = &streamOptions{IncludeUsage: true}
+		if !cfg.NoStreamOptions {
+			req.StreamOptions = &streamOptions{IncludeUsage: true}
+		}
 	}
 
 	return req, nil
@@ -401,6 +368,7 @@ func convertMessages(msgs []provider.Message) ([]wireMessage, error) {
 				out = append(out, wireMessage{
 					Role:       "tool",
 					ToolCallID: trp.ToolCallID,
+					Name:       trp.Name,
 					Content:    content,
 				})
 			}
@@ -551,13 +519,16 @@ func convertTools(tools []provider.ToolDef) []wireTool {
 	return out
 }
 
-func convertToolChoice(tc provider.ToolChoice) any {
+func convertToolChoice(tc provider.ToolChoice, requiredValue string) any {
 	switch tc.Mode {
 	case provider.ToolChoiceAuto:
 		return "auto"
 	case provider.ToolChoiceNone:
 		return "none"
 	case provider.ToolChoiceRequired:
+		if requiredValue != "" {
+			return requiredValue
+		}
 		return "required"
 	case provider.ToolChoiceTool:
 		return wireToolChoiceObj{
@@ -603,7 +574,7 @@ func mapFinishReason(reason string) provider.FinishReason {
 	switch reason {
 	case "stop":
 		return provider.FinishStop
-	case "length":
+	case "length", "model_length": // "model_length" is Mistral's spelling
 		return provider.FinishLength
 	case "tool_calls":
 		return provider.FinishToolCalls

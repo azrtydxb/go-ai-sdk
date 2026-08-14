@@ -596,7 +596,7 @@ func TestStreamTranscribe_AbandonedEventsThenCloseUnblocksReadLoop(t *testing.T)
 	}
 
 	select {
-	case <-stream.readLoopDone:
+	case <-stream.stream.Done():
 		// reader goroutine exited, as required.
 	case <-time.After(2 * time.Second):
 		t.Fatal("readLoop leaked: did not exit within 2s of Close() after Events() was abandoned")

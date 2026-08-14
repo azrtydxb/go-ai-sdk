@@ -43,11 +43,6 @@ type RealtimeConfig struct {
 // machinery (dial/readLoop/Close/Err/Events).
 type RealtimeSession struct {
 	stream *wsstream.Stream[RealtimeEvent]
-
-	// readLoopDone mirrors stream.Done(): not part of the public
-	// interface, but tests observe it directly to confirm the reader
-	// goroutine has actually exited, not just that Events() stopped.
-	readLoopDone <-chan struct{}
 }
 
 // RealtimeEvent is one event surfaced from an open RealtimeSession.
@@ -102,7 +97,7 @@ func (p *Provider) RealtimeSession(ctx context.Context, cfg RealtimeConfig) (*Re
 		Conn:   conn,
 		Decode: decodeRealtimeVoiceMessage,
 	})
-	return &RealtimeSession{stream: ws, readLoopDone: ws.Done()}, nil
+	return &RealtimeSession{stream: ws}, nil
 }
 
 // realtimeVoiceDialURL derives the wss:// (or ws://, for test fixtures) URL

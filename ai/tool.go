@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"runtime/debug"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/schema"
@@ -72,7 +71,7 @@ type tool struct {
 	name           string
 	description    string
 	schema         json.RawMessage
-	fn             any // We store this as any and use reflection to call it
+	execute        func(ctx context.Context, args json.RawMessage) (any, error) // typed closure built by NewTool
 	strict         bool
 	inputExamples  []json.RawMessage
 	inputCallbacks ToolInputCallbacks
@@ -143,11 +142,90 @@ func NewTool[Args any](name, description string, fn func(context.Context, Args) 
 		opt(&o)
 	}
 
+	execute := func(ctx context.Context, args json.RawMessage) (result any, err error) {
+		// Normalize empty/nil/whitespace-only args to "{}" before decoding:
+		// this is the normal wire shape for a no-arg tool call (and exactly
+		// what stream assembly produces when a tool call arrives with no
+		// ArgsDelta — see stream_text.go's ToolCallPart{Args: pc.args} with
+		// nil pc.args). Without this, json.Decoder.Decode on an empty/blank
+		// reader returns io.EOF, rejecting every no-arg call as
+		// *InvalidToolArgumentsError. Args with required fields are
+		// unaffected: Decode against "{}" still fails validation the same
+		// way it would against any other object missing required fields
+		// (schema-level, unchanged).
+		if len(bytes.TrimSpace(args)) == 0 {
+			args = []byte("{}")
+		}
+
+		// Unmarshal strictly with DisallowUnknownFields
+		var a Args
+		decoder := json.NewDecoder(bytes.NewReader(args))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&a); err != nil {
+			return nil, &InvalidToolArgumentsError{
+				ToolName: name,
+				Args:     args,
+				Cause:    err,
+			}
+		}
+
+		// Check for trailing content after the JSON value
+		if decoder.More() {
+			return nil, &InvalidToolArgumentsError{
+				ToolName: name,
+				Args:     args,
+				Cause:    fmt.Errorf("trailing content after JSON value"),
+			}
+		}
+
+		// A user tool that panics must not crash the tool loop's goroutine:
+		// callers (executeToolCall in generate_text.go) treat Execute as a
+		// fallible call, so a panic is converted to *ToolExecutionError. A
+		// panic(error) keeps its error identity via %w for errors.Is chains.
+		// Placed after arg-decoding so decode failures keep returning
+		// *InvalidToolArgumentsError untouched by recover.
+		//
+		// This recover is redundant-but-harmless double cover: executeToolCall
+		// wraps every t.Execute call (any Tool implementation, not just ones
+		// built with NewTool, and including ApprovalRequirer.ApprovalRequired
+		// hooks) in its own loop-level recoverToolPanic/recoverApprovalRequiredPanic
+		// guard, which is what actually protects hand-rolled ai.Tool
+		// implementations that have no recover of their own. This one stays so
+		// (*tool).Execute remains independently panic-safe for callers that
+		// invoke it directly, outside the GenerateText/StreamText loop.
+		//
+		// The captured stack goes on ToolExecutionError.Stack, NOT into Cause:
+		// Cause feeds Error(), and Error() can be shipped back to the provider
+		// as a tool result (generate_text.go's toolResultValue), so embedding a
+		// goroutine dump there would leak local file paths into the prompt.
+		defer func() {
+			if r := recover(); r != nil {
+				var cause error
+				if perr, ok := r.(error); ok {
+					cause = fmt.Errorf("tool panicked: %w", perr)
+				} else {
+					cause = fmt.Errorf("tool panicked: %v", r)
+				}
+				result = nil
+				err = &ToolExecutionError{ToolName: name, Cause: cause, Stack: debug.Stack()}
+			}
+		}()
+
+		res, fnErr := fn(ctx, a)
+		if fnErr != nil {
+			return nil, &ToolExecutionError{
+				ToolName: name,
+				Cause:    fnErr,
+			}
+		}
+		return res, nil
+	}
+
 	return &tool{
 		name:           name,
 		description:    description,
 		schema:         s,
-		fn:             fn,
+		execute:        execute,
 		strict:         o.strict,
 		inputExamples:  o.inputExamples,
 		inputCallbacks: o.inputCallbacks,
@@ -178,103 +256,6 @@ func (t *tool) InputCallbacks() ToolInputCallbacks {
 	return t.inputCallbacks
 }
 
-func (t *tool) Execute(ctx context.Context, args json.RawMessage) (result any, err error) {
-	// Get the function as a reflect.Value to call it dynamically
-	fnValue := reflect.ValueOf(t.fn)
-	fnType := fnValue.Type()
-
-	// The function signature is func(context.Context, Args) (any, error)
-	// We need to unmarshal args into the Args type (second parameter)
-	argType := fnType.In(1)
-
-	// Create a new instance of the Args type
-	argValue := reflect.New(argType)
-	argInterface := argValue.Interface()
-
-	// Normalize empty/nil/whitespace-only args to "{}" before decoding: this
-	// is the normal wire shape for a no-arg tool call (and exactly what
-	// stream assembly produces when a tool call arrives with no ArgsDelta —
-	// see stream_text.go's ToolCallPart{Args: pc.args} with nil pc.args).
-	// Without this, json.Decoder.Decode on an empty/blank reader returns
-	// io.EOF, rejecting every no-arg call as *InvalidToolArgumentsError.
-	// Args with required fields are unaffected: Decode against "{}" still
-	// fails validation the same way it would against any other object
-	// missing required fields (schema-level, unchanged).
-	if len(bytes.TrimSpace(args)) == 0 {
-		args = []byte("{}")
-	}
-
-	// Unmarshal strictly with DisallowUnknownFields
-	decoder := json.NewDecoder(bytes.NewReader(args))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(argInterface); err != nil {
-		return nil, &InvalidToolArgumentsError{
-			ToolName: t.name,
-			Args:     args,
-			Cause:    err,
-		}
-	}
-
-	// Check for trailing content after the JSON value
-	if decoder.More() {
-		return nil, &InvalidToolArgumentsError{
-			ToolName: t.name,
-			Args:     args,
-			Cause:    fmt.Errorf("trailing content after JSON value"),
-		}
-	}
-
-	// A user tool that panics must not crash the tool loop's goroutine:
-	// callers (executeToolCall in generate_text.go) treat Execute as a
-	// fallible call, so a panic is converted to *ToolExecutionError. A
-	// panic(error) keeps its error identity via %w for errors.Is chains.
-	// Placed after arg-decoding so decode failures keep returning
-	// *InvalidToolArgumentsError untouched by recover.
-	//
-	// This recover is redundant-but-harmless double cover: executeToolCall
-	// wraps every t.Execute call (any Tool implementation, not just ones
-	// built with NewTool, and including ApprovalRequirer.ApprovalRequired
-	// hooks) in its own loop-level recoverToolPanic/recoverApprovalRequiredPanic
-	// guard, which is what actually protects hand-rolled ai.Tool
-	// implementations that have no recover of their own. This one stays so
-	// (*tool).Execute remains independently panic-safe for callers that
-	// invoke it directly, outside the GenerateText/StreamText loop.
-	//
-	// The captured stack goes on ToolExecutionError.Stack, NOT into Cause:
-	// Cause feeds Error(), and Error() can be shipped back to the provider
-	// as a tool result (generate_text.go's toolResultValue), so embedding a
-	// goroutine dump there would leak local file paths into the prompt.
-	defer func() {
-		if r := recover(); r != nil {
-			var cause error
-			if perr, ok := r.(error); ok {
-				cause = fmt.Errorf("tool panicked: %w", perr)
-			} else {
-				cause = fmt.Errorf("tool panicked: %v", r)
-			}
-			result = nil
-			err = &ToolExecutionError{ToolName: t.name, Cause: cause, Stack: debug.Stack()}
-		}
-	}()
-
-	// Call the function with context and unmarshaled args
-	results := fnValue.Call([]reflect.Value{
-		reflect.ValueOf(ctx),
-		argValue.Elem(),
-	})
-
-	// Extract return values: (any, error)
-	resultValue := results[0].Interface()
-	errValue := results[1].Interface()
-
-	// Check if there was an error
-	if errValue != nil {
-		err := errValue.(error)
-		return nil, &ToolExecutionError{
-			ToolName: t.name,
-			Cause:    err,
-		}
-	}
-
-	return resultValue, nil
+func (t *tool) Execute(ctx context.Context, args json.RawMessage) (any, error) {
+	return t.execute(ctx, args)
 }

@@ -197,7 +197,7 @@ for the full per-provider mapping table.
 - [LM Studio](lmstudio.md) — chat + embeddings, local-first, no auth required
 - [NVIDIA NIM](nvidia.md) — chat + embeddings
 - [Vercel AI Gateway](gateway.md) — chat + embeddings; `"provider/model"` routing slugs, `NativeJSON: false`
-- [Mistral](mistral.md) — standalone wire format; schema dropped from `response_format`
+- [Mistral](mistral.md) — openaicompat preset (`random_seed`, `tool_choice: "any"`); schema dropped from `response_format`
 - [Cohere](cohere.md) — standalone v2 chat/embed API; `p` for top_p, typed SSE events
 - [Voyage](voyage.md) — embeddings + reranking only, no language model
 - [Mixedbread](mixedbread.md) — reranking only, no language model or embeddings

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/azrtydxb/go-ai-sdk/internal/retry"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -55,11 +54,6 @@ func Transcribe(ctx context.Context, opts TranscribeOpts) (*TranscribeResult, er
 		return nil, ErrAudioRequired
 	}
 
-	maxRetries := defaultMaxRetries
-	if opts.MaxRetries != nil {
-		maxRetries = *opts.MaxRetries
-	}
-
 	call := provider.TranscriptionCall{
 		Audio:           opts.Audio,
 		MediaType:       opts.MediaType,
@@ -69,20 +63,9 @@ func Transcribe(ctx context.Context, opts TranscribeOpts) (*TranscribeResult, er
 		Headers:         opts.Headers,
 	}
 
-	if opts.OnTranscribeStart != nil {
-		opts.OnTranscribeStart(call)
-	}
-
-	resp, err := retry.Do(ctx, maxRetries, func() (*provider.TranscriptionResponse, error) {
-		return opts.Model.Transcribe(ctx, call)
-	})
-	callErr := translateRetryErr(err)
-
-	if opts.OnTranscribeEnd != nil {
-		opts.OnTranscribeEnd(resp, callErr)
-	}
-	if callErr != nil {
-		return nil, callErr
+	resp, err := mediaCall(ctx, opts.MaxRetries, call, opts.OnTranscribeStart, opts.Model.Transcribe, opts.OnTranscribeEnd)
+	if err != nil {
+		return nil, err
 	}
 
 	return &TranscribeResult{

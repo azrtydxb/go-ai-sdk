@@ -10,8 +10,9 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/fetchmedia"
 	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
-	"github.com/azrtydxb/go-ai-sdk/internal/imagesniff"
+	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -83,7 +84,7 @@ func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall
 	if err != nil {
 		return nil, fmt.Errorf("openaicompat: marshal image request: %w", err)
 	}
-	reqBody, err = applyProviderOptions(reqBody, call.ProviderOptions, m.cfg.Name)
+	reqBody, err = providerutil.ApplyProviderOptions(reqBody, call.ProviderOptions, m.cfg.Name)
 	if err != nil {
 		return nil, fmt.Errorf("openaicompat: apply provider options: %w", err)
 	}
@@ -123,7 +124,7 @@ func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall
 		if err != nil {
 			return nil, fmt.Errorf("openaicompat: decode image b64_json: %w", err)
 		}
-		images[i] = provider.GeneratedImage{Data: data, MediaType: imagesniff.SniffMediaType(data)}
+		images[i] = provider.GeneratedImage{Data: data, MediaType: fetchmedia.SniffImageMediaType(data, "image/png")}
 	}
 
 	return &provider.ImageResponse{

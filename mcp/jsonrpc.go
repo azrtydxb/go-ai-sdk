@@ -65,12 +65,8 @@ func newSendSem() sendSem {
 	return s
 }
 
-// Lock blocks until the slot is acquired. Pair with a deferred Unlock,
-// exactly like sync.Mutex.
-func (s sendSem) Lock() { <-s }
-
-// Unlock releases the slot. Must be called exactly once per successful Lock
-// or successful (true-returning) TryLockContext call.
+// Unlock releases the slot. Must be called exactly once per successful
+// (true-returning) TryLockContext call.
 func (s sendSem) Unlock() { s <- struct{}{} }
 
 // TryLockContext attempts to acquire the slot, blocking until it succeeds
@@ -317,16 +313,8 @@ func (c *Client) recvLoop() {
 			h := c.notificationHandler
 			c.mu.Unlock()
 			if h != nil && resp.Method != "" {
-				select {
-				case c.dispatchSem <- struct{}{}:
-					c.dispatchWG.Add(1)
-					go func() {
-						defer c.dispatchWG.Done()
-						defer func() { <-c.dispatchSem }()
-						h(resp.Method, resp.Params)
-					}()
-				default:
-				}
+				method, params := resp.Method, resp.Params
+				c.tryDispatch(func() { h(method, params) })
 			}
 			continue
 		}
@@ -344,15 +332,7 @@ func (c *Client) recvLoop() {
 			// JSON-RPC error rather than spawned or queued, so recvLoop
 			// itself never blocks waiting for dispatch capacity.
 			req := serverRequest{ID: resp.ID, Method: resp.Method, Params: resp.Params}
-			select {
-			case c.dispatchSem <- struct{}{}:
-				c.dispatchWG.Add(1)
-				go func() {
-					defer c.dispatchWG.Done()
-					defer func() { <-c.dispatchSem }()
-					c.dispatchServerRequest(req)
-				}()
-			default:
+			if !c.tryDispatch(func() { c.dispatchServerRequest(req) }) {
 				// Bounded, best-effort: see busyReplyTimeout for why this
 				// write must not be allowed to block recvLoop indefinitely.
 				busyCtx, busyCancel := context.WithTimeout(c.ctx, busyReplyTimeout)
@@ -385,6 +365,26 @@ func (c *Client) recvLoop() {
 		if ok {
 			ch <- resp
 		}
+	}
+}
+
+// tryDispatch runs fn on a new goroutine if a dispatchSem slot is free,
+// reporting whether it did. The goroutine is tracked by dispatchWG (so Close
+// can drain it — see closeDrainGrace) and releases its slot when fn returns.
+// If the bound is saturated it does nothing and returns false immediately —
+// never blocking recvLoop, its only caller.
+func (c *Client) tryDispatch(fn func()) bool {
+	select {
+	case c.dispatchSem <- struct{}{}:
+		c.dispatchWG.Add(1)
+		go func() {
+			defer c.dispatchWG.Done()
+			defer func() { <-c.dispatchSem }()
+			fn()
+		}()
+		return true
+	default:
+		return false
 	}
 }
 

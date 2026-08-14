@@ -8,12 +8,12 @@
 package assemblyai
 
 import (
-	"encoding/json"
 	"net/http"
 	"os"
 	"time"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
+	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -95,43 +95,5 @@ func (p *Provider) poll() time.Duration {
 
 // apiError converts a non-2xx HTTP response into an *ai.APICallError.
 func apiError(resp *http.Response, body []byte) error {
-	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), errorMessage(body))
-}
-
-// wireError matches AssemblyAI's error body shape: {"error": "..."}.
-type wireError struct {
-	Error string `json:"error"`
-}
-
-// errorMessage tries to parse AssemblyAI's error body shape
-// {"error":"..."}. Falls back to the raw body if parsing fails or no
-// message field is present.
-func errorMessage(body []byte) string {
-	var we wireError
-	if err := json.Unmarshal(body, &we); err == nil && we.Error != "" {
-		return we.Error
-	}
-	return string(body)
-}
-
-// ---- provider options ----
-
-// applyProviderOptions merges providerOptions["assemblyai"] (when it is a
-// non-empty map[string]any) top-level into the already-marshaled JSON
-// request object reqBytes, entries from the option map winning over
-// whatever the SDK built. Returns reqBytes unchanged (no unmarshal/marshal
-// round trip) when there's nothing to merge, which is the common case.
-func applyProviderOptions(reqBytes []byte, providerOptions map[string]any) ([]byte, error) {
-	opts, _ := providerOptions["assemblyai"].(map[string]any)
-	if len(opts) == 0 {
-		return reqBytes, nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(reqBytes, &m); err != nil {
-		return nil, err
-	}
-	for k, v := range opts {
-		m[k] = v
-	}
-	return json.Marshal(m)
+	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), providerutil.ErrorMessage(body))
 }

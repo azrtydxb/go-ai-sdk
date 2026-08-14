@@ -3,7 +3,6 @@ package ai
 import (
 	"context"
 
-	"github.com/azrtydxb/go-ai-sdk/internal/retry"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -50,11 +49,6 @@ func Translate(ctx context.Context, opts TranslateOpts) (*TranslateResult, error
 		return nil, ErrAudioRequired
 	}
 
-	maxRetries := defaultMaxRetries
-	if opts.MaxRetries != nil {
-		maxRetries = *opts.MaxRetries
-	}
-
 	call := provider.TranslationCall{
 		Audio:           opts.Audio,
 		MediaType:       opts.MediaType,
@@ -63,20 +57,9 @@ func Translate(ctx context.Context, opts TranslateOpts) (*TranslateResult, error
 		Headers:         opts.Headers,
 	}
 
-	if opts.OnTranslateStart != nil {
-		opts.OnTranslateStart(call)
-	}
-
-	resp, err := retry.Do(ctx, maxRetries, func() (*provider.TranslationResponse, error) {
-		return opts.Model.Translate(ctx, call)
-	})
-	callErr := translateRetryErr(err)
-
-	if opts.OnTranslateEnd != nil {
-		opts.OnTranslateEnd(resp, callErr)
-	}
-	if callErr != nil {
-		return nil, callErr
+	resp, err := mediaCall(ctx, opts.MaxRetries, call, opts.OnTranslateStart, opts.Model.Translate, opts.OnTranslateEnd)
+	if err != nil {
+		return nil, err
 	}
 
 	return &TranslateResult{

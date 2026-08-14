@@ -9,8 +9,9 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/azrtydxb/go-ai-sdk/internal/fetchimage"
+	"github.com/azrtydxb/go-ai-sdk/internal/fetchmedia"
 	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
+	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
 	"github.com/azrtydxb/go-ai-sdk/internal/transcribeutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -68,7 +69,7 @@ func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall
 	if err != nil {
 		return nil, fmt.Errorf("luma: marshal image request: %w", err)
 	}
-	reqBody, err = applyProviderOptions(reqBody, call.ProviderOptions)
+	reqBody, err = providerutil.ApplyProviderOptions(reqBody, call.ProviderOptions, "luma")
 	if err != nil {
 		return nil, fmt.Errorf("luma: apply provider options: %w", err)
 	}
@@ -113,7 +114,7 @@ func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall
 		return nil, fmt.Errorf("luma: completed generation contained no image asset: %s", rawBody)
 	}
 
-	data, mediaType, err := fetchimage.Fetch(ctx, m.provider.client(), gen.Assets.Image, "luma")
+	data, mediaType, err := fetchmedia.FetchImage(ctx, m.provider.client(), gen.Assets.Image, "luma")
 	if err != nil {
 		return nil, err
 	}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/azrtydxb/go-ai-sdk/internal/fetchmedia"
 	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
+	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
 	"github.com/azrtydxb/go-ai-sdk/internal/transcribeutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -69,7 +70,7 @@ func (m *videoModel) GenerateVideos(ctx context.Context, call provider.VideoCall
 	if err != nil {
 		return nil, fmt.Errorf("luma: marshal video request: %w", err)
 	}
-	reqBody, err = applyProviderOptions(reqBody, call.ProviderOptions)
+	reqBody, err = providerutil.ApplyProviderOptions(reqBody, call.ProviderOptions, "luma")
 	if err != nil {
 		return nil, fmt.Errorf("luma: apply provider options: %w", err)
 	}
@@ -114,7 +115,7 @@ func (m *videoModel) GenerateVideos(ctx context.Context, call provider.VideoCall
 		return nil, fmt.Errorf("luma: completed generation contained no video asset: %s", rawBody)
 	}
 
-	data, mediaType, err := fetchmedia.Fetch(ctx, m.provider.client(), gen.Assets.Video, "luma", 0)
+	data, mediaType, err := fetchmedia.Fetch(ctx, m.provider.client(), gen.Assets.Video, "luma")
 	if err != nil {
 		return nil, err
 	}

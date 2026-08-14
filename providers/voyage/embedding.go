@@ -10,6 +10,7 @@ import (
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
 	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
+	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -28,7 +29,7 @@ func (m *embeddingModel) ProviderName() string { return providerName }
 func (m *embeddingModel) MaxBatchSize() int    { return embeddingBatch }
 
 func apiError(resp *http.Response, body []byte) error {
-	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), errorMessage(body))
+	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), providerutil.ErrorMessage(body))
 }
 
 func (m *embeddingModel) Embed(ctx context.Context, values []string) (*provider.EmbeddingResponse, error) {
@@ -43,7 +44,7 @@ func (m *embeddingModel) EmbedCall(ctx context.Context, call provider.EmbeddingC
 	if err != nil {
 		return nil, fmt.Errorf("voyage: marshal embedding request: %w", err)
 	}
-	reqBody, err = applyProviderOptions(reqBody, call.ProviderOptions)
+	reqBody, err = providerutil.ApplyProviderOptions(reqBody, call.ProviderOptions, providerName)
 	if err != nil {
 		return nil, fmt.Errorf("voyage: apply provider options: %w", err)
 	}

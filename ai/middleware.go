@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"iter"
+	"maps"
 	"strings"
 
 	"github.com/azrtydxb/go-ai-sdk/provider"
@@ -569,31 +570,15 @@ func (m *defaultSettingsModel) applyDefaults(call provider.Call) provider.Call {
 // result afterward cannot affect either input.
 func mergeHeaders(defaults, override map[string]string) map[string]string {
 	if len(defaults) == 0 {
-		return copyHeadersMap(override)
+		return maps.Clone(override)
 	}
 	if len(override) == 0 {
-		return copyHeadersMap(defaults)
+		return maps.Clone(defaults)
 	}
 	merged := make(map[string]string, len(defaults)+len(override))
-	for k, v := range defaults {
-		merged[k] = v
-	}
-	for k, v := range override {
-		merged[k] = v
-	}
+	maps.Copy(merged, defaults)
+	maps.Copy(merged, override)
 	return merged
-}
-
-// copyHeadersMap returns a copy of m (nil stays nil).
-func copyHeadersMap(m map[string]string) map[string]string {
-	if m == nil {
-		return nil
-	}
-	cp := make(map[string]string, len(m))
-	for k, v := range m {
-		cp[k] = v
-	}
-	return cp
 }
 
 // mergeProviderOptions shallow-merges per-call provider options over
@@ -629,12 +614,8 @@ func mergeProviderOptions(defaults, override map[string]any) map[string]any {
 			continue
 		}
 		nsMerged := make(map[string]any, len(dm)+len(om))
-		for k, v := range dm {
-			nsMerged[k] = v
-		}
-		for k, v := range om {
-			nsMerged[k] = v
-		}
+		maps.Copy(nsMerged, dm)
+		maps.Copy(nsMerged, om)
 		merged[ns] = nsMerged
 	}
 	return merged
@@ -658,15 +639,10 @@ func copyOptionsMap(m map[string]any) map[string]any {
 // map[string]any (the common shape of a provider-options namespace value),
 // otherwise v unchanged.
 func copyNamespaceValue(v any) any {
-	m, ok := v.(map[string]any)
-	if !ok {
-		return v
+	if m, ok := v.(map[string]any); ok {
+		return maps.Clone(m)
 	}
-	cp := make(map[string]any, len(m))
-	for k, vv := range m {
-		cp[k] = vv
-	}
-	return cp
+	return v
 }
 
 // ---------------------------------------------------------------------
