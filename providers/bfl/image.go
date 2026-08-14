@@ -13,6 +13,7 @@ import (
 	"github.com/azrtydxb/go-ai-sdk/internal/fetchimage"
 	"github.com/azrtydxb/go-ai-sdk/internal/fetchmedia"
 	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
+	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
 	"github.com/azrtydxb/go-ai-sdk/internal/transcribeutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -83,7 +84,7 @@ func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall
 	if err != nil {
 		return nil, fmt.Errorf("bfl: marshal image request: %w", err)
 	}
-	reqBody, err = applyProviderOptions(reqBody, call.ProviderOptions)
+	reqBody, err = providerutil.ApplyProviderOptions(reqBody, call.ProviderOptions, "bfl")
 	if err != nil {
 		return nil, fmt.Errorf("bfl: apply provider options: %w", err)
 	}

@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
+	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -47,7 +48,7 @@ func (m *embeddingModel) EmbedCall(ctx context.Context, call provider.EmbeddingC
 	if err != nil {
 		return nil, fmt.Errorf("%s: marshal embedding request: %w", m.cfg.Name, err)
 	}
-	reqBody, err = applyProviderOptions(reqBody, call.ProviderOptions, m.cfg.Name)
+	reqBody, err = providerutil.ApplyProviderOptions(reqBody, call.ProviderOptions, m.cfg.Name)
 	if err != nil {
 		return nil, fmt.Errorf("%s: apply provider options: %w", m.cfg.Name, err)
 	}

@@ -8,11 +8,11 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
-	"net/textproto"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
 	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/internal/multipartutil"
+	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -45,45 +45,8 @@ type fileWireResponse struct {
 	Bytes    int64  `json:"bytes"`
 }
 
-type fileWireError struct {
-	Error struct {
-		Message string `json:"message"`
-	} `json:"error"`
-}
-
-func fileErrorMessage(body []byte) string {
-	var we fileWireError
-	if err := json.Unmarshal(body, &we); err == nil && we.Error.Message != "" {
-		return we.Error.Message
-	}
-	return string(body)
-}
-
 func fileAPIError(resp *http.Response, body []byte) error {
-	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), fileErrorMessage(body))
-}
-
-// createFilePart adds the "file" part to mw, using filename and, when
-// mediaType is non-empty, a Content-Type header carrying it — mirroring
-// internal/openaicompat's translation upload path. An empty mediaType
-// falls back to mw.CreateFormFile, which (per net/http's sniffing
-// convention) always writes "application/octet-stream" and leaves
-// call.FileUploadCall.MediaType's information dropped, matching prior
-// behavior for callers that don't set MediaType.
-func createFilePart(mw *multipart.Writer, filename, mediaType string) (io.Writer, error) {
-	if err := multipartutil.ValidField("filename", filename); err != nil {
-		return nil, err
-	}
-	if err := multipartutil.ValidField("media type", mediaType); err != nil {
-		return nil, err
-	}
-	if mediaType == "" {
-		return mw.CreateFormFile("file", filename)
-	}
-	h := make(textproto.MIMEHeader)
-	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename=%q`, filename))
-	h.Set("Content-Type", mediaType)
-	return mw.CreatePart(h)
+	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), providerutil.ErrorMessage(body))
 }
 
 // UploadFile implements provider.FileStore. It POSTs a multipart request to
@@ -96,7 +59,7 @@ func (s *fileStore) UploadFile(ctx context.Context, call provider.FileUploadCall
 	if filename == "" {
 		filename = "file"
 	}
-	fw, err := createFilePart(mw, filename, call.MediaType)
+	fw, err := multipartutil.CreateFilePart(mw, "file", filename, call.MediaType)
 	if err != nil {
 		return nil, fmt.Errorf("openai: create file part: %w", err)
 	}
@@ -115,19 +78,8 @@ func (s *fileStore) UploadFile(ctx context.Context, call provider.FileUploadCall
 		return nil, fmt.Errorf("openai: write purpose field: %w", err)
 	}
 
-	if opts, ok := call.ProviderOptions["openai"].(map[string]any); ok {
-		for k, v := range opts {
-			if err := multipartutil.ValidField("provider option field name", k); err != nil {
-				return nil, fmt.Errorf("openai: %w", err)
-			}
-			sv := fmt.Sprint(v)
-			if err := multipartutil.ValidField("provider option field value", sv); err != nil {
-				return nil, fmt.Errorf("openai: %w", err)
-			}
-			if err := mw.WriteField(k, sv); err != nil {
-				return nil, fmt.Errorf("openai: write provider option field %q: %w", k, err)
-			}
-		}
+	if err := multipartutil.ApplyProviderOptionsForm(mw, call.ProviderOptions, "openai"); err != nil {
+		return nil, fmt.Errorf("openai: %w", err)
 	}
 
 	if err := mw.Close(); err != nil {

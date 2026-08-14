@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -21,17 +22,6 @@ import (
 // elicitation reachable against a 2025-06-18 server while remaining
 // back-compatible with a 2025-03-26 server.
 var supportedProtocolVersions = []string{"2025-06-18", "2025-03-26"}
-
-// isSupportedProtocolVersion reports whether v is one of
-// supportedProtocolVersions.
-func isSupportedProtocolVersion(v string) bool {
-	for _, sv := range supportedProtocolVersions {
-		if sv == v {
-			return true
-		}
-	}
-	return false
-}
 
 type clientInfo struct {
 	Name    string `json:"name"`
@@ -90,7 +80,7 @@ func (c *Client) Initialize(ctx context.Context) error {
 	if err := json.Unmarshal(raw, &res); err != nil {
 		return fmt.Errorf("mcp: decode initialize result: %w", err)
 	}
-	if !isSupportedProtocolVersion(res.ProtocolVersion) {
+	if !slices.Contains(supportedProtocolVersions, res.ProtocolVersion) {
 		return fmt.Errorf("mcp: server negotiated unsupported protocol version %q", res.ProtocolVersion)
 	}
 	c.mu.Lock()

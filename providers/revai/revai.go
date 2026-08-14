@@ -8,12 +8,12 @@
 package revai
 
 import (
-	"encoding/json"
 	"net/http"
 	"os"
 	"time"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
+	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -98,28 +98,5 @@ func (p *Provider) poll() time.Duration {
 
 // apiError converts a non-2xx HTTP response into an *ai.APICallError.
 func apiError(resp *http.Response, body []byte) error {
-	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), errorMessage(body))
-}
-
-// wireError matches Rev.ai's error body shape:
-// {"title":"...","detail":"..."} (RFC 7807 Problem Details).
-type wireError struct {
-	Title  string `json:"title"`
-	Detail string `json:"detail"`
-}
-
-// errorMessage tries to parse Rev.ai's error body shape
-// {"title":"...","detail":"..."}, preferring detail over title. Falls back
-// to the raw body if parsing fails or neither field is present.
-func errorMessage(body []byte) string {
-	var we wireError
-	if err := json.Unmarshal(body, &we); err == nil {
-		if we.Detail != "" {
-			return we.Detail
-		}
-		if we.Title != "" {
-			return we.Title
-		}
-	}
-	return string(body)
+	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), providerutil.ErrorMessage(body))
 }

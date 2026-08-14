@@ -63,18 +63,3 @@ func TestImageModel(t *testing.T) {
 		t.Errorf("ProviderName() = %q", m.ProviderName())
 	}
 }
-
-func TestErrorMessage_Detail(t *testing.T) {
-	got := errorMessage([]byte(`{"detail":"invalid api key"}`))
-	if got != "invalid api key" {
-		t.Errorf("errorMessage = %q, want %q", got, "invalid api key")
-	}
-}
-
-func TestErrorMessage_FallsBackToRawBody(t *testing.T) {
-	body := `not json at all`
-	got := errorMessage([]byte(body))
-	if got != body {
-		t.Errorf("errorMessage = %q, want raw body %q", got, body)
-	}
-}

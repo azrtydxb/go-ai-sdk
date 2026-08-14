@@ -1,17 +1,10 @@
 package openaicompat
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"mime/multipart"
-	"net/http"
 
-	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
-	"github.com/azrtydxb/go-ai-sdk/internal/multipartutil"
-	"github.com/azrtydxb/go-ai-sdk/internal/transcribeutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -42,81 +35,18 @@ type translationResponse struct {
 }
 
 func (m *translationModel) Translate(ctx context.Context, call provider.TranslationCall) (*provider.TranslationResponse, error) {
-	if m.cfg.BaseURL == "" {
-		return nil, fmt.Errorf("%s: base URL not configured", m.cfg.Name)
-	}
-	if err := multipartutil.ValidField("media type", call.MediaType); err != nil {
-		return nil, fmt.Errorf("openaicompat: %w", err)
-	}
-	// call.Prompt is intentionally not guarded here — see the matching
-	// comment in transcription.go: it only ever reaches a multipart field
-	// value, never a header.
-
-	var buf bytes.Buffer
-	mw := multipart.NewWriter(&buf)
-
-	ext := transcribeutil.ExtForMediaType(call.MediaType)
-	if ext == "" {
-		ext = ".bin"
-	}
-	filename := "audio" + ext
-	fileHeader := make(map[string][]string)
-	fileHeader["Content-Disposition"] = []string{fmt.Sprintf(`form-data; name="file"; filename=%q`, filename)}
-	contentType := call.MediaType
-	if contentType == "" {
-		contentType = "application/octet-stream"
-	}
-	fileHeader["Content-Type"] = []string{contentType}
-	part, err := mw.CreatePart(fileHeader)
-	if err != nil {
-		return nil, fmt.Errorf("openaicompat: create translation file part: %w", err)
-	}
-	if _, err := part.Write(call.Audio); err != nil {
-		return nil, fmt.Errorf("openaicompat: write translation file part: %w", err)
-	}
-
-	if err := mw.WriteField("model", m.modelID); err != nil {
-		return nil, fmt.Errorf("openaicompat: write model field: %w", err)
-	}
-	if call.Prompt != "" {
-		if err := mw.WriteField("prompt", call.Prompt); err != nil {
-			return nil, fmt.Errorf("openaicompat: write prompt field: %w", err)
-		}
-	}
-	if err := mw.WriteField("response_format", "verbose_json"); err != nil {
-		return nil, fmt.Errorf("openaicompat: write response_format field: %w", err)
-	}
-
-	if err := applyProviderOptionsForm(mw, call.ProviderOptions, m.cfg.Name); err != nil {
-		return nil, fmt.Errorf("openaicompat: apply provider options: %w", err)
-	}
-
-	if err := mw.Close(); err != nil {
-		return nil, fmt.Errorf("openaicompat: close multipart writer: %w", err)
-	}
-
-	url := m.cfg.BaseURL + "/audio/translations"
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, &buf)
-	if err != nil {
-		return nil, fmt.Errorf("openaicompat: build translation request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", mw.FormDataContentType())
-	m.cfg.setAuthHeader(httpReq)
-	httpheader.Apply(httpReq, call.Headers, m.cfg.authHeaderName())
-
-	resp, err := m.cfg.client().Do(httpReq)
+	body, err := doAudioForm(ctx, m.cfg, m.modelID, audioFormCall{
+		endpoint:        "translations",
+		kind:            "translation",
+		responseFormat:  "verbose_json",
+		mediaType:       call.MediaType,
+		audio:           call.Audio,
+		prompt:          call.Prompt,
+		providerOptions: call.ProviderOptions,
+		headers:         call.Headers,
+	})
 	if err != nil {
 		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("openaicompat: read translation response: %w", err)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, apiError(resp, body)
 	}
 
 	var wr translationResponse

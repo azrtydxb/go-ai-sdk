@@ -12,6 +12,7 @@ import (
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
 	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
+	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
 	"github.com/azrtydxb/go-ai-sdk/internal/sse"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -48,7 +49,7 @@ func (m *languageModel) doRequest(ctx context.Context, url string, body []byte, 
 }
 
 func apiError(resp *http.Response, body []byte) error {
-	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), errorMessage(body))
+	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), providerutil.ErrorMessage(body))
 }
 
 func (m *languageModel) Generate(ctx context.Context, call provider.Call) (*provider.Response, error) {
@@ -60,7 +61,7 @@ func (m *languageModel) Generate(ctx context.Context, call provider.Call) (*prov
 	if err != nil {
 		return nil, fmt.Errorf("%s: marshal request: %w", m.cfg.Name, err)
 	}
-	body, err = applyProviderOptions(body, call.ProviderOptions, m.cfg.Name)
+	body, err = providerutil.ApplyProviderOptions(body, call.ProviderOptions, m.cfg.Name)
 	if err != nil {
 		return nil, fmt.Errorf("%s: apply provider options: %w", m.cfg.Name, err)
 	}
@@ -98,7 +99,7 @@ func (m *languageModel) Stream(ctx context.Context, call provider.Call) (provide
 	if err != nil {
 		return nil, fmt.Errorf("%s: marshal request: %w", m.cfg.Name, err)
 	}
-	body, err = applyProviderOptions(body, call.ProviderOptions, m.cfg.Name)
+	body, err = providerutil.ApplyProviderOptions(body, call.ProviderOptions, m.cfg.Name)
 	if err != nil {
 		return nil, fmt.Errorf("%s: apply provider options: %w", m.cfg.Name, err)
 	}

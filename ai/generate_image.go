@@ -12,6 +12,37 @@ import (
 // ErrPromptRequired is returned when Prompt is empty in GenerateImage options.
 var ErrPromptRequired = errors.New("ai: prompt is required")
 
+// mediaCall is the shared skeleton behind the media wrappers (GenerateImage,
+// GenerateSpeech, GenerateVideo, Transcribe, Translate, Rerank, UploadFile,
+// DeleteFile): fire the optional start hook with the built call, run do under
+// retry (nil maxRetries → defaultMaxRetries), translate retry exhaustion to
+// *RetryError, then fire the optional end hook with the SAME error the caller
+// gets (resp is the zero value on error).
+func mediaCall[C, R any](ctx context.Context, maxRetries *int, call C, onStart func(C), do func(context.Context, C) (R, error), onEnd func(R, error)) (R, error) {
+	mr := defaultMaxRetries
+	if maxRetries != nil {
+		mr = *maxRetries
+	}
+
+	if onStart != nil {
+		onStart(call)
+	}
+
+	resp, err := retry.Do(ctx, mr, func() (R, error) {
+		return do(ctx, call)
+	})
+	callErr := translateRetryErr(err)
+
+	if onEnd != nil {
+		onEnd(resp, callErr)
+	}
+	if callErr != nil {
+		var zero R
+		return zero, callErr
+	}
+	return resp, nil
+}
+
 // GenerateImageOpts options for the GenerateImage function.
 type GenerateImageOpts struct {
 	Model           provider.ImageModel // required
@@ -55,11 +86,6 @@ func GenerateImage(ctx context.Context, opts GenerateImageOpts) (*GenerateImageR
 		return nil, ErrPromptRequired
 	}
 
-	maxRetries := defaultMaxRetries
-	if opts.MaxRetries != nil {
-		maxRetries = *opts.MaxRetries
-	}
-
 	call := provider.ImageCall{
 		Prompt:          opts.Prompt,
 		N:               opts.N,
@@ -70,20 +96,9 @@ func GenerateImage(ctx context.Context, opts GenerateImageOpts) (*GenerateImageR
 		Headers:         opts.Headers,
 	}
 
-	if opts.OnImageStart != nil {
-		opts.OnImageStart(call)
-	}
-
-	resp, err := retry.Do(ctx, maxRetries, func() (*provider.ImageResponse, error) {
-		return opts.Model.GenerateImages(ctx, call)
-	})
-	callErr := translateRetryErr(err)
-
-	if opts.OnImageEnd != nil {
-		opts.OnImageEnd(resp, callErr)
-	}
-	if callErr != nil {
-		return nil, callErr
+	resp, err := mediaCall(ctx, opts.MaxRetries, call, opts.OnImageStart, opts.Model.GenerateImages, opts.OnImageEnd)
+	if err != nil {
+		return nil, err
 	}
 
 	if len(resp.Images) == 0 {

@@ -305,7 +305,9 @@ func TestBusyReplyDropsWithoutWedgingRecvLoop(t *testing.T) {
 	// stdin) by holding sendSem ourselves — exactly what an in-progress Send
 	// would do — and deliberately never releasing it in this phase of the
 	// test.
-	c.sendSem.Lock()
+	if !c.sendSem.TryLockContext(context.Background()) {
+		t.Fatal("could not acquire sendSem")
+	}
 
 	sendServerRequest(t, server, 1000, "elicitation/create", map[string]any{"message": "overflow-1"})
 

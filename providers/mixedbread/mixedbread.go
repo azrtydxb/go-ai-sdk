@@ -3,12 +3,11 @@
 package mixedbread
 
 import (
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
+	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -70,43 +69,6 @@ func (p *Provider) client() *http.Client {
 	return http.DefaultClient
 }
 
-// ---- wire types ----
-
-type wireError struct {
-	Detail string `json:"detail"`
-}
-
-// errorMessage tries to parse Mixedbread's {"detail":...} error body
-// shape. Falls back to the raw body if parsing fails or no detail field is
-// present.
-func errorMessage(body []byte) string {
-	var we wireError
-	if err := json.Unmarshal(body, &we); err == nil && we.Detail != "" {
-		return we.Detail
-	}
-	return string(body)
-}
-
-// applyProviderOptions merges providerOptions["mixedbread"] (when it is a
-// non-empty map[string]any) into the already-marshaled JSON object
-// reqBytes, entries from the option map winning over whatever the SDK
-// built. Returns reqBytes unchanged (no unmarshal/marshal round trip) when
-// there's nothing to merge, which is the common case.
-func applyProviderOptions(reqBytes []byte, providerOptions map[string]any) ([]byte, error) {
-	opts, _ := providerOptions["mixedbread"].(map[string]any)
-	if len(opts) == 0 {
-		return reqBytes, nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(reqBytes, &m); err != nil {
-		return nil, fmt.Errorf("mixedbread: unmarshal request for provider options merge: %w", err)
-	}
-	for k, v := range opts {
-		m[k] = v
-	}
-	return json.Marshal(m)
-}
-
 func apiError(resp *http.Response, body []byte) error {
-	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), errorMessage(body))
+	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), providerutil.ErrorMessage(body))
 }

@@ -8,7 +8,6 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
-	"net/textproto"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/internal/multipartutil"
@@ -40,79 +39,34 @@ type fileWireResponse struct {
 	MimeType  string `json:"mime_type"`
 }
 
-// createFilePart adds the "file" part to mw, using filename and, when
-// mediaType is non-empty, a Content-Type header carrying it — mirroring
-// internal/openaicompat's translation upload path. An empty mediaType
-// falls back to mw.CreateFormFile, which (per net/http's sniffing
-// convention) always writes "application/octet-stream" and leaves
-// call.FileUploadCall.MediaType's information dropped, matching prior
-// behavior for callers that don't set MediaType.
-func createFilePart(mw *multipart.Writer, filename, mediaType string) (io.Writer, error) {
-	if err := multipartutil.ValidField("filename", filename); err != nil {
-		return nil, err
-	}
-	if err := multipartutil.ValidField("media type", mediaType); err != nil {
-		return nil, err
-	}
-	if mediaType == "" {
-		return mw.CreateFormFile("file", filename)
-	}
-	h := make(textproto.MIMEHeader)
-	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename=%q`, filename))
-	h.Set("Content-Type", mediaType)
-	return mw.CreatePart(h)
-}
-
-// UploadFile implements provider.FileStore. It POSTs a multipart request to
-// {base}/v1/files with a "file" field, sending the x-api-key,
-// anthropic-version, and anthropic-beta: files-api-2025-04-14 headers.
-func (s *fileStore) UploadFile(ctx context.Context, call provider.FileUploadCall) (*provider.FileInfo, error) {
+// postMultipart POSTs a multipart request built by build to {base}{path},
+// sending the x-api-key, anthropic-version, and given anthropic-beta
+// headers (plus any extra caller headers), then decodes the 2xx response
+// into out. Returns the raw response body for Raw fields. Shared by
+// UploadFile and UploadSkill.
+func (p *Provider) postMultipart(ctx context.Context, path, betaHeader string, headers map[string]string, build func(*multipart.Writer) error, out any) ([]byte, error) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 
-	filename := call.Filename
-	if filename == "" {
-		filename = "file"
+	if err := build(mw); err != nil {
+		return nil, fmt.Errorf("anthropic: %w", err)
 	}
-	fw, err := createFilePart(mw, filename, call.MediaType)
-	if err != nil {
-		return nil, fmt.Errorf("anthropic: create file part: %w", err)
-	}
-	if _, err := fw.Write(call.Data); err != nil {
-		return nil, fmt.Errorf("anthropic: write file part: %w", err)
-	}
-
-	if opts, ok := call.ProviderOptions["anthropic"].(map[string]any); ok {
-		for k, v := range opts {
-			if err := multipartutil.ValidField("provider option field name", k); err != nil {
-				return nil, fmt.Errorf("anthropic: %w", err)
-			}
-			sv := fmt.Sprint(v)
-			if err := multipartutil.ValidField("provider option field value", sv); err != nil {
-				return nil, fmt.Errorf("anthropic: %w", err)
-			}
-			if err := mw.WriteField(k, sv); err != nil {
-				return nil, fmt.Errorf("anthropic: write provider option field %q: %w", k, err)
-			}
-		}
-	}
-
 	if err := mw.Close(); err != nil {
 		return nil, fmt.Errorf("anthropic: close multipart writer: %w", err)
 	}
 
-	url := s.provider.baseURL + "/v1/files"
+	url := p.baseURL + path
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, &buf)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: build upload request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", mw.FormDataContentType())
-	httpReq.Header.Set(anthropicAuthHeader, s.provider.apiKey)
+	httpReq.Header.Set(anthropicAuthHeader, p.apiKey)
 	httpReq.Header.Set("anthropic-version", anthropicVersion)
-	httpReq.Header.Set("anthropic-beta", filesBetaHeader)
-	httpheader.Apply(httpReq, call.Headers, anthropicAuthHeader)
+	httpReq.Header.Set("anthropic-beta", betaHeader)
+	httpheader.Apply(httpReq, headers, anthropicAuthHeader)
 
-	resp, err := s.provider.client().Do(httpReq)
+	resp, err := p.client().Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
@@ -127,9 +81,34 @@ func (s *fileStore) UploadFile(ctx context.Context, call provider.FileUploadCall
 		return nil, apiError(resp, body)
 	}
 
-	var wr fileWireResponse
-	if err := json.Unmarshal(body, &wr); err != nil {
+	if err := json.Unmarshal(body, out); err != nil {
 		return nil, fmt.Errorf("anthropic: decode upload response: %w", err)
+	}
+	return body, nil
+}
+
+// UploadFile implements provider.FileStore. It POSTs a multipart request to
+// {base}/v1/files with a "file" field, sending the x-api-key,
+// anthropic-version, and anthropic-beta: files-api-2025-04-14 headers.
+func (s *fileStore) UploadFile(ctx context.Context, call provider.FileUploadCall) (*provider.FileInfo, error) {
+	filename := call.Filename
+	if filename == "" {
+		filename = "file"
+	}
+
+	var wr fileWireResponse
+	body, err := s.provider.postMultipart(ctx, "/v1/files", filesBetaHeader, call.Headers, func(mw *multipart.Writer) error {
+		fw, err := multipartutil.CreateFilePart(mw, "file", filename, call.MediaType)
+		if err != nil {
+			return fmt.Errorf("create file part: %w", err)
+		}
+		if _, err := fw.Write(call.Data); err != nil {
+			return fmt.Errorf("write file part: %w", err)
+		}
+		return multipartutil.ApplyProviderOptionsForm(mw, call.ProviderOptions, "anthropic")
+	}, &wr)
+	if err != nil {
+		return nil, err
 	}
 
 	return &provider.FileInfo{

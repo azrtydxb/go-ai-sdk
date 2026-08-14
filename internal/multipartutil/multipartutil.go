@@ -17,6 +17,9 @@ package multipartutil
 
 import (
 	"fmt"
+	"io"
+	"mime/multipart"
+	"net/textproto"
 	"strings"
 )
 
@@ -28,6 +31,47 @@ import (
 func ValidField(kind, s string) error {
 	if strings.ContainsAny(s, "\r\n\"") {
 		return fmt.Errorf("invalid %s: contains CR, LF, or quote", kind)
+	}
+	return nil
+}
+
+// CreateFilePart adds a file part named field to mw, using filename and,
+// when mediaType is non-empty, a Content-Type header carrying it. An empty
+// mediaType falls back to mw.CreateFormFile, which (per net/http's sniffing
+// convention) always writes "application/octet-stream".
+func CreateFilePart(mw *multipart.Writer, field, filename, mediaType string) (io.Writer, error) {
+	if err := ValidField("filename", filename); err != nil {
+		return nil, err
+	}
+	if err := ValidField("media type", mediaType); err != nil {
+		return nil, err
+	}
+	if mediaType == "" {
+		return mw.CreateFormFile(field, filename)
+	}
+	h := make(textproto.MIMEHeader)
+	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name=%q; filename=%q`, field, filename))
+	h.Set("Content-Type", mediaType)
+	return mw.CreatePart(h)
+}
+
+// ApplyProviderOptionsForm writes providerOptions[name] (when it is a
+// non-empty map[string]any) as extra multipart form fields, each value
+// stringified with fmt.Sprint. Used for multipart-body requests, where
+// there's no single JSON object to merge into.
+func ApplyProviderOptionsForm(mw *multipart.Writer, providerOptions map[string]any, name string) error {
+	opts, _ := providerOptions[name].(map[string]any)
+	for k, v := range opts {
+		if err := ValidField("provider option field name", k); err != nil {
+			return err
+		}
+		sv := fmt.Sprint(v)
+		if err := ValidField("provider option field value", sv); err != nil {
+			return err
+		}
+		if err := mw.WriteField(k, sv); err != nil {
+			return err
+		}
 	}
 	return nil
 }

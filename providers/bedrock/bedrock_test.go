@@ -155,7 +155,7 @@ func newFixtureServer(t *testing.T) (*httptest.Server, *fixtureState) {
 
 			switch text {
 			case "stream simple":
-				writeEvent(t, w, "messageStart", eventMessageStart{Role: "assistant"})
+				writeEvent(t, w, "messageStart", map[string]string{"role": "assistant"})
 				flusher.Flush()
 				writeEvent(t, w, "contentBlockDelta", eventContentBlockDelta{ContentBlockIndex: 0, Delta: eventDeltaUnion{Text: "Hel"}})
 				flusher.Flush()
@@ -167,7 +167,7 @@ func newFixtureServer(t *testing.T) (*httptest.Server, *fixtureState) {
 				flusher.Flush()
 
 			case "stream tool":
-				writeEvent(t, w, "messageStart", eventMessageStart{Role: "assistant"})
+				writeEvent(t, w, "messageStart", map[string]string{"role": "assistant"})
 				writeEvent(t, w, "contentBlockStart", eventContentBlockStart{
 					ContentBlockIndex: 0,
 					Start:             eventContentBlockStartUnion{ToolUse: &eventToolUseStart{ToolUseID: "tu_1", Name: "get_weather"}},
@@ -186,7 +186,7 @@ func newFixtureServer(t *testing.T) (*httptest.Server, *fixtureState) {
 				flusher.Flush()
 
 			case "stream reasoning":
-				writeEvent(t, w, "messageStart", eventMessageStart{Role: "assistant"})
+				writeEvent(t, w, "messageStart", map[string]string{"role": "assistant"})
 				flusher.Flush()
 				writeEvent(t, w, "contentBlockDelta", eventContentBlockDelta{
 					ContentBlockIndex: 0,
@@ -213,19 +213,19 @@ func newFixtureServer(t *testing.T) (*httptest.Server, *fixtureState) {
 				flusher.Flush()
 
 			case "stream truncated":
-				writeEvent(t, w, "messageStart", eventMessageStart{Role: "assistant"})
+				writeEvent(t, w, "messageStart", map[string]string{"role": "assistant"})
 				writeEvent(t, w, "contentBlockDelta", eventContentBlockDelta{ContentBlockIndex: 0, Delta: eventDeltaUnion{Text: "partial"}})
 				flusher.Flush()
 				// Connection closes here without contentBlockStop/messageStop.
 
 			case "stream exception":
-				writeEvent(t, w, "messageStart", eventMessageStart{Role: "assistant"})
+				writeEvent(t, w, "messageStart", map[string]string{"role": "assistant"})
 				writeEvent(t, w, "contentBlockDelta", eventContentBlockDelta{ContentBlockIndex: 0, Delta: eventDeltaUnion{Text: "oops"}})
 				writeException(t, w, "internalServerException", "something went wrong")
 				flusher.Flush()
 
 			case "stream error":
-				writeEvent(t, w, "messageStart", eventMessageStart{Role: "assistant"})
+				writeEvent(t, w, "messageStart", map[string]string{"role": "assistant"})
 				writeEvent(t, w, "contentBlockDelta", eventContentBlockDelta{ContentBlockIndex: 0, Delta: eventDeltaUnion{Text: "oops"}})
 				writeTransportError(t, w, "InternalServerException", "connection reset")
 				flusher.Flush()

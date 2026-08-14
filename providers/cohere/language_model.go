@@ -13,6 +13,7 @@ import (
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
 	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
+	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
 	"github.com/azrtydxb/go-ai-sdk/internal/sse"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -37,7 +38,7 @@ func (m *languageModel) doRequest(ctx context.Context, req chatRequest, provider
 	if err != nil {
 		return nil, fmt.Errorf("cohere: marshal request: %w", err)
 	}
-	body, err = applyProviderOptions(body, providerOptions)
+	body, err = providerutil.ApplyProviderOptions(body, providerOptions, "cohere")
 	if err != nil {
 		return nil, fmt.Errorf("cohere: apply provider options: %w", err)
 	}
@@ -55,7 +56,7 @@ func (m *languageModel) doRequest(ctx context.Context, req chatRequest, provider
 }
 
 func apiError(resp *http.Response, body []byte) error {
-	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), errorMessage(body))
+	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), providerutil.ErrorMessage(body))
 }
 
 func (m *languageModel) Generate(ctx context.Context, call provider.Call) (*provider.Response, error) {

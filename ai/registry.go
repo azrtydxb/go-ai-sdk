@@ -97,122 +97,60 @@ func (r *Registry) lookup(name string) (any, error) {
 	return p, nil
 }
 
-// LanguageModel resolves id ("provider:model") into a provider.LanguageModel.
-func (r *Registry) LanguageModel(id string) (provider.LanguageModel, error) {
+// resolve is the shared parse-id/lookup/type-assert plumbing behind every
+// per-capability Registry method: it splits id into provider:model, looks up
+// the registered provider, asserts it against capability interface P, and
+// constructs the model via get. capability names the capability in the
+// "does not support X models" error.
+func resolve[P, M any](r *Registry, id, capability string, get func(P, string) M) (M, error) {
+	var zero M
 	name, model, err := splitID(id)
 	if err != nil {
-		return nil, err
+		return zero, err
 	}
 	p, err := r.lookup(name)
 	if err != nil {
-		return nil, err
+		return zero, err
 	}
-	lp, ok := p.(LanguageModelProvider)
+	cp, ok := p.(P)
 	if !ok {
-		return nil, fmt.Errorf("ai: provider %q does not support language models", name)
+		return zero, fmt.Errorf("ai: provider %q does not support %s models", name, capability)
 	}
-	return lp.Model(model), nil
+	return get(cp, model), nil
+}
+
+// LanguageModel resolves id ("provider:model") into a provider.LanguageModel.
+func (r *Registry) LanguageModel(id string) (provider.LanguageModel, error) {
+	return resolve(r, id, "language", LanguageModelProvider.Model)
 }
 
 // EmbeddingModel resolves id ("provider:model") into a provider.EmbeddingModel.
 func (r *Registry) EmbeddingModel(id string) (provider.EmbeddingModel, error) {
-	name, model, err := splitID(id)
-	if err != nil {
-		return nil, err
-	}
-	p, err := r.lookup(name)
-	if err != nil {
-		return nil, err
-	}
-	ep, ok := p.(EmbeddingModelProvider)
-	if !ok {
-		return nil, fmt.Errorf("ai: provider %q does not support embedding models", name)
-	}
-	return ep.EmbeddingModel(model), nil
+	return resolve(r, id, "embedding", EmbeddingModelProvider.EmbeddingModel)
 }
 
 // ImageModel resolves id ("provider:model") into a provider.ImageModel.
 func (r *Registry) ImageModel(id string) (provider.ImageModel, error) {
-	name, model, err := splitID(id)
-	if err != nil {
-		return nil, err
-	}
-	p, err := r.lookup(name)
-	if err != nil {
-		return nil, err
-	}
-	ip, ok := p.(ImageModelProvider)
-	if !ok {
-		return nil, fmt.Errorf("ai: provider %q does not support image models", name)
-	}
-	return ip.ImageModel(model), nil
+	return resolve(r, id, "image", ImageModelProvider.ImageModel)
 }
 
 // SpeechModel resolves id ("provider:model") into a provider.SpeechModel.
 func (r *Registry) SpeechModel(id string) (provider.SpeechModel, error) {
-	name, model, err := splitID(id)
-	if err != nil {
-		return nil, err
-	}
-	p, err := r.lookup(name)
-	if err != nil {
-		return nil, err
-	}
-	sp, ok := p.(SpeechModelProvider)
-	if !ok {
-		return nil, fmt.Errorf("ai: provider %q does not support speech models", name)
-	}
-	return sp.SpeechModel(model), nil
+	return resolve(r, id, "speech", SpeechModelProvider.SpeechModel)
 }
 
 // VideoModel resolves id ("provider:model") into a provider.VideoModel.
 func (r *Registry) VideoModel(id string) (provider.VideoModel, error) {
-	name, model, err := splitID(id)
-	if err != nil {
-		return nil, err
-	}
-	p, err := r.lookup(name)
-	if err != nil {
-		return nil, err
-	}
-	vp, ok := p.(VideoModelProvider)
-	if !ok {
-		return nil, fmt.Errorf("ai: provider %q does not support video models", name)
-	}
-	return vp.VideoModel(model), nil
+	return resolve(r, id, "video", VideoModelProvider.VideoModel)
 }
 
 // TranscriptionModel resolves id ("provider:model") into a
 // provider.TranscriptionModel.
 func (r *Registry) TranscriptionModel(id string) (provider.TranscriptionModel, error) {
-	name, model, err := splitID(id)
-	if err != nil {
-		return nil, err
-	}
-	p, err := r.lookup(name)
-	if err != nil {
-		return nil, err
-	}
-	tp, ok := p.(TranscriptionModelProvider)
-	if !ok {
-		return nil, fmt.Errorf("ai: provider %q does not support transcription models", name)
-	}
-	return tp.TranscriptionModel(model), nil
+	return resolve(r, id, "transcription", TranscriptionModelProvider.TranscriptionModel)
 }
 
 // RerankingModel resolves id ("provider:model") into a provider.RerankingModel.
 func (r *Registry) RerankingModel(id string) (provider.RerankingModel, error) {
-	name, model, err := splitID(id)
-	if err != nil {
-		return nil, err
-	}
-	p, err := r.lookup(name)
-	if err != nil {
-		return nil, err
-	}
-	rp, ok := p.(RerankingModelProvider)
-	if !ok {
-		return nil, fmt.Errorf("ai: provider %q does not support reranking models", name)
-	}
-	return rp.RerankingModel(model), nil
+	return resolve(r, id, "reranking", RerankingModelProvider.RerankingModel)
 }

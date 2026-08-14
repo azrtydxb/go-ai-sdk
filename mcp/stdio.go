@@ -239,7 +239,7 @@ func (t *framedTransport) Receive(ctx context.Context) (json.RawMessage, error) 
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case <-t.closed:
-		return nil, errors.New("mcp: transport closed")
+		return nil, errTransportClosed
 	}
 }
 

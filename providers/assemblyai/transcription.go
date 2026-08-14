@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
+	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
 	"github.com/azrtydxb/go-ai-sdk/internal/transcribeutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -155,7 +156,7 @@ func (m *transcriptionModel) create(ctx context.Context, call provider.Transcrip
 	if err != nil {
 		return "", fmt.Errorf("assemblyai: marshal transcript request: %w", err)
 	}
-	reqBody, err = applyProviderOptions(reqBody, call.ProviderOptions)
+	reqBody, err = providerutil.ApplyProviderOptions(reqBody, call.ProviderOptions, providerName)
 	if err != nil {
 		return "", fmt.Errorf("assemblyai: apply provider options: %w", err)
 	}

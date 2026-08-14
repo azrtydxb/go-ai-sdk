@@ -170,9 +170,9 @@ func TestTranscriptionExtensionMapping(t *testing.T) {
 	}{
 		{"audio/mpeg", "mp3"},
 		{"audio/wav", "wav"},
-		{"audio/mp4", "mp4"},
+		{"audio/mp4", "m4a"},
 		{"audio/webm", "webm"},
-		{"audio/unknown-format", "bin"},
+		{"audio/unknown-format", "unknown-format"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.mediaType, func(t *testing.T) {

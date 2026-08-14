@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
+	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -59,7 +60,7 @@ func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall
 	if err != nil {
 		return nil, fmt.Errorf("prodia: marshal job config: %w", err)
 	}
-	cfgBytes, err = applyProviderOptions(cfgBytes, call.ProviderOptions)
+	cfgBytes, err = providerutil.ApplyProviderOptions(cfgBytes, call.ProviderOptions, "prodia")
 	if err != nil {
 		return nil, fmt.Errorf("prodia: apply provider options: %w", err)
 	}

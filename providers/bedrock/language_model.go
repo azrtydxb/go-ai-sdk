@@ -14,6 +14,7 @@ import (
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
 	"github.com/azrtydxb/go-ai-sdk/internal/eventstream"
+	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
 	"github.com/azrtydxb/go-ai-sdk/internal/sigv4"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -62,10 +63,6 @@ func escapeModelID(id string) string {
 		}
 	}
 	return buf.String()
-}
-
-func (m *languageModel) doRequest(ctx context.Context, path string, body []byte, headers map[string]string) (*http.Response, error) {
-	return m.provider.doRequest(ctx, path, body, headers)
 }
 
 // bedrockAuthHeader is the HTTP header SigV4 signing sets the computed
@@ -137,7 +134,7 @@ func (p *Provider) doRequest(ctx context.Context, path string, body []byte, head
 }
 
 func apiError(resp *http.Response, body []byte) error {
-	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), errorMessage(body))
+	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), providerutil.ErrorMessage(body))
 }
 
 func (m *languageModel) Generate(ctx context.Context, call provider.Call) (*provider.Response, error) {
@@ -154,7 +151,7 @@ func (m *languageModel) Generate(ctx context.Context, call provider.Call) (*prov
 		return nil, fmt.Errorf("bedrock: apply provider options: %w", err)
 	}
 
-	resp, err := m.doRequest(ctx, m.modelPath("/converse"), body, call.Headers)
+	resp, err := m.provider.doRequest(ctx, m.modelPath("/converse"), body, call.Headers)
 	if err != nil {
 		return nil, err
 	}
@@ -191,7 +188,7 @@ func (m *languageModel) Stream(ctx context.Context, call provider.Call) (provide
 		return nil, fmt.Errorf("bedrock: apply provider options: %w", err)
 	}
 
-	resp, err := m.doRequest(ctx, m.modelPath("/converse-stream"), body, call.Headers)
+	resp, err := m.provider.doRequest(ctx, m.modelPath("/converse-stream"), body, call.Headers)
 	if err != nil {
 		return nil, err
 	}

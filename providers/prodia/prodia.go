@@ -6,11 +6,11 @@
 package prodia
 
 import (
-	"encoding/json"
 	"net/http"
 	"os"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
+	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -72,52 +72,6 @@ func (p *Provider) client() *http.Client {
 	return http.DefaultClient
 }
 
-// ---- shared error handling ----
-
-// wireError matches Prodia's error body: {"error":"..."} or
-// {"message":"..."}.
-type wireError struct {
-	Error   string `json:"error"`
-	Message string `json:"message"`
-}
-
-// errorMessage tries to parse Prodia's error body shape. Falls back to the
-// raw body if parsing fails or no message can be extracted.
-func errorMessage(body []byte) string {
-	var we wireError
-	if err := json.Unmarshal(body, &we); err == nil {
-		if we.Error != "" {
-			return we.Error
-		}
-		if we.Message != "" {
-			return we.Message
-		}
-	}
-	return string(body)
-}
-
 func apiError(resp *http.Response, body []byte) error {
-	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), errorMessage(body))
-}
-
-// ---- provider options ----
-
-// applyProviderOptions merges providerOptions["prodia"] (when it is a
-// non-empty map[string]any) top-level into the already-marshaled JSON
-// config object cfgBytes, entries from the option map winning over
-// whatever the SDK built. Returns cfgBytes unchanged (no unmarshal/marshal
-// round trip) when there's nothing to merge, which is the common case.
-func applyProviderOptions(cfgBytes []byte, providerOptions map[string]any) ([]byte, error) {
-	opts, _ := providerOptions["prodia"].(map[string]any)
-	if len(opts) == 0 {
-		return cfgBytes, nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(cfgBytes, &m); err != nil {
-		return nil, err
-	}
-	for k, v := range opts {
-		m[k] = v
-	}
-	return json.Marshal(m)
+	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), providerutil.ErrorMessage(body))
 }

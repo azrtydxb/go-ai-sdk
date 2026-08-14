@@ -11,6 +11,7 @@ import (
 
 	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/internal/multipartutil"
+	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
 	"github.com/azrtydxb/go-ai-sdk/internal/transcribeutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -146,10 +147,7 @@ func (m *transcriptionModel) upload(ctx context.Context, call provider.Transcrip
 	}
 	filename := "audio" + transcribeutil.ExtForMediaType(call.MediaType)
 
-	partHeader := make(map[string][]string)
-	partHeader["Content-Disposition"] = []string{fmt.Sprintf(`form-data; name="audio"; filename=%q`, filename)}
-	partHeader["Content-Type"] = []string{contentType}
-	part, err := mw.CreatePart(partHeader)
+	part, err := multipartutil.CreateFilePart(mw, "audio", filename, contentType)
 	if err != nil {
 		return "", fmt.Errorf("gladia: create upload file part: %w", err)
 	}
@@ -204,7 +202,7 @@ func (m *transcriptionModel) create(ctx context.Context, call provider.Transcrip
 	if err != nil {
 		return "", fmt.Errorf("gladia: marshal pre-recorded request: %w", err)
 	}
-	reqBody, err = applyProviderOptions(reqBody, call.ProviderOptions)
+	reqBody, err = providerutil.ApplyProviderOptions(reqBody, call.ProviderOptions, providerName)
 	if err != nil {
 		return "", fmt.Errorf("gladia: apply provider options: %w", err)
 	}

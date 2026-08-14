@@ -6,7 +6,6 @@
 package anthropic
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -53,71 +52,25 @@ type skillWireResponse struct {
 // x-api-key, anthropic-version, and anthropic-beta: skills-2025-10-02
 // headers.
 func (p *Provider) UploadSkill(ctx context.Context, call UploadSkillCall) (*SkillInfo, error) {
-	var buf bytes.Buffer
-	mw := multipart.NewWriter(&buf)
-
-	fw, err := mw.CreateFormFile("files[]", "skill.zip")
-	if err != nil {
-		return nil, fmt.Errorf("anthropic: create skill file part: %w", err)
-	}
-	if _, err := fw.Write(call.Zip); err != nil {
-		return nil, fmt.Errorf("anthropic: write skill file part: %w", err)
-	}
-
-	if err := multipartutil.ValidField("display_name", call.DisplayName); err != nil {
-		return nil, fmt.Errorf("anthropic: %w", err)
-	}
-	if err := mw.WriteField("display_name", call.DisplayName); err != nil {
-		return nil, fmt.Errorf("anthropic: write display_name field: %w", err)
-	}
-
-	if opts, ok := call.ProviderOptions["anthropic"].(map[string]any); ok {
-		for k, v := range opts {
-			if err := multipartutil.ValidField("provider option field name", k); err != nil {
-				return nil, fmt.Errorf("anthropic: %w", err)
-			}
-			sv := fmt.Sprint(v)
-			if err := multipartutil.ValidField("provider option field value", sv); err != nil {
-				return nil, fmt.Errorf("anthropic: %w", err)
-			}
-			if err := mw.WriteField(k, sv); err != nil {
-				return nil, fmt.Errorf("anthropic: write provider option field %q: %w", k, err)
-			}
+	var wr skillWireResponse
+	body, err := p.postMultipart(ctx, "/v1/skills", skillsBetaHeader, nil, func(mw *multipart.Writer) error {
+		fw, err := mw.CreateFormFile("files[]", "skill.zip")
+		if err != nil {
+			return fmt.Errorf("create skill file part: %w", err)
 		}
-	}
-
-	if err := mw.Close(); err != nil {
-		return nil, fmt.Errorf("anthropic: close multipart writer: %w", err)
-	}
-
-	url := p.baseURL + "/v1/skills"
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, &buf)
-	if err != nil {
-		return nil, fmt.Errorf("anthropic: build skill upload request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", mw.FormDataContentType())
-	httpReq.Header.Set(anthropicAuthHeader, p.apiKey)
-	httpReq.Header.Set("anthropic-version", anthropicVersion)
-	httpReq.Header.Set("anthropic-beta", skillsBetaHeader)
-
-	resp, err := p.client().Do(httpReq)
+		if _, err := fw.Write(call.Zip); err != nil {
+			return fmt.Errorf("write skill file part: %w", err)
+		}
+		if err := multipartutil.ValidField("display_name", call.DisplayName); err != nil {
+			return err
+		}
+		if err := mw.WriteField("display_name", call.DisplayName); err != nil {
+			return fmt.Errorf("write display_name field: %w", err)
+		}
+		return multipartutil.ApplyProviderOptionsForm(mw, call.ProviderOptions, "anthropic")
+	}, &wr)
 	if err != nil {
 		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("anthropic: read skill upload response: %w", err)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, apiError(resp, body)
-	}
-
-	var wr skillWireResponse
-	if err := json.Unmarshal(body, &wr); err != nil {
-		return nil, fmt.Errorf("anthropic: decode skill upload response: %w", err)
 	}
 
 	return &SkillInfo{

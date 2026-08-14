@@ -5,11 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"mime"
-	"mime/multipart"
 	"strings"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
-	"github.com/azrtydxb/go-ai-sdk/internal/multipartutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -212,65 +210,6 @@ type wireToolCallDelta struct {
 	ID       string           `json:"id"`
 	Type     string           `json:"type"`
 	Function wireToolCallFunc `json:"function"`
-}
-
-// ---- Error wire type ----
-
-type wireError struct {
-	Error struct {
-		Message string `json:"message"`
-	} `json:"error"`
-}
-
-// errorMessage tries to parse OpenAI's {"error":{"message":...}} shape.
-// Falls back to the raw body if parsing fails or message is empty.
-func errorMessage(body []byte) string {
-	var we wireError
-	if err := json.Unmarshal(body, &we); err == nil && we.Error.Message != "" {
-		return we.Error.Message
-	}
-	return string(body)
-}
-
-// applyProviderOptions merges providerOptions[name] (when it is a non-empty
-// map[string]any) into the already-marshaled JSON object reqBytes, entries
-// from the option map winning over whatever the SDK built. Returns reqBytes
-// unchanged (no unmarshal/marshal round trip) when there's nothing to
-// merge, which is the common case.
-func applyProviderOptions(reqBytes []byte, providerOptions map[string]any, name string) ([]byte, error) {
-	opts, _ := providerOptions[name].(map[string]any)
-	if len(opts) == 0 {
-		return reqBytes, nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(reqBytes, &m); err != nil {
-		return nil, fmt.Errorf("openaicompat: unmarshal request for provider options merge: %w", err)
-	}
-	for k, v := range opts {
-		m[k] = v
-	}
-	return json.Marshal(m)
-}
-
-// applyProviderOptionsForm writes providerOptions[name] (when it is a
-// non-empty map[string]any) as extra multipart form fields, each value
-// stringified with fmt.Sprint. Used for multipart-body requests
-// (transcription), where there's no single JSON object to merge into.
-func applyProviderOptionsForm(mw *multipart.Writer, providerOptions map[string]any, name string) error {
-	opts, _ := providerOptions[name].(map[string]any)
-	for k, v := range opts {
-		if err := multipartutil.ValidField("provider option field name", k); err != nil {
-			return err
-		}
-		sv := fmt.Sprint(v)
-		if err := multipartutil.ValidField("provider option field value", sv); err != nil {
-			return err
-		}
-		if err := mw.WriteField(k, sv); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // ---- Request building ----
