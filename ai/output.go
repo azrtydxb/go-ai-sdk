@@ -49,9 +49,14 @@ type Output interface {
 // be repaired into valid JSON or does not unmarshal into a T. It is the
 // shared body of the Output modes' decodePartial, mirroring the
 // repair-then-unmarshal step ObjectStream.Partials performs per chunk.
+//
+// A leading markdown code fence is stripped first (stripPartialFences), so
+// partials fire for models that wrap their JSON in fences — in every schema
+// mode, and from the first delta on, without waiting for a closing fence
+// that the whole-document stripFences would require.
 func decodePartialAs[T any](raw string) (T, bool) {
 	var v T
-	repaired, ok := partialjson.Repair(raw)
+	repaired, ok := partialjson.Repair(stripPartialFences(raw))
 	if !ok {
 		return v, false
 	}
@@ -133,20 +138,20 @@ func (arrayOutput[T]) schema() (string, json.RawMessage, error) {
 	return defaultSchemaName, sch, nil
 }
 
-func (arrayOutput[T]) decodePartial(raw string) (any, bool) {
-	wrapper, ok := decodePartialAs[arrayElements[T]](raw)
-	if !ok {
-		return nil, false
-	}
-	return wrapper.Elements, true
-}
-
 func (arrayOutput[T]) decode(rawText string) (any, error) {
 	wrapper, err := decodeObject[arrayElements[T]](rawText)
 	if err != nil {
 		return nil, err
 	}
 	return wrapper.Elements, nil
+}
+
+func (arrayOutput[T]) decodePartial(raw string) (any, bool) {
+	wrapper, ok := decodePartialAs[arrayElements[T]](raw)
+	if !ok {
+		return nil, false
+	}
+	return wrapper.Elements, true
 }
 
 // choiceResult wraps a single string under a "result" key, matching the
@@ -242,8 +247,12 @@ func (jsonOutput) schema() (string, json.RawMessage, error) {
 	return "", nil, nil
 }
 
+// decodePartial takes the prefix as-is: decodePartialAs already strips a
+// leading fence with stripPartialFences. (The whole-document stripFences this
+// used to call was ineffective here — it strips only when the text is fenced
+// at BOTH ends, which a still-streaming prefix is not.)
 func (jsonOutput) decodePartial(raw string) (any, bool) {
-	v, ok := decodePartialAs[any](stripFences(raw))
+	v, ok := decodePartialAs[any](raw)
 	if !ok || v == nil {
 		return nil, false
 	}

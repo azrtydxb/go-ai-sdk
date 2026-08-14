@@ -260,3 +260,134 @@ func TestStreamTextOutputChoiceNoPartials(t *testing.T) {
 		t.Fatalf("Output() = %v, want %q", out, "yes")
 	}
 }
+
+// TestStreamTextOutputToolModeSecondCallIgnored covers a model that emits
+// TWO calls to the injected output tool. Output() decodes the FIRST call
+// (findToolCallByName is first-match-wins), so the partial-output tap must
+// track that same call: the second call's args must never be reported, and
+// the last partial must equal Output().
+func TestStreamTextOutputToolModeSecondCallIgnored(t *testing.T) {
+	first := `{"name":"bob","age":42}`
+	second := `{"name":"eve","age":7}`
+	m := &aitest.MockModel{
+		Streams: [][]provider.StreamPart{{
+			provider.ToolCallDelta{ID: "c1", Name: defaultSchemaName, ArgsDelta: `{"name":"bob",`},
+			provider.ToolCallDelta{ID: "c1", ArgsDelta: `"age":42}`},
+			provider.ToolCallEnd{Call: provider.ToolCallPart{ID: "c1", Name: defaultSchemaName, Args: []byte(first)}},
+			provider.ToolCallDelta{ID: "c2", Name: defaultSchemaName, ArgsDelta: second},
+			provider.ToolCallEnd{Call: provider.ToolCallPart{ID: "c2", Name: defaultSchemaName, Args: []byte(second)}},
+			provider.FinishPart{Reason: provider.FinishToolCalls},
+		}},
+	}
+	var partials []any
+	s, err := StreamText(t.Context(), GenerateTextOpts{
+		Model:           m,
+		Prompt:          "who",
+		Output:          OutputObject[streamPerson](),
+		OnPartialOutput: func(v any) { partials = append(partials, v) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+	}
+	if s.Err() != nil {
+		t.Fatal(s.Err())
+	}
+	if len(partials) == 0 {
+		t.Fatal("OnPartialOutput never fired")
+	}
+	for i, p := range partials {
+		if p.(streamPerson).Name == "eve" {
+			t.Fatalf("partial[%d] = %+v came from the SECOND output tool call", i, p)
+		}
+	}
+	out, oerr := s.Output()
+	if oerr != nil {
+		t.Fatal(oerr)
+	}
+	if got, want := out.(streamPerson), (streamPerson{Name: "bob", Age: 42}); got != want {
+		t.Fatalf("Output() = %+v, want %+v (first call wins)", got, want)
+	}
+	if last := partials[len(partials)-1]; last != out {
+		t.Fatalf("last partial %+v != Output() %+v", last, out)
+	}
+}
+
+// TestStreamTextOutputFencedPartials covers a model that wraps its JSON in a
+// markdown code fence: partials must fire despite the fence prefix.
+func TestStreamTextOutputFencedPartials(t *testing.T) {
+	m := &aitest.MockModel{
+		Caps: provider.Capabilities{NativeJSON: true},
+		Streams: [][]provider.StreamPart{{
+			provider.TextDelta{Text: "```json\n{\"name\":\"bob\""},
+			provider.TextDelta{Text: ",\"age\":42}\n```"},
+			provider.FinishPart{Reason: provider.FinishStop},
+		}},
+	}
+	var partials []any
+	s, err := StreamText(t.Context(), GenerateTextOpts{
+		Model:           m,
+		Prompt:          "who",
+		Output:          OutputObject[streamPerson](),
+		OnPartialOutput: func(v any) { partials = append(partials, v) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+	}
+	if s.Err() != nil {
+		t.Fatal(s.Err())
+	}
+	if len(partials) < 2 {
+		t.Fatalf("fenced stream fired %d partials (%v), want >= 2", len(partials), partials)
+	}
+	out, oerr := s.Output()
+	if oerr != nil {
+		t.Fatal(oerr)
+	}
+	if got, want := out.(streamPerson), (streamPerson{Name: "bob", Age: 42}); got != want {
+		t.Fatalf("Output() = %+v, want %+v", got, want)
+	}
+	if last := partials[len(partials)-1]; last != out {
+		t.Fatalf("last partial %+v != Output() %+v", last, out)
+	}
+}
+
+// TestStreamTextOutputFencedPartialsJSONMode covers the schemaless JSON mode
+// on the same fenced stream: jsonOutput.decodePartial must strip the fence
+// PREFIX (a whole-document fence strip never matches a prefix that has no
+// closing fence yet).
+func TestStreamTextOutputFencedPartialsJSONMode(t *testing.T) {
+	m := &aitest.MockModel{
+		Caps: provider.Capabilities{NativeJSON: true},
+		Streams: [][]provider.StreamPart{{
+			provider.TextDelta{Text: "```json\n{\"name\":\"bob\""},
+			provider.TextDelta{Text: ",\"age\":42}\n```"},
+			provider.FinishPart{Reason: provider.FinishStop},
+		}},
+	}
+	var partials []any
+	s, err := StreamText(t.Context(), GenerateTextOpts{
+		Model:           m,
+		Prompt:          "who",
+		Output:          OutputJSON(),
+		OnPartialOutput: func(v any) { partials = append(partials, v) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+	}
+	if s.Err() != nil {
+		t.Fatal(s.Err())
+	}
+	if len(partials) < 2 {
+		t.Fatalf("fenced stream fired %d partials (%v), want >= 2", len(partials), partials)
+	}
+	last, ok := partials[len(partials)-1].(map[string]any)
+	if !ok || last["name"] != "bob" {
+		t.Fatalf("last partial = %v", partials[len(partials)-1])
+	}
+}

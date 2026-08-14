@@ -276,3 +276,125 @@ func TestStreamObjectFinalNeverStarted(t *testing.T) {
 		t.Fatalf("want *NoObjectGeneratedError, got final=%+v err=%v", final, err)
 	}
 }
+
+// TestPartialTrackerRepairShortCircuit pins the tracker's repaired-string
+// short-circuit: a delta that leaves the repaired JSON unchanged (trailing
+// whitespace, an empty delta) must not reach the decode function at all, so
+// it costs neither an unmarshal nor a DeepEqual.
+func TestPartialTrackerRepairShortCircuit(t *testing.T) {
+	var tr partialTracker
+	decodes := 0
+	decode := func(raw string) (any, bool) {
+		decodes++
+		return decodePartialAsAny(raw)
+	}
+
+	if _, ok := tr.feed([]byte(`{"city":"Ghent"`), decode); !ok {
+		t.Fatal("first delta produced no partial")
+	}
+	if decodes != 1 {
+		t.Fatalf("decodes after first delta = %d, want 1", decodes)
+	}
+
+	// Whitespace-only and empty deltas leave the repaired document identical.
+	for _, d := range []string{" ", "\n\t", ""} {
+		if v, ok := tr.feed([]byte(d), decode); ok {
+			t.Fatalf("delta %q produced a new partial %v, want none", d, v)
+		}
+	}
+	if decodes != 1 {
+		t.Fatalf("decodes after whitespace deltas = %d, want 1 (short-circuited)", decodes)
+	}
+
+	// A delta that does change the repaired document decodes again.
+	if _, ok := tr.feed([]byte(`,"temp":21}`), decode); !ok {
+		t.Fatal("content delta produced no partial")
+	}
+	if decodes != 2 {
+		t.Fatalf("decodes after content delta = %d, want 2", decodes)
+	}
+	// text() reports the raw accumulation verbatim, short-circuited deltas
+	// included — it is what the stream decodes as its final text.
+	if got, want := tr.text(), "{\"city\":\"Ghent\" \n\t,\"temp\":21}"; got != want {
+		t.Fatalf("text() = %q, want %q", got, want)
+	}
+}
+
+// decodePartialAsAny is a test helper mirroring what the Output modes'
+// decodePartial does, without depending on a particular mode.
+func decodePartialAsAny(raw string) (any, bool) {
+	v, ok := decodePartialAs[map[string]any](raw)
+	if !ok {
+		return nil, false
+	}
+	return v, true
+}
+
+// TestStreamObjectWhitespaceDeltaNoExtraPartial covers the same
+// short-circuit end to end: a whitespace-only text delta between two content
+// deltas yields no extra snapshot.
+func TestStreamObjectWhitespaceDeltaNoExtraPartial(t *testing.T) {
+	m := &aitest.MockModel{
+		Caps: provider.Capabilities{NativeJSON: true},
+		Streams: [][]provider.StreamPart{{
+			provider.TextDelta{Text: `{"city":"Ghent"`},
+			provider.TextDelta{Text: "  \n"},
+			provider.TextDelta{Text: `,"temp":21}`},
+			provider.FinishPart{Reason: provider.FinishStop},
+		}},
+	}
+	s, err := StreamObject[forecast](t.Context(), GenerateObjectOpts{Model: m, Prompt: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snaps []forecast
+	for p := range s.Partials() {
+		snaps = append(snaps, p)
+	}
+	if s.Err() != nil {
+		t.Fatal(s.Err())
+	}
+	want := []forecast{{City: "Ghent"}, {City: "Ghent", Temp: 21}}
+	if len(snaps) != len(want) || snaps[0] != want[0] || snaps[1] != want[1] {
+		t.Fatalf("snapshots = %+v, want %+v", snaps, want)
+	}
+}
+
+// TestStreamObjectFencedPartials covers a model that wraps its JSON in a
+// markdown code fence: partials must still fire (the fence prefix is
+// stripped before repair) and Final must decode.
+func TestStreamObjectFencedPartials(t *testing.T) {
+	m := &aitest.MockModel{
+		Caps: provider.Capabilities{NativeJSON: true},
+		Streams: [][]provider.StreamPart{{
+			provider.TextDelta{Text: "```json\n{\"city\":\"Gh"},
+			provider.TextDelta{Text: "ent\",\"temp\""},
+			provider.TextDelta{Text: ":21}\n```"},
+			provider.FinishPart{Reason: provider.FinishStop},
+		}},
+	}
+	s, err := StreamObject[forecast](t.Context(), GenerateObjectOpts{Model: m, Prompt: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snaps []forecast
+	for p := range s.Partials() {
+		snaps = append(snaps, p)
+	}
+	if s.Err() != nil {
+		t.Fatal(s.Err())
+	}
+	if len(snaps) < 2 {
+		t.Fatalf("fenced stream yielded %d snapshots (%+v), want >= 2", len(snaps), snaps)
+	}
+	final, err := s.Final()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if final != (forecast{City: "Ghent", Temp: 21}) {
+		t.Fatalf("final = %+v", final)
+	}
+	if last := snaps[len(snaps)-1]; last != final {
+		t.Fatalf("last snapshot %+v != final %+v", last, final)
+	}
+}

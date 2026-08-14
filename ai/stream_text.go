@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"iter"
-	"reflect"
 	"time"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/retry"
@@ -57,13 +56,20 @@ type TextStream struct {
 	// see Parts.
 	outputToolName string
 
-	// outputAccum is the current step's accumulating raw structured output
-	// (text deltas, or the forced output tool call's argument deltas), and
-	// outputPrev/outputHavePrev the last value reported to OnPartialOutput —
-	// used to suppress repeat snapshots. All three reset at every step.
-	outputAccum    []byte
-	outputPrev     any
-	outputHavePrev bool
+	// outputTracker accumulates the current step's raw structured output
+	// (text deltas, or the forced output tool call's argument deltas) and
+	// decides which snapshots reach OnPartialOutput. It resets at every step.
+	outputTracker partialTracker
+
+	// outputToolID is the ID of the tool call the partial-output tap follows
+	// in Output's tool-mode fallback, and outputToolIDSet whether one has
+	// been picked yet. A model can emit more than one call to the injected
+	// output tool; the final decode takes the FIRST one (see
+	// findToolCallByName), so the tap must follow that same call — otherwise
+	// a later call's args would be reported as partials of a value that never
+	// becomes the output. Both reset at every step, with outputTracker.
+	outputToolID    string
+	outputToolIDSet bool
 
 	// outputResolved records that the final decode has already run, so
 	// Output() (and buildResult) are idempotent and decode at most once.
@@ -293,9 +299,9 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 			// Partial-output accumulation is per step: with native JSON and
 			// user tools, the decoded output is the LAST step's text (same as
 			// GenerateText), so earlier steps' text must not bleed into it.
-			s.outputAccum = s.outputAccum[:0]
-			s.outputPrev = nil
-			s.outputHavePrev = false
+			s.outputTracker.reset()
+			s.outputToolID = ""
+			s.outputToolIDSet = false
 
 			var text string
 			var reasoningText string
@@ -364,8 +370,19 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 						// *NoObjectGeneratedError. Args arrive either as a
 						// sequence of fragments or as a single full-args
 						// delta (Gemini-family); appending handles both.
+						//
+						// The tap follows exactly one call — the first whose
+						// name is either not known yet or matches the output
+						// tool — so a second call's args never masquerade as
+						// partials of the first (see outputToolID).
 						suppressed = true
-						s.tapPartialOutput(part.ArgsDelta)
+						if !s.outputToolIDSet && (part.Name == "" || part.Name == s.outputToolName) {
+							s.outputToolIDSet = true
+							s.outputToolID = part.ID
+						}
+						if s.outputToolIDSet && part.ID == s.outputToolID {
+							s.tapPartialOutput(part.ArgsDelta)
+						}
 					}
 					pc, ok := argsByID[part.ID]
 					if !ok {
@@ -408,8 +425,16 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 						// The assembled call carries the authoritative args:
 						// replace the accumulation rather than appending to
 						// it, so a provider that emits both deltas and a full
-						// ToolCallEnd doesn't double up.
-						s.resetPartialOutput(part.Call.Args)
+						// ToolCallEnd doesn't double up. Like the delta case,
+						// only the tapped call may do so — a second call's
+						// end must not overwrite the first call's partials.
+						if !s.outputToolIDSet && (part.Call.Name == "" || part.Call.Name == s.outputToolName) {
+							s.outputToolIDSet = true
+							s.outputToolID = part.Call.ID
+						}
+						if s.outputToolIDSet && part.Call.ID == s.outputToolID {
+							s.resetPartialOutput(part.Call.Args)
+						}
 					}
 					toolCalls = append(toolCalls, part.Call)
 				case provider.FinishPart:
@@ -888,8 +913,9 @@ func (s *TextStream) tapPartialOutput(chunk string) {
 	if s.opts.Output == nil || s.opts.OnPartialOutput == nil {
 		return
 	}
-	s.outputAccum = append(s.outputAccum, chunk...)
-	s.emitPartialOutput()
+	if v, ok := s.outputTracker.feed([]byte(chunk), s.opts.Output.decodePartial); ok {
+		s.opts.OnPartialOutput(v)
+	}
 }
 
 // resetPartialOutput replaces the current step's accumulation wholesale (a
@@ -899,21 +925,9 @@ func (s *TextStream) resetPartialOutput(raw []byte) {
 	if s.opts.Output == nil || s.opts.OnPartialOutput == nil {
 		return
 	}
-	s.outputAccum = append(s.outputAccum[:0], raw...)
-	s.emitPartialOutput()
-}
-
-func (s *TextStream) emitPartialOutput() {
-	v, ok := s.opts.Output.decodePartial(string(s.outputAccum))
-	if !ok {
-		return
+	if v, ok := s.outputTracker.replace(raw, s.opts.Output.decodePartial); ok {
+		s.opts.OnPartialOutput(v)
 	}
-	if s.outputHavePrev && reflect.DeepEqual(s.outputPrev, v) {
-		return
-	}
-	s.outputHavePrev = true
-	s.outputPrev = v
-	s.opts.OnPartialOutput(v)
 }
 
 // Output returns the decoded structured output of a stream started with

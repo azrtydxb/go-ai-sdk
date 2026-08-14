@@ -2,12 +2,9 @@ package ai
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"iter"
-	"reflect"
 
-	"github.com/azrtydxb/go-ai-sdk/internal/partialjson"
 	"github.com/azrtydxb/go-ai-sdk/internal/retry"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -66,7 +63,9 @@ func StreamObject[T any](ctx context.Context, opts GenerateObjectOpts) (*ObjectS
 // deltas in native JSON mode, or the forced tool call's argument deltas in
 // tool mode — repaired via partialjson.Repair, unmarshals successfully into
 // T and differs (via reflect.DeepEqual) from the previously yielded
-// snapshot. Iteration is single-use: calling Partials() again after
+// snapshot. A leading markdown code fence is tolerated (stripped before the
+// repair), so models that wrap their JSON in fences still yield snapshots.
+// Iteration is single-use: calling Partials() again after
 // exhausting (or abandoning) it yields nothing. The underlying provider
 // stream is closed when iteration ends, including on early abandonment.
 func (s *ObjectStream[T]) Partials() iter.Seq[T] {
@@ -81,45 +80,51 @@ func (s *ObjectStream[T]) Partials() iter.Seq[T] {
 			return
 		}
 
-		var accum []byte
-		var have bool
-		var prev T
+		var tracker partialTracker
+		// decode is the tracker's mode-specific decoder: repair-parse the
+		// accumulated prefix (fences stripped) into a T. Only the parts that
+		// change the accumulation drive the tracker below — a part that adds
+		// nothing to it cannot produce a new snapshot.
+		decode := func(raw string) (any, bool) {
+			snap, ok := decodePartialAs[T](raw)
+			if !ok {
+				return nil, false
+			}
+			return snap, true
+		}
 		abandoned := false
 
 		for p := range stream.Parts() {
+			var v any
+			var ok bool
 			switch part := p.(type) {
 			case provider.TextDelta:
 				if !s.toolMode {
-					accum = append(accum, part.Text...)
+					v, ok = tracker.feed([]byte(part.Text), decode)
 				}
 			case provider.ToolCallDelta:
 				if s.toolMode {
-					accum = append(accum, part.ArgsDelta...)
+					v, ok = tracker.feed([]byte(part.ArgsDelta), decode)
 				}
 			case provider.ToolCallEnd:
 				if s.toolMode {
-					accum = append(accum[:0], part.Call.Args...)
+					// The assembled call carries the authoritative args, so it
+					// supersedes the deltas rather than extending them.
+					v, ok = tracker.replace(part.Call.Args, decode)
 				}
 			case provider.FinishPart:
 				s.usage = part.Usage
 			}
 
-			if repaired, ok := partialjson.Repair(string(accum)); ok {
-				var snap T
-				if err := json.Unmarshal([]byte(repaired), &snap); err == nil {
-					if !have || !reflect.DeepEqual(snap, prev) {
-						have = true
-						prev = snap
-						if !yield(snap) {
-							abandoned = true
-							break
-						}
-					}
+			if ok {
+				if !yield(v.(T)) {
+					abandoned = true
+					break
 				}
 			}
 		}
 
-		s.rawText = string(accum)
+		s.rawText = tracker.text()
 		s.stream = nil
 
 		if abandoned {
