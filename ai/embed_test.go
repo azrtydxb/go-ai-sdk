@@ -3,7 +3,9 @@ package ai
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -367,4 +369,159 @@ func (m *testEmptyResponseEmbedder) MaxBatchSize() int { return 1 }
 func (m *testEmptyResponseEmbedder) ModelID() string   { return "test-empty" }
 func (m *testEmptyResponseEmbedder) ProviderName() string {
 	return "test"
+}
+
+// --- EmbedMany Concurrency tests ---
+
+// TestEmbedManyConcurrencyMatchesSequential covers Task 7 scenario (a):
+// Concurrency=4 over 8 batches (batch size 1, so 8 separate calls) returns
+// embeddings index-aligned identically to a Concurrency=0 (sequential) run
+// against an equivalent model, and the batch count matches in both modes.
+func TestEmbedManyConcurrencyMatchesSequential(t *testing.T) {
+	values := []string{"a", "bb", "ccc", "dddd", "eeeee", "ffffff", "ggggggg", "hhhhhhhh"}
+
+	seqModel := &aitest.MockEmbedder{BatchSize: 1}
+	seqRes, err := EmbedMany(t.Context(), EmbedManyOpts{Model: seqModel, Values: values})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(seqModel.RecordedBatches()); got != 8 {
+		t.Fatalf("sequential batches = %d, want 8", got)
+	}
+
+	concModel := &aitest.MockEmbedder{BatchSize: 1}
+	concRes, err := EmbedMany(t.Context(), EmbedManyOpts{Model: concModel, Values: values, Concurrency: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(concModel.RecordedBatches()); got != 8 {
+		t.Fatalf("concurrent batches = %d, want 8", got)
+	}
+
+	if len(concRes.Embeddings) != len(seqRes.Embeddings) {
+		t.Fatalf("embeddings length mismatch: seq=%d conc=%d", len(seqRes.Embeddings), len(concRes.Embeddings))
+	}
+	for i := range seqRes.Embeddings {
+		if !reflect.DeepEqual(seqRes.Embeddings[i], concRes.Embeddings[i]) {
+			t.Fatalf("index %d mismatch: seq=%v conc=%v", i, seqRes.Embeddings[i], concRes.Embeddings[i])
+		}
+	}
+	if concRes.Usage != seqRes.Usage {
+		t.Fatalf("usage mismatch: seq=%+v conc=%+v", seqRes.Usage, concRes.Usage)
+	}
+}
+
+// failOnValueEmbedder is a provider.EmbeddingModel test double (batch size
+// 1) that fails with a non-retryable *APICallError when it sees FailValue,
+// and otherwise sleeps briefly (to widen the race window so the dispatch
+// loop's cancellation-before-launch check is exercised deterministically)
+// before succeeding. Calls is incremented atomically so it is safe to read
+// from the test goroutine while EmbedMany's worker pool is still draining.
+type failOnValueEmbedder struct {
+	Calls     int32
+	FailValue string
+}
+
+func (m *failOnValueEmbedder) Embed(ctx context.Context, values []string) (*provider.EmbeddingResponse, error) {
+	atomic.AddInt32(&m.Calls, 1)
+	if len(values) == 1 && values[0] == m.FailValue {
+		return nil, NewAPICallError(400, "https://x", "", "batch failed")
+	}
+	time.Sleep(10 * time.Millisecond)
+	embeddings := make([][]float64, len(values))
+	for i := range values {
+		embeddings[i] = []float64{1}
+	}
+	return &provider.EmbeddingResponse{Embeddings: embeddings, Usage: provider.Usage{TotalTokens: len(values)}}, nil
+}
+
+func (m *failOnValueEmbedder) MaxBatchSize() int    { return 1 }
+func (m *failOnValueEmbedder) ModelID() string      { return "fail-on-value" }
+func (m *failOnValueEmbedder) ProviderName() string { return "test" }
+
+// TestEmbedManyConcurrencyErrorCancelsRemainder covers Task 7 scenario (b):
+// an error in batch 3 (of 8, one value per batch) makes EmbedMany return
+// that error (translated — here unchanged, since APICallError{400} isn't
+// retryable) and stops the dispatch loop from launching the remaining
+// batches, so the call count stays bounded below the full batch count.
+func TestEmbedManyConcurrencyErrorCancelsRemainder(t *testing.T) {
+	m := &failOnValueEmbedder{FailValue: "c"}
+	values := []string{"a", "b", "c", "d", "e", "f", "g", "h"}
+
+	_, err := EmbedMany(t.Context(), EmbedManyOpts{Model: m, Values: values, Concurrency: 2})
+	if err == nil {
+		t.Fatal("want error")
+	}
+	var apiErr *APICallError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != 400 {
+		t.Fatalf("err = %v, want *APICallError{StatusCode:400}", err)
+	}
+
+	calls := atomic.LoadInt32(&m.Calls)
+	if calls < 3 {
+		t.Fatalf("calls = %d, want >= 3 (batch 3, the failing one, must have run)", calls)
+	}
+	if calls >= int32(len(values)) {
+		t.Fatalf("calls = %d, want < %d (remaining batches must be cancelled)", calls, len(values))
+	}
+}
+
+// TestEmbedManyConcurrencyUnsetStaysSequential covers Task 7 scenario (c):
+// leaving Concurrency unset (its zero value) keeps EmbedMany's strictly
+// sequential, in-batch-order call pattern — the same behavior the
+// pre-Concurrency implementation had.
+func TestEmbedManyConcurrencyUnsetStaysSequential(t *testing.T) {
+	m := &aitest.MockEmbedder{BatchSize: 1}
+	values := []string{"a", "bb", "ccc", "dddd", "eeeee"}
+
+	res, err := EmbedMany(t.Context(), EmbedManyOpts{Model: m, Values: values})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	batches := m.RecordedBatches()
+	if len(batches) != len(values) {
+		t.Fatalf("batches = %d, want %d", len(batches), len(values))
+	}
+	for i, batch := range batches {
+		if len(batch) != 1 || batch[0] != values[i] {
+			t.Fatalf("batch %d = %v, want [%q] (strict batch order)", i, batch, values[i])
+		}
+	}
+	for i, emb := range res.Embeddings {
+		if emb[0] != float64(len(values[i])) {
+			t.Fatalf("embedding %d = %v, order broken", i, emb)
+		}
+	}
+}
+
+// TestEmbedManyConcurrencyCallbacksFireOncePerBatch covers Task 7 scenario
+// (d): under Concurrency > 1, OnEmbedStart/OnEmbedEnd each fire exactly
+// once per batch (from worker goroutines, so the counters must be atomic).
+func TestEmbedManyConcurrencyCallbacksFireOncePerBatch(t *testing.T) {
+	m := &aitest.MockEmbedder{BatchSize: 1}
+	values := []string{"a", "bb", "ccc", "dddd", "eeeee", "ffffff", "ggggggg", "hhhhhhhh"}
+
+	var starts, ends int32
+	_, err := EmbedMany(t.Context(), EmbedManyOpts{
+		Model:       m,
+		Values:      values,
+		Concurrency: 4,
+		OnEmbedStart: func(batch []string) {
+			atomic.AddInt32(&starts, 1)
+		},
+		OnEmbedEnd: func(resp *provider.EmbeddingResponse, err error) {
+			atomic.AddInt32(&ends, 1)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := atomic.LoadInt32(&starts); got != int32(len(values)) {
+		t.Fatalf("OnEmbedStart calls = %d, want %d", got, len(values))
+	}
+	if got := atomic.LoadInt32(&ends); got != int32(len(values)) {
+		t.Fatalf("OnEmbedEnd calls = %d, want %d", got, len(values))
+	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/retry"
 	"github.com/azrtydxb/go-ai-sdk/provider"
@@ -105,15 +106,43 @@ type EmbedManyOpts struct {
 	// silently ignored otherwise.
 	Headers map[string]string
 
+	// Concurrency bounds how many batches may be in flight at once. 0 or 1
+	// (the default) processes batches strictly sequentially, identical to
+	// pre-Concurrency behavior. A value greater than 1 fans batches out over
+	// a worker pool of at most Concurrency goroutines: each batch is still
+	// retried independently via the same retry.Do + translateRetryErr path
+	// as the sequential mode, but batches run concurrently and results are
+	// reassembled index-aligned (Embeddings stays aligned with Values;
+	// Usage is summed across all batches regardless of completion order).
+	//
+	// On the first batch failure, the context used for all other batches is
+	// cancelled via context.WithCancel: in-flight batches are allowed to
+	// drain (EmbedMany waits for every dispatched batch to return before
+	// returning itself) but no new batches are dispatched once cancellation
+	// is observed. EmbedMany returns the first error encountered (in
+	// completion order, not batch order), translated the same way the
+	// sequential path translates it.
+	//
+	// Callback contract under concurrency: OnEmbedStart/OnEmbedEnd still
+	// fire exactly once per batch, but from worker goroutines, in
+	// completion order rather than batch order — callers that set these
+	// callbacks with Concurrency > 1 MUST make them goroutine-safe (e.g.
+	// guard shared state with a mutex or use atomics). In sequential mode
+	// (0 or 1) the existing in-order, single-goroutine guarantee holds
+	// verbatim.
+	Concurrency int
+
 	// OnEmbedStart, when non-nil, fires once per underlying provider call —
-	// once per batch, in batch order — before the first attempt of that
-	// batch.
+	// once per batch — before the first attempt of that batch. See
+	// Concurrency's doc for the ordering/goroutine-safety contract this
+	// callback must satisfy when Concurrency > 1.
 	OnEmbedStart func(values []string)
-	// OnEmbedEnd, when non-nil, fires once per batch (in batch order) after
-	// the final attempt of that batch (success or retry exhaustion). err,
-	// when non-nil, is the SAME error EmbedMany itself returns for that
-	// failure (retry exhaustion translated to *RetryError). resp is nil on
-	// error.
+	// OnEmbedEnd, when non-nil, fires once per batch after the final
+	// attempt of that batch (success or retry exhaustion). err, when
+	// non-nil, is the SAME error EmbedMany itself returns for that failure
+	// (retry exhaustion translated to *RetryError). resp is nil on error.
+	// See Concurrency's doc for the ordering/goroutine-safety contract this
+	// callback must satisfy when Concurrency > 1.
 	OnEmbedEnd func(resp *provider.EmbeddingResponse, err error)
 }
 
@@ -163,6 +192,10 @@ func EmbedMany(ctx context.Context, opts EmbedManyOpts) (*EmbedManyResult, error
 		batchSize = 1
 	}
 
+	if opts.Concurrency > 1 {
+		return embedManyConcurrent(ctx, opts, batchSize, maxRetries)
+	}
+
 	var allEmbeddings [][]float64
 	var totalUsage provider.Usage
 
@@ -201,6 +234,118 @@ func EmbedMany(ctx context.Context, opts EmbedManyOpts) (*EmbedManyResult, error
 		totalUsage.TotalTokens += resp.Usage.TotalTokens
 		totalUsage.CachedInputTokens += resp.Usage.CachedInputTokens
 		totalUsage.ReasoningTokens += resp.Usage.ReasoningTokens
+	}
+
+	return &EmbedManyResult{
+		Embeddings: allEmbeddings,
+		Usage:      totalUsage,
+	}, nil
+}
+
+// embedManyConcurrent implements EmbedMany's Concurrency > 1 path. Batches
+// are split the same way the sequential path splits them, then fanned out
+// over a worker pool bounded by opts.Concurrency using a buffered-channel
+// semaphore (stdlib only, no external worker-pool package). Each batch is
+// retried independently via the same retry.Do + translateRetryErr sequence
+// the sequential path uses, and OnEmbedStart/OnEmbedEnd fire once per batch
+// from whichever goroutine handles it — see EmbedManyOpts.Concurrency's doc
+// for the resulting ordering and goroutine-safety contract.
+//
+// Results are written into an index-aligned slice so reassembly does not
+// depend on completion order. On the first batch error, a shared
+// context.WithCancel is cancelled so in-flight retries/calls observe
+// cancellation and return promptly, and the dispatch loop stops launching
+// new batches; a sync.WaitGroup ensures every already-dispatched batch
+// drains before EmbedMany returns the first error encountered.
+func embedManyConcurrent(ctx context.Context, opts EmbedManyOpts, batchSize, maxRetries int) (*EmbedManyResult, error) {
+	var batches [][]string
+	for i := 0; i < len(opts.Values); i += batchSize {
+		end := i + batchSize
+		if end > len(opts.Values) {
+			end = len(opts.Values)
+		}
+		batches = append(batches, opts.Values[i:end])
+	}
+
+	cctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	embeddings := make([][][]float64, len(batches))
+	usages := make([]provider.Usage, len(batches))
+
+	sem := make(chan struct{}, opts.Concurrency)
+	var wg sync.WaitGroup
+	var errOnce sync.Once
+	var firstErr error
+
+	for i, batch := range batches {
+		// Block for a free worker slot, then re-check cancellation before
+		// dispatching: once a prior batch has failed, don't start new work.
+		sem <- struct{}{}
+		if cctx.Err() != nil {
+			<-sem
+			break
+		}
+
+		wg.Add(1)
+		go func(i int, batch []string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			if opts.OnEmbedStart != nil {
+				opts.OnEmbedStart(batch)
+			}
+
+			resp, err := retry.Do(cctx, maxRetries, func() (*provider.EmbeddingResponse, error) {
+				return embedCall(cctx, opts.Model, batch, opts.ProviderOptions, opts.Headers)
+			})
+			callErr := translateRetryErr(err)
+
+			// Mirror the sequential path exactly: OnEmbedEnd sees callErr
+			// as translated from retry.Do BEFORE the embeddings-count
+			// mismatch check below, so (like sequential mode) a mismatch
+			// is reported to the caller via EmbedMany's return value but
+			// NOT re-surfaced to OnEmbedEnd.
+			if opts.OnEmbedEnd != nil {
+				opts.OnEmbedEnd(resp, callErr)
+			}
+
+			if callErr != nil {
+				errOnce.Do(func() {
+					firstErr = callErr
+					cancel()
+				})
+				return
+			}
+
+			if len(resp.Embeddings) != len(batch) {
+				errOnce.Do(func() {
+					firstErr = fmt.Errorf("ai: embedding model returned %d embeddings for %d values", len(resp.Embeddings), len(batch))
+					cancel()
+				})
+				return
+			}
+
+			embeddings[i] = resp.Embeddings
+			usages[i] = resp.Usage
+		}(i, batch)
+	}
+
+	wg.Wait()
+
+	if firstErr != nil {
+		return nil, firstErr
+	}
+
+	var allEmbeddings [][]float64
+	var totalUsage provider.Usage
+	for i := range embeddings {
+		allEmbeddings = append(allEmbeddings, embeddings[i]...)
+		totalUsage.InputTokens += usages[i].InputTokens
+		totalUsage.OutputTokens += usages[i].OutputTokens
+		totalUsage.TotalTokens += usages[i].TotalTokens
+		totalUsage.CachedInputTokens += usages[i].CachedInputTokens
+		totalUsage.ReasoningTokens += usages[i].ReasoningTokens
 	}
 
 	return &EmbedManyResult{
