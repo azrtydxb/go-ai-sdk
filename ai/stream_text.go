@@ -68,8 +68,22 @@ type TextStream struct {
 	// findToolCallByName), so the tap must follow that same call — otherwise
 	// a later call's args would be reported as partials of a value that never
 	// becomes the output. Both reset at every step, with outputTracker.
+	//
+	// Scope of the resulting "last partial equals Output()" guarantee: it
+	// holds for the shapes providers actually emit — one output call, or a
+	// repeated one — because the tap follows the call whose deltas arrive
+	// first and the final decode takes the first call in the ASSEMBLED order,
+	// which are the same call. For exotic interleavings where those two
+	// orders differ (a second call whose ToolCallEnd arrives before the
+	// first's), the tap can follow a call the final decode doesn't pick.
 	outputToolID    string
 	outputToolIDSet bool
+
+	// outputAtomic is Output's atomicity, probed once at StreamText: an
+	// atomic mode (OutputChoice) has no meaningful partials, so the tap skips
+	// accumulating and repairing entirely rather than repairing every delta
+	// only to have the decoder decline it.
+	outputAtomic bool
 
 	// outputResolved records that the final decode has already run, so
 	// Output() (and buildResult) are idempotent and decode at most once.
@@ -140,6 +154,7 @@ func StreamText(ctx context.Context, opts GenerateTextOpts) (*TextStream, error)
 		cancelTotal: cancelTotal,
 
 		outputToolName: outputToolName,
+		outputAtomic:   opts.Output != nil && outputIsAtomic(opts.Output),
 	}
 
 	// Resume: an unanswered assistant tool-call batch at the end of
@@ -376,11 +391,7 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 						// tool — so a second call's args never masquerade as
 						// partials of the first (see outputToolID).
 						suppressed = true
-						if !s.outputToolIDSet && (part.Name == "" || part.Name == s.outputToolName) {
-							s.outputToolIDSet = true
-							s.outputToolID = part.ID
-						}
-						if s.outputToolIDSet && part.ID == s.outputToolID {
+						if s.tapsToolCall(part.ID, part.Name) {
 							s.tapPartialOutput(part.ArgsDelta)
 						}
 					}
@@ -428,11 +439,7 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 						// ToolCallEnd doesn't double up. Like the delta case,
 						// only the tapped call may do so — a second call's
 						// end must not overwrite the first call's partials.
-						if !s.outputToolIDSet && (part.Call.Name == "" || part.Call.Name == s.outputToolName) {
-							s.outputToolIDSet = true
-							s.outputToolID = part.Call.ID
-						}
-						if s.outputToolIDSet && part.Call.ID == s.outputToolID {
+						if s.tapsToolCall(part.Call.ID, part.Call.Name) {
 							s.resetPartialOutput(part.Call.Args)
 						}
 					}
@@ -910,22 +917,46 @@ func (s *TextStream) buildResult() *GenerateTextResult {
 // GenerateTextOpts.OnPartialOutput). It is a no-op unless both Output and
 // OnPartialOutput are set.
 func (s *TextStream) tapPartialOutput(chunk string) {
-	if s.opts.Output == nil || s.opts.OnPartialOutput == nil {
+	if s.opts.Output == nil || s.opts.OnPartialOutput == nil || s.outputAtomic {
 		return
 	}
-	if v, ok := s.outputTracker.feed([]byte(chunk), s.opts.Output.decodePartial); ok {
+	if v, ok := s.outputTracker.feed([]byte(chunk), s.opts.Output.decodeRepaired); ok {
 		s.opts.OnPartialOutput(v)
 	}
+}
+
+// tapsToolCall reports whether the tool call identified by id/name (name is
+// "" when the provider hasn't revealed it yet) is the one the partial-output
+// tap follows, claiming the call the first time one is eligible. See
+// outputToolID.
+func (s *TextStream) tapsToolCall(id, name string) bool {
+	if !s.outputToolIDSet {
+		if name != "" && name != s.outputToolName {
+			return false
+		}
+		s.outputToolIDSet = true
+		s.outputToolID = id
+		return true
+	}
+	if s.outputToolID == "" && id != "" && (name == "" || name == s.outputToolName) {
+		// The claimed call had no ID yet: several providers
+		// (openai-compatible, mistral) emit "" until a wire chunk carries the
+		// id. Adopt the first real ID that shows up rather than freezing the
+		// tap on "" and silently dropping every later delta of the same call.
+		s.outputToolID = id
+		return true
+	}
+	return id == s.outputToolID
 }
 
 // resetPartialOutput replaces the current step's accumulation wholesale (a
 // provider-assembled ToolCallEnd supersedes the deltas that preceded it) and
 // reports the resulting value like tapPartialOutput does.
 func (s *TextStream) resetPartialOutput(raw []byte) {
-	if s.opts.Output == nil || s.opts.OnPartialOutput == nil {
+	if s.opts.Output == nil || s.opts.OnPartialOutput == nil || s.outputAtomic {
 		return
 	}
-	if v, ok := s.outputTracker.replace(raw, s.opts.Output.decodePartial); ok {
+	if v, ok := s.outputTracker.replace(raw, s.opts.Output.decodeRepaired); ok {
 		s.opts.OnPartialOutput(v)
 	}
 }

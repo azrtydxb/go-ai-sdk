@@ -10,8 +10,10 @@ package ai
 // accumulated length for every delta: partialjson.Repair rescans the whole
 // document each time, because a repair-based partial parser has no
 // incremental state to resume from (a single new byte can change how the
-// tail of the document must be closed). What the tracker removes is the
-// redundant work layered on top of that scan: when a delta leaves the
+// tail of the document must be closed). The tracker does that scan exactly
+// ONCE per delta — it hands the repaired string straight to the mode's
+// decodeRepaired rather than letting the decoder repair a second time — and
+// removes the redundant work layered on top of it: when a delta leaves the
 // REPAIRED document byte-identical (a whitespace-only delta, an empty delta,
 // or a provider-assembled ToolCallEnd that merely restates the args already
 // streamed), the tracker short-circuits before the json.Unmarshal and the
@@ -22,8 +24,6 @@ package ai
 import (
 	"reflect"
 	"strings"
-
-	"github.com/azrtydxb/go-ai-sdk/internal/partialjson"
 )
 
 // partialTracker accumulates a streaming raw JSON document and decides which
@@ -49,15 +49,14 @@ type partialTracker struct {
 // feed appends delta to the accumulation and reports the resulting snapshot,
 // returning ok=true only for a NEW distinct partial value.
 //
-// decode is the caller's mode-specific decoder (Output.decodePartial, or the
-// equivalent closure in ObjectStream.Partials): it receives the raw
-// accumulated text — fence stripping and repair included, exactly as a
-// standalone caller would pass it — and reports ok=false while that prefix
-// cannot yet be turned into a meaningful value. It is called at most once per
-// feed, and not at all when the delta left the repaired document unchanged.
-// (decode repeats the tracker's repair for the deltas that do get through —
-// that keeps decode usable on its own, and a repair is the cheap half of the
-// work; the unmarshal and the DeepEqual are what the short-circuit saves.)
+// decode is the caller's mode-specific decoder (Output.decodeRepaired, or the
+// equivalent closure in ObjectStream.Partials). It receives the string the
+// tracker has ALREADY fence-stripped and repaired, and only unmarshals it —
+// the repair happens exactly once per delta, here, and is shared between the
+// short-circuit and the decode. (A repair is not cheap enough to do twice:
+// on a 30KB document it costs roughly three quarters of what the unmarshal
+// costs.) decode is called at most once per feed, and not at all when the
+// delta left the repaired document unchanged.
 func (t *partialTracker) feed(delta []byte, decode func(string) (any, bool)) (any, bool) {
 	t.buf.Write(delta)
 	return t.emit(decode)
@@ -91,8 +90,7 @@ func (t *partialTracker) text() string { return t.buf.String() }
 // emit runs the repair short-circuit, then the decode and the DeepEqual
 // dedupe, returning the value to report (if any).
 func (t *partialTracker) emit(decode func(string) (any, bool)) (any, bool) {
-	raw := t.buf.String()
-	repaired, ok := partialjson.Repair(stripPartialFences(raw))
+	repaired, ok := repairPartial(t.buf.String())
 	if !ok {
 		// Nothing decodable yet (empty, or not the start of a JSON value):
 		// leave the short-circuit key untouched so the first repairable
@@ -105,7 +103,7 @@ func (t *partialTracker) emit(decode func(string) (any, bool)) (any, bool) {
 	t.haveRepaired = true
 	t.repaired = repaired
 
-	v, ok := decode(raw)
+	v, ok := decode(repaired)
 	if !ok {
 		return nil, false
 	}

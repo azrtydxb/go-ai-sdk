@@ -3,7 +3,9 @@ package ai
 import (
 	"context"
 	"errors"
+	"fmt"
 	"iter"
+	"strings"
 	"testing"
 
 	"github.com/azrtydxb/go-ai-sdk/ai/aitest"
@@ -321,9 +323,10 @@ func TestPartialTrackerRepairShortCircuit(t *testing.T) {
 }
 
 // decodePartialAsAny is a test helper mirroring what the Output modes'
-// decodePartial does, without depending on a particular mode.
-func decodePartialAsAny(raw string) (any, bool) {
-	v, ok := decodePartialAs[map[string]any](raw)
+// decodeRepaired does, without depending on a particular mode: the tracker
+// hands it an already-repaired document, so it only unmarshals.
+func decodePartialAsAny(repaired string) (any, bool) {
+	v, ok := unmarshalRepairedAs[map[string]any](repaired)
 	if !ok {
 		return nil, false
 	}
@@ -396,5 +399,56 @@ func TestStreamObjectFencedPartials(t *testing.T) {
 	}
 	if last := snaps[len(snaps)-1]; last != final {
 		t.Fatalf("last snapshot %+v != final %+v", last, final)
+	}
+}
+
+// TestPartialTrackerFeedsRepairedText pins the tracker's decode contract: the
+// decoder receives an already-repaired document (so it never has to repair a
+// second time), not the raw accumulation.
+func TestPartialTrackerFeedsRepairedText(t *testing.T) {
+	var tr partialTracker
+	var seen []string
+	decode := func(repaired string) (any, bool) {
+		seen = append(seen, repaired)
+		return decodePartialAsAny(repaired)
+	}
+	if _, ok := tr.feed([]byte("```json\n{\"city\":\"Ghe"), decode); !ok {
+		t.Fatal("no partial")
+	}
+	if len(seen) != 1 || seen[0] != `{"city":"Ghe"}` {
+		t.Fatalf("decoder saw %q, want the fence-stripped, repaired document", seen)
+	}
+}
+
+// BenchmarkPartialTrackerFeed measures the streaming hot path: a large
+// document arriving in many deltas, one repair per delta.
+func BenchmarkPartialTrackerFeed(b *testing.B) {
+	var sb strings.Builder
+	sb.WriteString(`{"items":[`)
+	for i := range 400 {
+		if i > 0 {
+			sb.WriteByte(',')
+		}
+		fmt.Fprintf(&sb, `{"id":%d,"name":"item-%d","note":"some padding text"}`, i, i)
+	}
+	sb.WriteString("]}")
+	doc := sb.String()
+
+	const chunk = 64
+	var deltas []string
+	for i := 0; i < len(doc); i += chunk {
+		end := min(i+chunk, len(doc))
+		deltas = append(deltas, doc[i:end])
+	}
+
+	decode := func(repaired string) (any, bool) {
+		return unmarshalRepairedAs[map[string]any](repaired)
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		var tr partialTracker
+		for _, d := range deltas {
+			tr.feed([]byte(d), decode)
+		}
 	}
 }

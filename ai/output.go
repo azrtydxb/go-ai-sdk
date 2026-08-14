@@ -42,6 +42,43 @@ type Output interface {
 	// during streaming; modes whose value is atomic (OutputChoice) always
 	// report false.
 	decodePartial(raw string) (v any, ok bool)
+	// decodeRepaired is decodePartial's second half: it unmarshals a prefix
+	// that has ALREADY been fence-stripped and repaired (see repairPartial)
+	// into the mode's Go value. partialTracker calls it, having done that
+	// repair itself for its short-circuit, so the streaming path repairs each
+	// delta exactly once.
+	decodeRepaired(repaired string) (v any, ok bool)
+}
+
+// atomicOutput marks an Output mode whose value is atomic: no prefix of the
+// streamed document is ever a meaningful partial, so decodeRepaired can only
+// ever decline. The partial-output tap probes for it once per stream and then
+// skips accumulating and repairing altogether (see outputIsAtomic).
+type atomicOutput interface{ atomicPartials() }
+
+// outputIsAtomic reports whether o never produces partial values.
+func outputIsAtomic(o Output) bool {
+	_, ok := o.(atomicOutput)
+	return ok
+}
+
+// repairPartial fence-strips and repairs raw (a prefix of a JSON document
+// that is still streaming in), reporting ok=false when no valid completion
+// exists yet. It is the step decodePartial and partialTracker share, and the
+// only place either performs it.
+func repairPartial(raw string) (string, bool) {
+	return partialjson.Repair(stripPartialFences(raw))
+}
+
+// unmarshalRepairedAs unmarshals an already-repaired JSON document into a T,
+// reporting ok=false when it doesn't fit. It is the shared body of the Output
+// modes' decodeRepaired.
+func unmarshalRepairedAs[T any](repaired string) (T, bool) {
+	var v T
+	if err := json.Unmarshal([]byte(repaired), &v); err != nil {
+		return v, false
+	}
+	return v, true
 }
 
 // decodePartialAs repair-parses raw (a prefix of a JSON document that is
@@ -55,15 +92,12 @@ type Output interface {
 // mode, and from the first delta on, without waiting for a closing fence
 // that the whole-document stripFences would require.
 func decodePartialAs[T any](raw string) (T, bool) {
-	var v T
-	repaired, ok := partialjson.Repair(stripPartialFences(raw))
+	repaired, ok := repairPartial(raw)
 	if !ok {
+		var v T
 		return v, false
 	}
-	if err := json.Unmarshal([]byte(repaired), &v); err != nil {
-		return v, false
-	}
-	return v, true
+	return unmarshalRepairedAs[T](repaired)
 }
 
 // objectOutput is the Output implementation for OutputObject[T].
@@ -89,6 +123,14 @@ func (objectOutput[T]) decode(rawText string) (any, error) {
 
 func (objectOutput[T]) decodePartial(raw string) (any, bool) {
 	v, ok := decodePartialAs[T](raw)
+	if !ok {
+		return nil, false
+	}
+	return v, true
+}
+
+func (objectOutput[T]) decodeRepaired(repaired string) (any, bool) {
+	v, ok := unmarshalRepairedAs[T](repaired)
 	if !ok {
 		return nil, false
 	}
@@ -154,6 +196,14 @@ func (arrayOutput[T]) decodePartial(raw string) (any, bool) {
 	return wrapper.Elements, true
 }
 
+func (arrayOutput[T]) decodeRepaired(repaired string) (any, bool) {
+	wrapper, ok := unmarshalRepairedAs[arrayElements[T]](repaired)
+	if !ok {
+		return nil, false
+	}
+	return wrapper.Elements, true
+}
+
 // choiceResult wraps a single string under a "result" key, matching the
 // schema OutputChoice requests.
 type choiceResult struct {
@@ -211,6 +261,13 @@ func (c choiceOutput) schema() (string, json.RawMessage, error) {
 // GenerateTextOpts.OnPartialOutput).
 func (choiceOutput) decodePartial(string) (any, bool) { return nil, false }
 
+// decodeRepaired likewise never reports a value; atomicPartials marks the
+// mode so the streaming tap skips accumulating and repairing entirely rather
+// than repairing every delta only to have it declined here.
+func (choiceOutput) decodeRepaired(string) (any, bool) { return nil, false }
+
+func (choiceOutput) atomicPartials() {}
+
 func (c choiceOutput) decode(rawText string) (any, error) {
 	wrapper, err := decodeObject[choiceResult](rawText)
 	if err != nil {
@@ -253,6 +310,14 @@ func (jsonOutput) schema() (string, json.RawMessage, error) {
 // at BOTH ends, which a still-streaming prefix is not.)
 func (jsonOutput) decodePartial(raw string) (any, bool) {
 	v, ok := decodePartialAs[any](raw)
+	if !ok || v == nil {
+		return nil, false
+	}
+	return v, true
+}
+
+func (jsonOutput) decodeRepaired(repaired string) (any, bool) {
+	v, ok := unmarshalRepairedAs[any](repaired)
 	if !ok || v == nil {
 		return nil, false
 	}

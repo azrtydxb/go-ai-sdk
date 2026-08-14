@@ -391,3 +391,84 @@ func TestStreamTextOutputFencedPartialsJSONMode(t *testing.T) {
 		t.Fatalf("last partial = %v", partials[len(partials)-1])
 	}
 }
+
+// TestStreamTextOutputToolModeLateCallID covers providers (openai-compatible,
+// mistral) that emit a tool call whose ID is empty until a later wire chunk
+// carries it: the tap must adopt the real ID rather than freezing on "" and
+// dropping every subsequent delta.
+func TestStreamTextOutputToolModeLateCallID(t *testing.T) {
+	args := `{"name":"bob","age":42}`
+	m := &aitest.MockModel{
+		Streams: [][]provider.StreamPart{{
+			provider.ToolCallDelta{ID: "", Name: defaultSchemaName, ArgsDelta: `{"name":`},
+			provider.ToolCallDelta{ID: "c1", ArgsDelta: `"bob",`},
+			provider.ToolCallDelta{ID: "c1", ArgsDelta: `"age":42}`},
+			provider.ToolCallEnd{Call: provider.ToolCallPart{ID: "c1", Name: defaultSchemaName, Args: []byte(args)}},
+			provider.FinishPart{Reason: provider.FinishToolCalls},
+		}},
+	}
+	var partials []any
+	s, err := StreamText(t.Context(), GenerateTextOpts{
+		Model:           m,
+		Prompt:          "who",
+		Output:          OutputObject[streamPerson](),
+		OnPartialOutput: func(v any) { partials = append(partials, v) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range s.Parts() {
+	}
+	if s.Err() != nil {
+		t.Fatal(s.Err())
+	}
+	if len(partials) < 2 {
+		t.Fatalf("fired %d partials (%v), want >= 2 (the late-ID deltas must keep feeding the tap)", len(partials), partials)
+	}
+	out, oerr := s.Output()
+	if oerr != nil {
+		t.Fatal(oerr)
+	}
+	if last := partials[len(partials)-1]; last != out {
+		t.Fatalf("last partial %+v != Output() %+v", last, out)
+	}
+}
+
+// TestStreamTextOutputChoiceSkipsTracker covers the atomic-mode fast path:
+// OutputChoice never yields partials, so the tap must not accumulate or
+// repair anything at all.
+func TestStreamTextOutputChoiceSkipsTracker(t *testing.T) {
+	m := &aitest.MockModel{
+		Caps: provider.Capabilities{NativeJSON: true},
+		Streams: [][]provider.StreamPart{{
+			provider.TextDelta{Text: `{"result":`},
+			provider.TextDelta{Text: `"yes"}`},
+			provider.FinishPart{Reason: provider.FinishStop},
+		}},
+	}
+	fired := 0
+	s, err := StreamText(t.Context(), GenerateTextOpts{
+		Model:           m,
+		Prompt:          "yes or no",
+		Output:          OutputChoice("yes", "no"),
+		OnPartialOutput: func(any) { fired++ },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.outputAtomic {
+		t.Fatal("outputAtomic = false for OutputChoice, want true")
+	}
+	for range s.Parts() {
+	}
+	if fired != 0 {
+		t.Fatalf("OnPartialOutput fired %d times, want 0", fired)
+	}
+	if got := s.outputTracker.text(); got != "" {
+		t.Fatalf("tracker accumulated %q, want nothing (atomic mode skips it)", got)
+	}
+	out, oerr := s.Output()
+	if oerr != nil || out != "yes" {
+		t.Fatalf("Output() = (%v, %v), want (\"yes\", nil)", out, oerr)
+	}
+}

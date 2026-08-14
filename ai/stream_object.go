@@ -81,12 +81,12 @@ func (s *ObjectStream[T]) Partials() iter.Seq[T] {
 		}
 
 		var tracker partialTracker
-		// decode is the tracker's mode-specific decoder: repair-parse the
-		// accumulated prefix (fences stripped) into a T. Only the parts that
-		// change the accumulation drive the tracker below — a part that adds
-		// nothing to it cannot produce a new snapshot.
-		decode := func(raw string) (any, bool) {
-			snap, ok := decodePartialAs[T](raw)
+		// decode is the tracker's mode-specific decoder: unmarshal the prefix
+		// the tracker has already fence-stripped and repaired into a T. Only
+		// the parts that change the accumulation drive the tracker below — a
+		// part that adds nothing to it cannot produce a new snapshot.
+		decode := func(repaired string) (any, bool) {
+			snap, ok := unmarshalRepairedAs[T](repaired)
 			if !ok {
 				return nil, false
 			}
