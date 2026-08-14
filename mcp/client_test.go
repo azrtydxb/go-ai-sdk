@@ -423,7 +423,7 @@ func TestCallToolRequiresCapability(t *testing.T) {
 	}
 }
 
-func TestCallToolConcatenatesTextAndIgnoresOtherTypes(t *testing.T) {
+func TestCallToolConcatenatesTextIntoTextField(t *testing.T) {
 	c, server := withCap("tools")
 	defer c.Close()
 

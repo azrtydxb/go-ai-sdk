@@ -350,6 +350,52 @@ if err := client.Initialize(ctx); err != nil {
 - Subject to the same dispatch, bounding, `Close`-drain, and HTTP-transport
   limitations documented under [Elicitation](#elicitation).
 
+## Notifications
+
+Notifications are server-to-client JSON-RPC messages with no `id` — the
+server owes no reply and expects none, e.g. `notifications/message` or
+`notifications/resources/updated`. Install a handler *before*
+`Initialize` so no notification sent early in the session (for example
+immediately after the server processes `initialized`) is missed:
+
+```go
+client.SetNotificationHandler(func(method string, params json.RawMessage) {
+	fmt.Println("notification:", method, string(params))
+})
+
+if err := client.Initialize(ctx); err != nil {
+	log.Fatal(err)
+}
+```
+
+- `NotificationHandler func(method string, params json.RawMessage)`. There
+  is no per-method typed dispatch — `params` is the raw, undecoded params
+  object from the wire, and the handler is responsible for switching on
+  `method` and unmarshaling whatever shape that method implies.
+- **No handler installed** (the default) → incoming notifications are
+  silently dropped. Unlike elicitation and sampling, there's no capability
+  to negotiate here: notifications aren't gated by anything declared during
+  `Initialize`, so a server may send them regardless of whether a handler
+  is installed.
+- **Delivery is best-effort and bounded.** A notification is dispatched to
+  its own goroutine on the same bounded pool used for server-initiated
+  requests (see [Elicitation](#elicitation)'s "Dispatch is bounded"). If all
+  slots are busy when a notification arrives, it is **dropped** rather than
+  queued or blocking `recvLoop` — matching the fire-and-forget semantics of
+  JSON-RPC notifications, and unlike a server-initiated request (which gets
+  a "server busy" error reply), a dropped notification has no reply channel
+  to report the drop on at all.
+- Since a notification owes no reply, a handler that blocks does not delay
+  any response to the server — but it does hold a dispatch slot for as long
+  as it runs, and a handler that never returns will eventually starve
+  delivery of further notifications and server-initiated requests once the
+  bound is exhausted.
+- Subject to the same HTTP-transport limitation documented under
+  [Elicitation](#elicitation): the Streamable HTTP transport has no
+  server→client channel to receive server-initiated traffic on, so
+  notifications (like elicitation and sampling) only reach the client over
+  the stdio transport today.
+
 ## Token-provider auth and retries (HTTP transport)
 
 `NewStreamableHTTPTransportWithOptions` is the options-taking form of the
@@ -584,7 +630,7 @@ if err != nil {
   handler must switch on `method` and unmarshal itself. Delivery is
   best-effort: like server-initiated requests, notifications share the
   bounded dispatch pool, and one arriving while the pool is saturated is
-  dropped rather than queued.
+  dropped rather than queued. See [Notifications](#notifications).
 
 ## Source of truth
 

@@ -1,9 +1,11 @@
 package schema
 
 import (
+	"bytes"
 	"encoding/json"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -477,6 +479,52 @@ func TestForTypeCached(t *testing.T) {
 	}
 	if &first[0] != &second[0] {
 		t.Fatal("second ForType call must return the cached bytes (same backing array)")
+	}
+}
+
+func TestForTypeConcurrentConvergesOnOneSchema(t *testing.T) {
+	// A type unique to this test so the shared schemaCache starts cold for
+	// it: every goroutine below races ForType's Load/structSchema/Marshal/
+	// LoadOrStore sequence against the others on first use.
+	type concurrentSample struct {
+		Name string   `json:"name"`
+		Tags []string `json:"tags"`
+	}
+	typ := reflect.TypeOf(concurrentSample{})
+
+	const n = 32
+	results := make([]json.RawMessage, n)
+	errs := make([]error, n)
+
+	var start sync.WaitGroup
+	start.Add(1)
+	var done sync.WaitGroup
+	done.Add(n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			defer done.Done()
+			start.Wait() // line every goroutine up to fire together
+			results[i], errs[i] = ForType(typ)
+		}(i)
+	}
+	start.Done()
+	done.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("goroutine %d: ForType error: %v", i, err)
+		}
+	}
+	if len(results[0]) == 0 {
+		t.Fatal("ForType returned empty schema")
+	}
+	for i := 1; i < n; i++ {
+		if !bytes.Equal(results[0], results[i]) {
+			t.Fatalf("goroutine %d schema bytes differ from goroutine 0: %s vs %s", i, results[i], results[0])
+		}
+		if &results[0][0] != &results[i][0] {
+			t.Fatalf("goroutine %d got a different backing array than goroutine 0 — LoadOrStore did not converge on one winner", i)
+		}
 	}
 }
 

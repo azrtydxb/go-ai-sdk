@@ -77,12 +77,13 @@ func (c *Client) dispatchServerRequest(req serverRequest) {
 	case "roots/list":
 		c.mu.Lock()
 		rootsSet := c.rootsSet
+		roots := c.roots
 		c.mu.Unlock()
 		if !rootsSet {
 			c.respondServerError(req.ID, rpcMethodNotFound, "Method not found")
 			return
 		}
-		c.handleRootsList(req)
+		c.handleRootsList(req, roots)
 	default:
 		c.respondServerError(req.ID, rpcMethodNotFound, "Method not found")
 	}

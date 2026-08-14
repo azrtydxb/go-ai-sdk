@@ -49,7 +49,7 @@ No public API removed.
   server-initiated notifications (`notifications/message`,
   `notifications/resources/updated`, etc.) to an installable handler
   instead of silently dropping them. See
-  [MCP § Notifications](docs/mcp.md).
+  [MCP § Notifications](docs/mcp.md#notifications).
 - **`mcp.ToolResult.Content`** preserves every content part of a
   `tools/call` result verbatim, in wire order (text, image, audio,
   embedded resource) — `ToolResult.Text` still concatenates only the
