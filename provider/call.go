@@ -117,6 +117,12 @@ type Call struct {
 	// signing, so it participates in the signature (SigV4 signs every
 	// x-amz-* header present on the request); every other entry is set
 	// AFTER signing, so it reaches the wire unsigned.
+	//
+	// Only the provider's auth header is protected this way — a Headers
+	// entry CAN override any other header the SDK would otherwise set,
+	// including provider-fixed non-auth headers such as Content-Type on
+	// multipart request paths, Rev.ai's Accept, Replicate's Prefer, or
+	// Cartesia's Cartesia-Version.
 	Headers map[string]string
 
 	// ProviderOptions is an escape hatch for provider-specific parameters.

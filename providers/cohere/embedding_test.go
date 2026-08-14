@@ -99,6 +99,46 @@ func TestEmbedCallRequestHeaders(t *testing.T) {
 	}
 }
 
+// TestEmbedCallProviderOptionsMerge verifies
+// EmbeddingCall.ProviderOptions["cohere"] is merged into the /embed
+// request body as extra top-level fields, alongside the SDK-built ones.
+func TestEmbedCallProviderOptionsMerge(t *testing.T) {
+	var gotBody map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("/embed", func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("fixture: decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(embeddingResponse{
+			Embeddings: embeddingsWire{Float: [][]float64{{0.1, 0.1}}},
+		})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).EmbeddingModel("embed-test")
+
+	optioned, ok := model.(provider.EmbeddingModelWithOptions)
+	if !ok {
+		t.Fatal("embeddingModel does not implement provider.EmbeddingModelWithOptions")
+	}
+	_, err := optioned.EmbedCall(context.Background(), provider.EmbeddingCall{
+		Values: []string{"a"},
+		ProviderOptions: map[string]any{
+			"cohere": map[string]any{"truncate": "END"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("EmbedCall: %v", err)
+	}
+	if gotBody["truncate"] != "END" {
+		t.Errorf(`request body truncate = %v, want "END" (from ProviderOptions)`, gotBody["truncate"])
+	}
+	if gotBody["input_type"] != "search_document" {
+		t.Errorf("request body input_type = %v, want search_document (SDK-built field preserved)", gotBody["input_type"])
+	}
+}
+
 func TestEmbedResultFloatVectorsAndUsage(t *testing.T) {
 	srv := newEmbeddingFixtureServer(t, nil)
 	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).EmbeddingModel("embed-test")

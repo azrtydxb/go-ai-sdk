@@ -48,10 +48,10 @@ func (m *streamingTranscriptionModel) StreamTranscribe(ctx context.Context, call
 	}
 
 	wsHeader := http.Header{
-		"Authorization": []string{"Bearer " + m.provider.apiKey},
-		"OpenAI-Beta":   []string{"realtime=v1"},
+		openaiAuthHeader: []string{"Bearer " + m.provider.apiKey},
+		"OpenAI-Beta":    []string{"realtime=v1"},
 	}
-	httpheader.ApplyToHeader(wsHeader, call.Headers, "Authorization")
+	httpheader.ApplyToHeader(wsHeader, call.Headers, openaiAuthHeader)
 	conn, err := websocket.Dial(ctx, dialURL, websocket.DialOptions{
 		Header: wsHeader,
 	})

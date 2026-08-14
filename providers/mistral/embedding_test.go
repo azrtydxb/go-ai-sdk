@@ -135,6 +135,46 @@ func TestEmbedErrorPropagatesAPICallError(t *testing.T) {
 	}
 }
 
+// TestEmbedCallProviderOptionsMerge verifies
+// EmbeddingCall.ProviderOptions["mistral"] is merged into the /embeddings
+// request body as extra top-level fields, alongside the SDK-built ones.
+func TestEmbedCallProviderOptionsMerge(t *testing.T) {
+	var gotBody map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("/embeddings", func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("fixture: decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(embeddingResponse{
+			Data: []embeddingData{{Index: 0, Embedding: []float64{0.1}}},
+		})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).EmbeddingModel("mistral-embed")
+
+	optioned, ok := model.(provider.EmbeddingModelWithOptions)
+	if !ok {
+		t.Fatal("embeddingModel does not implement provider.EmbeddingModelWithOptions")
+	}
+	_, err := optioned.EmbedCall(context.Background(), provider.EmbeddingCall{
+		Values: []string{"a"},
+		ProviderOptions: map[string]any{
+			"mistral": map[string]any{"encoding_format": "base64"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("EmbedCall: %v", err)
+	}
+	if gotBody["encoding_format"] != "base64" {
+		t.Errorf(`request body encoding_format = %v, want "base64" (from ProviderOptions)`, gotBody["encoding_format"])
+	}
+	if gotBody["model"] != "mistral-embed" {
+		t.Errorf("request body model = %v, want mistral-embed (SDK-built field preserved)", gotBody["model"])
+	}
+}
+
 func TestEmbedCallRequestHeaders(t *testing.T) {
 	var gotCustom, gotAuth string
 	mux := http.NewServeMux()
