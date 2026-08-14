@@ -140,23 +140,23 @@ func newTokenServer(t *testing.T, pub *rsa.PublicKey, accessToken string, expire
 // ---- tests ----
 
 func TestNewServiceAccountTokenSource_InvalidJSON(t *testing.T) {
-	if _, err := NewServiceAccountTokenSource([]byte("not json")); err == nil {
+	if _, err := newServiceAccountTokenSource([]byte("not json")); err == nil {
 		t.Fatal("want error for invalid JSON, got nil")
 	}
 }
 
 func TestNewServiceAccountTokenSource_MissingFields(t *testing.T) {
 	_, priv := generateTestKey(t)
-	if _, err := NewServiceAccountTokenSource(serviceAccountJSON(t, "", priv, "")); err == nil {
+	if _, err := newServiceAccountTokenSource(serviceAccountJSON(t, "", priv, "")); err == nil {
 		t.Fatal("want error for missing client_email, got nil")
 	}
-	if _, err := NewServiceAccountTokenSource(serviceAccountJSON(t, "sa@example.com", "", "")); err == nil {
+	if _, err := newServiceAccountTokenSource(serviceAccountJSON(t, "sa@example.com", "", "")); err == nil {
 		t.Fatal("want error for missing private_key, got nil")
 	}
 }
 
 func TestNewServiceAccountTokenSource_InvalidPrivateKeyPEM(t *testing.T) {
-	_, err := NewServiceAccountTokenSource(serviceAccountJSON(t, "sa@example.com", "not a pem key", ""))
+	_, err := newServiceAccountTokenSource(serviceAccountJSON(t, "sa@example.com", "not a pem key", ""))
 	if err == nil {
 		t.Fatal("want error for unparseable private key, got nil")
 	}
@@ -197,7 +197,7 @@ func TestNewServiceAccountTokenSourceFromFile_MissingFile(t *testing.T) {
 
 func TestServiceAccountTokenSource_TokenFlow(t *testing.T) {
 	priv, pemStr := generateTestKey(t)
-	ts, err := NewServiceAccountTokenSource(serviceAccountJSON(t, "sa@example.com", pemStr, ""))
+	ts, err := newServiceAccountTokenSource(serviceAccountJSON(t, "sa@example.com", pemStr, ""))
 	if err != nil {
 		t.Fatalf("NewServiceAccountTokenSource: %v", err)
 	}
@@ -252,7 +252,7 @@ func TestServiceAccountTokenSource_TokenFlow(t *testing.T) {
 
 func TestServiceAccountTokenSource_RefreshesAfterExpiry(t *testing.T) {
 	priv, pemStr := generateTestKey(t)
-	ts, err := NewServiceAccountTokenSource(serviceAccountJSON(t, "sa@example.com", pemStr, ""))
+	ts, err := newServiceAccountTokenSource(serviceAccountJSON(t, "sa@example.com", pemStr, ""))
 	if err != nil {
 		t.Fatalf("NewServiceAccountTokenSource: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestServiceAccountTokenSource_RefreshesAfterExpiry(t *testing.T) {
 
 func TestServiceAccountTokenSource_TokenEndpointError(t *testing.T) {
 	_, pemStr := generateTestKey(t)
-	ts, err := NewServiceAccountTokenSource(serviceAccountJSON(t, "sa@example.com", pemStr, ""))
+	ts, err := newServiceAccountTokenSource(serviceAccountJSON(t, "sa@example.com", pemStr, ""))
 	if err != nil {
 		t.Fatalf("NewServiceAccountTokenSource: %v", err)
 	}
@@ -314,7 +314,7 @@ func TestServiceAccountTokenSource_TokenEndpointError(t *testing.T) {
 // implementing that method is sufficient -- no import of ai is required.
 func TestServiceAccountTokenSource_TokenEndpoint5xxIsRetryable(t *testing.T) {
 	_, pemStr := generateTestKey(t)
-	ts, err := NewServiceAccountTokenSource(serviceAccountJSON(t, "sa@example.com", pemStr, ""))
+	ts, err := newServiceAccountTokenSource(serviceAccountJSON(t, "sa@example.com", pemStr, ""))
 	if err != nil {
 		t.Fatalf("NewServiceAccountTokenSource: %v", err)
 	}
@@ -356,7 +356,7 @@ func TestServiceAccountTokenSource_TokenEndpoint5xxIsRetryable(t *testing.T) {
 
 func TestServiceAccountTokenSource_ContextCancellation(t *testing.T) {
 	_, pemStr := generateTestKey(t)
-	ts, err := NewServiceAccountTokenSource(serviceAccountJSON(t, "sa@example.com", pemStr, ""))
+	ts, err := newServiceAccountTokenSource(serviceAccountJSON(t, "sa@example.com", pemStr, ""))
 	if err != nil {
 		t.Fatalf("NewServiceAccountTokenSource: %v", err)
 	}
@@ -371,7 +371,7 @@ func TestServiceAccountTokenSource_ContextCancellation(t *testing.T) {
 
 func TestNewServiceAccountTokenSource_TokenURIHTTPRejected(t *testing.T) {
 	_, pemStr := generateTestKey(t)
-	_, err := NewServiceAccountTokenSource(serviceAccountJSON(t, "sa@example.com", pemStr, "http://oauth2.example.com/token"))
+	_, err := newServiceAccountTokenSource(serviceAccountJSON(t, "sa@example.com", pemStr, "http://oauth2.example.com/token"))
 	if err == nil {
 		t.Fatal("want error for http:// token_uri, got nil")
 	}
@@ -379,7 +379,7 @@ func TestNewServiceAccountTokenSource_TokenURIHTTPRejected(t *testing.T) {
 
 func TestNewServiceAccountTokenSource_TokenURIRelativeRejected(t *testing.T) {
 	_, pemStr := generateTestKey(t)
-	_, err := NewServiceAccountTokenSource(serviceAccountJSON(t, "sa@example.com", pemStr, "/token"))
+	_, err := newServiceAccountTokenSource(serviceAccountJSON(t, "sa@example.com", pemStr, "/token"))
 	if err == nil {
 		t.Fatal("want error for relative token_uri, got nil")
 	}
@@ -387,7 +387,7 @@ func TestNewServiceAccountTokenSource_TokenURIRelativeRejected(t *testing.T) {
 
 func TestNewServiceAccountTokenSource_TokenURIHTTPSAccepted(t *testing.T) {
 	_, pemStr := generateTestKey(t)
-	ts, err := NewServiceAccountTokenSource(serviceAccountJSON(t, "sa@example.com", pemStr, "https://oauth2.example.com/token"))
+	ts, err := newServiceAccountTokenSource(serviceAccountJSON(t, "sa@example.com", pemStr, "https://oauth2.example.com/token"))
 	if err != nil {
 		t.Fatalf("NewServiceAccountTokenSource: %v", err)
 	}
@@ -398,7 +398,7 @@ func TestNewServiceAccountTokenSource_TokenURIHTTPSAccepted(t *testing.T) {
 
 func TestServiceAccountTokenSource_DefaultTokenURL(t *testing.T) {
 	_, pemStr := generateTestKey(t)
-	ts, err := NewServiceAccountTokenSource(serviceAccountJSON(t, "sa@example.com", pemStr, ""))
+	ts, err := newServiceAccountTokenSource(serviceAccountJSON(t, "sa@example.com", pemStr, ""))
 	if err != nil {
 		t.Fatalf("NewServiceAccountTokenSource: %v", err)
 	}
@@ -415,7 +415,7 @@ func TestServiceAccountTokenSource_DefaultTokenURL(t *testing.T) {
 // own request.
 func TestServiceAccountTokenSource_SingleFlight(t *testing.T) {
 	priv, pemStr := generateTestKey(t)
-	ts, err := NewServiceAccountTokenSource(serviceAccountJSON(t, "sa@example.com", pemStr, ""))
+	ts, err := newServiceAccountTokenSource(serviceAccountJSON(t, "sa@example.com", pemStr, ""))
 	if err != nil {
 		t.Fatalf("NewServiceAccountTokenSource: %v", err)
 	}

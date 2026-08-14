@@ -115,7 +115,7 @@ func (m *videoModel) GenerateVideos(ctx context.Context, call provider.VideoCall
 		return nil, fmt.Errorf("luma: completed generation contained no video asset: %s", rawBody)
 	}
 
-	data, mediaType, err := fetchmedia.Fetch(ctx, m.provider.client(), gen.Assets.Video, "luma", 0)
+	data, mediaType, err := fetchmedia.Fetch(ctx, m.provider.client(), gen.Assets.Video, "luma")
 	if err != nil {
 		return nil, err
 	}

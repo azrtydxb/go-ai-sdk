@@ -8,6 +8,49 @@ once it reaches 1.0.
 
 ## [Unreleased]
 
+### Changed
+
+- **Repo-wide de-duplication pass (~2,300 lines deleted, no public API
+  changes).** New `internal/providerutil` (`ErrorMessage`,
+  `ApplyProviderOptions`) and extended `internal/multipartutil`
+  (`CreateFilePart`, `ApplyProviderOptionsForm`) replace ~20 per-provider
+  copies of error-body decoding, provider-options merging, and multipart
+  file-part building (fal and elevenlabs keep local error decoders for
+  their structured `detail` shapes; replicate keeps its nested-`input`
+  options merge; bedrock keeps its `additionalModelRequestFields`
+  sub-merge variant).
+- **`providers/mistral` is now an `internal/openaicompat` preset** instead
+  of a ~750-line standalone implementation. Its wire divergences became
+  reusable `openaicompat.Config` knobs: `SeedParam`, `RequiredToolChoice`,
+  `OmitToolsOnNone`, `NoStreamOptions`, `NoReasoningEffort`. Same wire
+  behavior, verified by the existing mistral wire-shape tests. As part of
+  this, all openaicompat-based providers now send the function `name` on
+  `role:"tool"` messages (required by Mistral, optional and harmless
+  elsewhere).
+- `ai`: registry resolution collapsed into one generic helper; tool
+  execution dispatches through a typed closure instead of reflection;
+  media wrappers (image/speech/video/transcribe/translate/rerank/files)
+  share one retry/lifecycle skeleton; map copying uses `maps.Clone`/
+  `maps.Copy`. Behavior and API unchanged.
+- `internal`: `imagesniff` and `fetchimage` packages folded into
+  `fetchmedia` (`SniffImageMediaType` now uses `http.DetectContentType`;
+  `FetchImage`; `Fetch` lost its always-zero `maxBytes` parameter);
+  `eventstream` is decode-only in production, with `Encode` moved to the
+  test-support package `eventstream/eventstreamtest`; openaicompat's
+  transcription and translation flows merged into one parameterized
+  implementation (transcription upload filenames now follow
+  `transcribeutil`, e.g. `audio/mp4` → `audio.m4a`, matching translation).
+- `mcp`: dead `sendSem.Lock` removed, one `errTransportClosed` sentinel
+  (now `errors.Is`-able) replaces five ad-hoc errors, bounded-dispatch
+  spawn logic factored into one helper, protocol-version check uses
+  `slices.Contains`.
+
+### Removed
+
+- `fetchmedia.SameOrigin` (unused), openai `audioFormatFor` switch
+  (single-value), bedrock's never-decoded `eventMessageStart` wire type
+  and a delegation-only `doRequest` wrapper — all internal.
+
 ## v0.4.0 (2026-08-14)
 
 A follow-up wave closing every item carried in v0.3.0's Notes section, plus

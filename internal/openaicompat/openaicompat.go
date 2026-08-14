@@ -36,6 +36,31 @@ type Config struct {
 	// "<APIKeyHeader>: <APIKey>" instead, with no Bearer prefix and no
 	// Authorization header — e.g. Azure OpenAI's "api-key".
 	APIKeyHeader string
+
+	// SeedParam is the wire field name used to send provider.Call's Seed.
+	// Empty defaults to "seed"; Mistral calls it "random_seed".
+	SeedParam string
+
+	// RequiredToolChoice is the wire value sent for
+	// provider.ToolChoiceRequired. Empty defaults to "required"; Mistral's
+	// word for it is "any".
+	RequiredToolChoice string
+
+	// OmitToolsOnNone drops the tools array (and tool_choice) entirely when
+	// ToolChoice.Mode is ToolChoiceNone, for servers that reject
+	// tool_choice without a non-empty tools array — e.g. Mistral.
+	OmitToolsOnNone bool
+
+	// NoReasoningEffort drops call.Reasoning.Effort instead of sending it
+	// as reasoning_effort, for servers whose chat API has no such knob —
+	// e.g. Mistral.
+	NoReasoningEffort bool
+
+	// NoStreamOptions suppresses the stream_options:{include_usage:true}
+	// field on streaming requests, for servers that don't take it. Usage is
+	// still captured from any stream chunk that carries it (Mistral sends
+	// it on the final content chunk).
+	NoStreamOptions bool
 }
 
 // client returns the configured *http.Client, falling back to

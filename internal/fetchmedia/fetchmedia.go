@@ -25,8 +25,7 @@ import (
 	"github.com/azrtydxb/go-ai-sdk/ai"
 )
 
-// MaxBytes is the default ceiling on a fetched response body, used when
-// Fetch is called with maxBytes <= 0.
+// MaxBytes is the ceiling on a fetched response body.
 const MaxBytes = 256 << 20
 
 // maxErrorBodyBytes caps how much of a non-2xx response body is included
@@ -82,24 +81,21 @@ func SetLookupIPAddrForTest(fn func(ctx context.Context, host string) ([]net.IPA
 //     the gap. See PinnedTransport's doc for the one case (a custom,
 //     non-*http.Transport RoundTripper) where this protection isn't
 //     available.
-//   - Memory DoS: the response body is read with a hard cap of maxBytes
-//     (MaxBytes if maxBytes <= 0); a body that would exceed the cap fails
-//     with an error rather than being read into memory in full.
+//   - Memory DoS: the response body is read with a hard cap of MaxBytes;
+//     a body that would exceed the cap fails with an error rather than
+//     being read into memory in full.
 //
 // A non-2xx response is returned as an *ai.APICallError (via
 // ai.NewAPICallError), wrapped like every other failure mode.
 // errPrefix is added exactly once, as fmt.Errorf("%s: fetch %s: %w",
 // errPrefix, url, err) — callers must not additionally wrap the returned
 // error with their own "fetch ...:" prefix.
-func Fetch(ctx context.Context, client *http.Client, rawURL, errPrefix string, maxBytes int64) ([]byte, string, error) {
+func Fetch(ctx context.Context, client *http.Client, rawURL, errPrefix string) ([]byte, string, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
-	if maxBytes <= 0 {
-		maxBytes = MaxBytes
-	}
 
-	data, mediaType, err := fetch(ctx, client, rawURL, maxBytes)
+	data, mediaType, err := fetch(ctx, client, rawURL, MaxBytes)
 	if err != nil {
 		return nil, "", fmt.Errorf("%s: fetch %s: %w", errPrefix, rawURL, err)
 	}
@@ -423,29 +419,12 @@ func pinnedDialContext(dial dialContextFunc) dialContextFunc {
 	}
 }
 
-// SameOrigin reports whether base and candidate share the same scheme and
-// host (host includes port, per net/url.URL.Host). It's used to gate
-// attaching credentials to a server-chosen redirect/polling URL: a
-// mismatch means the URL points somewhere the caller didn't configure and
-// shouldn't be trusted with a secret.
-func SameOrigin(base, candidate string) bool {
-	b, err := url.Parse(base)
-	if err != nil {
-		return false
-	}
-	c, err := url.Parse(candidate)
-	if err != nil {
-		return false
-	}
-	return b.Scheme == c.Scheme && b.Host == c.Host
-}
-
 // SameRegistrableDomain reports whether base and candidate are both
 // http(s), share the same scheme, and share, heuristically, the same
 // registrable domain: either an exact hostname match, or -- when hostnames
 // differ -- their final two dot-separated labels are equal (e.g.
 // "api.us1.bfl.ai" and "api.bfl.ai" both end in "bfl.ai"). Ports are
-// ignored (unlike SameOrigin).
+// ignored.
 //
 // This is a stdlib-only heuristic (no public-suffix-list dependency, e.g.
 // golang.org/x/net/publicsuffix): it does NOT correctly handle multi-label
@@ -455,9 +434,9 @@ func SameOrigin(base, candidate string) bool {
 // domain. It's meant narrowly, for gating credentials to a small, known
 // set of first-party provider hosts (e.g. BFL's regional API hosts, all
 // under the two-label "bfl.ai"), not as a general-purpose SSRF/CSRF origin
-// check. SameOrigin (exact host match) remains the right default for
-// anything more general, or for hosts under a TLD where the two-label
-// heuristic doesn't hold.
+// check. An exact scheme+host match remains the right default for anything
+// more general, or for hosts under a TLD where the two-label heuristic
+// doesn't hold.
 func SameRegistrableDomain(base, candidate string) bool {
 	b, err := url.Parse(base)
 	if err != nil {
@@ -510,4 +489,34 @@ func parseMediaType(contentType string) string {
 	}
 	t, _, _ := strings.Cut(contentType, ";")
 	return strings.TrimSpace(t)
+}
+
+// SniffImageMediaType sniffs decoded image bytes' MediaType via
+// http.DetectContentType, for providers whose APIs don't report one (or
+// report one unreliably, e.g. xAI's grok-2-image returns JPEG while the API
+// otherwise defaults to PNG). Returns fallback when the bytes don't sniff
+// as an image.
+func SniffImageMediaType(data []byte, fallback string) string {
+	if t := http.DetectContentType(data); strings.HasPrefix(t, "image/") {
+		return t
+	}
+	return fallback
+}
+
+// FetchImage is Fetch for images: the MediaType is taken from the
+// response's Content-Type when it starts with "image/", and sniffed from
+// the downloaded bytes (falling back to "image/png") otherwise. For
+// providers (e.g. fal, replicate) that return generated images as URLs
+// rather than inline data. errPrefix behaves exactly as in Fetch.
+func FetchImage(ctx context.Context, client *http.Client, url, errPrefix string) ([]byte, string, error) {
+	body, contentType, err := Fetch(ctx, client, url, errPrefix)
+	if err != nil {
+		return nil, "", err
+	}
+
+	mediaType := contentType
+	if !strings.HasPrefix(contentType, "image/") {
+		mediaType = SniffImageMediaType(body, "image/png")
+	}
+	return body, mediaType, nil
 }

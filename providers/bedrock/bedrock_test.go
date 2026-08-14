@@ -14,7 +14,7 @@ import (
 	"testing"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
-	"github.com/azrtydxb/go-ai-sdk/internal/eventstream"
+	"github.com/azrtydxb/go-ai-sdk/internal/eventstream/eventstreamtest"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 	"github.com/azrtydxb/go-ai-sdk/provider/providertest"
 )
@@ -65,7 +65,7 @@ func writeEvent(t *testing.T, w io.Writer, eventType string, payload any) {
 	if err != nil {
 		t.Fatalf("fixture: marshal event payload: %v", err)
 	}
-	frame := eventstream.Encode(map[string]string{
+	frame := eventstreamtest.Encode(map[string]string{
 		":message-type": "event",
 		":event-type":   eventType,
 	}, b)
@@ -77,7 +77,7 @@ func writeEvent(t *testing.T, w io.Writer, eventType string, payload any) {
 func writeException(t *testing.T, w io.Writer, excType, message string) {
 	t.Helper()
 	b, _ := json.Marshal(eventException{Message: message})
-	frame := eventstream.Encode(map[string]string{
+	frame := eventstreamtest.Encode(map[string]string{
 		":message-type":   "exception",
 		":exception-type": excType,
 	}, b)
@@ -88,7 +88,7 @@ func writeException(t *testing.T, w io.Writer, excType, message string) {
 
 func writeTransportError(t *testing.T, w io.Writer, code, message string) {
 	t.Helper()
-	frame := eventstream.Encode(map[string]string{
+	frame := eventstreamtest.Encode(map[string]string{
 		":message-type":  "error",
 		":error-code":    code,
 		":error-message": message,

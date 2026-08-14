@@ -7,6 +7,7 @@ package transcribeutil
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -44,16 +45,8 @@ func ExtForMediaType(mediaType string) string {
 	case "video/mp4":
 		return ".mp4"
 	}
-	if mediaType == "" {
-		return ""
-	}
-	for i := len(mediaType) - 1; i >= 0; i-- {
-		if mediaType[i] == '/' {
-			if i+1 < len(mediaType) {
-				return "." + mediaType[i+1:]
-			}
-			return ""
-		}
+	if i := strings.LastIndexByte(mediaType, '/'); i >= 0 && i+1 < len(mediaType) {
+		return "." + mediaType[i+1:]
 	}
 	return ""
 }

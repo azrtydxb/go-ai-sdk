@@ -1,15 +1,17 @@
 // Package mistral implements the go-ai-sdk provider interfaces against
-// Mistral's chat completions and embeddings API. Mistral's wire format is
-// close to OpenAI's chat-completions shape but differs in enough details
-// (tool_choice values, response_format, the max_tokens field name, and how
-// stream usage is delivered) that this is a standalone implementation
-// rather than a reuse of internal/openaicompat.
+// Mistral's chat completions and embeddings API, as a preset over the
+// shared openaicompat base. Mistral's wire divergences from OpenAI's shape
+// (max_tokens/random_seed field names, tool_choice "any", tools omitted on
+// ToolChoiceNone, json_object-only response_format, usage on the final
+// stream chunk instead of stream_options) are expressed as openaicompat
+// Config knobs — see (*Provider).config.
 package mistral
 
 import (
 	"net/http"
 	"os"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/openaicompat"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -60,20 +62,36 @@ func New(opts ...Option) *Provider {
 	return p
 }
 
+// config maps the Provider onto the openaicompat base, with Mistral's wire
+// divergences expressed as Config knobs: max_tokens/random_seed field
+// names, tool_choice "any" for required, tools omitted entirely on
+// ToolChoiceNone, json_object-only response_format, and no stream_options
+// (usage arrives on the final content chunk instead).
+func (p *Provider) config() openaicompat.Config {
+	return openaicompat.Config{
+		Name:               providerName,
+		APIKey:             p.apiKey,
+		BaseURL:            p.baseURL,
+		HTTPClient:         p.httpClient,
+		NativeJSON:         true,
+		EmbedBatch:         embeddingBatch,
+		MaxTokensParam:     "max_tokens",
+		JSONObjectOnly:     true,
+		SeedParam:          "random_seed",
+		RequiredToolChoice: "any",
+		OmitToolsOnNone:    true,
+		NoStreamOptions:    true,
+		NoReasoningEffort:  true,
+	}
+}
+
 // Model returns a provider.LanguageModel for the given Mistral model ID.
 func (p *Provider) Model(id string) provider.LanguageModel {
-	return &languageModel{provider: p, modelID: id}
+	return openaicompat.NewLanguageModel(p.config(), id)
 }
 
 // EmbeddingModel returns a provider.EmbeddingModel for the given Mistral
 // embedding model ID.
 func (p *Provider) EmbeddingModel(id string) provider.EmbeddingModel {
-	return &embeddingModel{provider: p, modelID: id}
-}
-
-func (p *Provider) client() *http.Client {
-	if p.httpClient != nil {
-		return p.httpClient
-	}
-	return http.DefaultClient
+	return openaicompat.NewEmbeddingModel(p.config(), id)
 }

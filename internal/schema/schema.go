@@ -20,7 +20,7 @@ var (
 	timeType       = reflect.TypeOf(time.Time{})
 )
 
-// schemaCache memoizes ForType results keyed by the (pointer-normalized)
+// schemaCache memoizes forType results keyed by the (pointer-normalized)
 // reflect.Type. The schema for a type never changes within a process, and
 // generation walks the whole struct via reflection + a full json.Marshal, so
 // every GenerateObject/Output/NewTool call was paying that cost repeatedly.
@@ -37,14 +37,14 @@ type cacheEntry struct {
 
 // For reflects T (which must be a struct type) into a JSON Schema object.
 func For[T any]() (json.RawMessage, error) {
-	return ForType(reflect.TypeOf((*T)(nil)).Elem())
+	return forType(reflect.TypeOf((*T)(nil)).Elem())
 }
 
-// ForType reflects t (which must be a struct type, or a pointer to one)
+// forType reflects t (which must be a struct type, or a pointer to one)
 // into a JSON Schema object:
 //
 //	{"type":"object","properties":{...},"required":[...],"additionalProperties":false}
-func ForType(t reflect.Type) (json.RawMessage, error) {
+func forType(t reflect.Type) (json.RawMessage, error) {
 	for t.Kind() == reflect.Ptr {
 		t = t.Elem()
 	}

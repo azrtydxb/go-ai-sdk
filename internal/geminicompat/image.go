@@ -9,8 +9,8 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/fetchmedia"
 	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
-	"github.com/azrtydxb/go-ai-sdk/internal/imagesniff"
 	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -126,7 +126,7 @@ func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall
 		}
 		mediaType := p.MimeType
 		if mediaType == "" {
-			mediaType = imagesniff.SniffMediaType(data)
+			mediaType = fetchmedia.SniffImageMediaType(data, "image/png")
 		}
 		images[i] = provider.GeneratedImage{Data: data, MediaType: mediaType}
 	}

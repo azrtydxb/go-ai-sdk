@@ -106,7 +106,7 @@ func (m *videoModel) GenerateVideos(ctx context.Context, call provider.VideoCall
 
 	videos := make([]provider.GeneratedVideo, 0, len(entries))
 	for _, v := range entries {
-		data, mediaType, err := fetchmedia.Fetch(ctx, m.provider.client(), v.URL, "fal", 0)
+		data, mediaType, err := fetchmedia.Fetch(ctx, m.provider.client(), v.URL, "fal")
 		if err != nil {
 			return nil, err
 		}

@@ -6,11 +6,13 @@ import (
 	"errors"
 	"hash/crc32"
 	"testing"
+
+	"github.com/azrtydxb/go-ai-sdk/internal/eventstream/eventstreamtest"
 )
 
 // rawHeader is a single (name, type, encoded value bytes) header tuple used
 // by buildFrame to construct frames containing non-string header types,
-// which the public Encode function (string headers only) cannot produce.
+// which eventstreamtest.Encode (string headers only) cannot produce.
 type rawHeader struct {
 	name    string
 	valType byte
@@ -67,7 +69,7 @@ func TestRoundTrip_SingleMessage(t *testing.T) {
 	}
 	payload := []byte(`{"delta":{"text":"hi"}}`)
 
-	frame := Encode(headers, payload)
+	frame := eventstreamtest.Encode(headers, payload)
 
 	var got []Message
 	for msg, err := range Scan(bytes.NewReader(frame)) {
@@ -92,10 +94,10 @@ func TestRoundTrip_SingleMessage(t *testing.T) {
 
 func TestRoundTrip_MultipleMessages(t *testing.T) {
 	var buf bytes.Buffer
-	buf.Write(Encode(map[string]string{":event-type": "messageStart"}, []byte(`{"role":"assistant"}`)))
-	buf.Write(Encode(map[string]string{":event-type": "contentBlockDelta"}, []byte(`{"delta":{"text":"a"}}`)))
-	buf.Write(Encode(map[string]string{":event-type": "contentBlockDelta"}, []byte(`{"delta":{"text":"b"}}`)))
-	buf.Write(Encode(map[string]string{":event-type": "messageStop"}, []byte(`{"stopReason":"end_turn"}`)))
+	buf.Write(eventstreamtest.Encode(map[string]string{":event-type": "messageStart"}, []byte(`{"role":"assistant"}`)))
+	buf.Write(eventstreamtest.Encode(map[string]string{":event-type": "contentBlockDelta"}, []byte(`{"delta":{"text":"a"}}`)))
+	buf.Write(eventstreamtest.Encode(map[string]string{":event-type": "contentBlockDelta"}, []byte(`{"delta":{"text":"b"}}`)))
+	buf.Write(eventstreamtest.Encode(map[string]string{":event-type": "messageStop"}, []byte(`{"stopReason":"end_turn"}`)))
 
 	var events []string
 	for msg, err := range Scan(&buf) {
@@ -129,7 +131,7 @@ func TestScan_EmptyStream(t *testing.T) {
 }
 
 func TestScan_CorruptedPreludeCRC(t *testing.T) {
-	frame := Encode(map[string]string{":event-type": "x"}, []byte("payload"))
+	frame := eventstreamtest.Encode(map[string]string{":event-type": "x"}, []byte("payload"))
 	// Corrupt a byte within the prelude CRC field (bytes 8-11).
 	frame[9] ^= 0xFF
 
@@ -147,7 +149,7 @@ func TestScan_CorruptedPreludeCRC(t *testing.T) {
 }
 
 func TestScan_CorruptedMessageCRC(t *testing.T) {
-	frame := Encode(map[string]string{":event-type": "x"}, []byte("payload"))
+	frame := eventstreamtest.Encode(map[string]string{":event-type": "x"}, []byte("payload"))
 	// Corrupt a payload byte, which invalidates the message CRC but leaves
 	// the prelude CRC intact.
 	payloadStart := len(frame) - 4 /*message crc*/ - len("payload")
@@ -167,7 +169,7 @@ func TestScan_CorruptedMessageCRC(t *testing.T) {
 }
 
 func TestScan_TruncatedFrame(t *testing.T) {
-	frame := Encode(map[string]string{":event-type": "x"}, []byte("payload"))
+	frame := eventstreamtest.Encode(map[string]string{":event-type": "x"}, []byte("payload"))
 	truncated := frame[:len(frame)-5] // cut off mid-payload/CRC
 
 	var gotErr error
@@ -189,7 +191,7 @@ func TestScan_TruncatedFrame(t *testing.T) {
 }
 
 func TestScan_TruncatedPrelude(t *testing.T) {
-	frame := Encode(map[string]string{":event-type": "x"}, []byte("payload"))
+	frame := eventstreamtest.Encode(map[string]string{":event-type": "x"}, []byte("payload"))
 	truncated := frame[:5] // less than the 12-byte prelude+CRC
 
 	var gotErr error
@@ -215,7 +217,7 @@ func TestScan_SkipsNonStringHeaderWithoutDesync(t *testing.T) {
 		{name: ":event-type", valType: headerTypeStr, value: []byte("contentBlockDelta")},
 	}, []byte(`{"delta":{"text":"a"}}`))
 
-	frame2 := Encode(map[string]string{":event-type": "messageStop"}, []byte(`{"stopReason":"end_turn"}`))
+	frame2 := eventstreamtest.Encode(map[string]string{":event-type": "messageStop"}, []byte(`{"stopReason":"end_turn"}`))
 
 	var buf bytes.Buffer
 	buf.Write(frame1)
@@ -280,7 +282,7 @@ func TestScan_RejectsOversizedTotalLength(t *testing.T) {
 }
 
 func TestEncode_FrameStructureSanity(t *testing.T) {
-	frame := Encode(map[string]string{"a": "1"}, []byte("xy"))
+	frame := eventstreamtest.Encode(map[string]string{"a": "1"}, []byte("xy"))
 	if len(frame) < 12 {
 		t.Fatalf("frame too short: %d bytes", len(frame))
 	}

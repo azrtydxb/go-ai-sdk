@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/azrtydxb/go-ai-sdk/internal/fetchimage"
+	"github.com/azrtydxb/go-ai-sdk/internal/fetchmedia"
 	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
@@ -151,7 +151,7 @@ func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall
 
 // resolveImage returns the decoded bytes and MediaType for a single image
 // entry, either by decoding a "data:" URL inline or by fetching an http(s)
-// URL via fetchimage.
+// URL via fetchmedia.
 func resolveImage(ctx context.Context, p *Provider, img imageWire) ([]byte, string, error) {
 	if strings.HasPrefix(img.URL, "data:") {
 		data, mediaType, err := decodeDataURL(img.URL)
@@ -164,7 +164,7 @@ func resolveImage(ctx context.Context, p *Provider, img imageWire) ([]byte, stri
 		return data, mediaType, nil
 	}
 
-	data, fetchedMediaType, err := fetchimage.Fetch(ctx, p.client(), img.URL, "fal")
+	data, fetchedMediaType, err := fetchmedia.FetchImage(ctx, p.client(), img.URL, "fal")
 	if err != nil {
 		return nil, "", err
 	}

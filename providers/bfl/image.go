@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/azrtydxb/go-ai-sdk/internal/fetchimage"
 	"github.com/azrtydxb/go-ai-sdk/internal/fetchmedia"
 	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
@@ -129,7 +128,7 @@ func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall
 		return nil, fmt.Errorf("bfl: ready generation contained no sample url: %s", rawBody)
 	}
 
-	data, mediaType, err := fetchimage.Fetch(ctx, m.provider.client(), poll.Result.Sample, "bfl")
+	data, mediaType, err := fetchmedia.FetchImage(ctx, m.provider.client(), poll.Result.Sample, "bfl")
 	if err != nil {
 		return nil, err
 	}

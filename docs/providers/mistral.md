@@ -1,9 +1,11 @@
 # Mistral
 
-Mistral's wire format is close to OpenAI's chat-completions shape but
-differs enough (`tool_choice` values, `response_format`, the `max_tokens`
-field name, how stream usage is delivered) that it's a standalone
-implementation rather than a reuse of `internal/openaicompat`.
+Mistral's wire format is close to OpenAI's chat-completions shape; the
+provider is a preset over the shared `internal/openaicompat` base, with the
+divergences (`max_tokens`/`random_seed` field names, `tool_choice` `"any"`,
+tools omitted entirely on `ToolChoiceNone`, `json_object`-only
+`response_format`, usage on the final stream chunk) expressed as
+configuration knobs.
 
 ```go
 provider := mistral.New(

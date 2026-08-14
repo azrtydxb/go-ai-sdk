@@ -128,7 +128,7 @@ implementation shapes exist in practice:
   full implementation `geminicompat` was extracted from (per
   `internal/geminicompat`'s doc comment), and Vertex AI configures the
   same base with its own auth and base-URL shape.
-- **Full, standalone implementations** — Anthropic, Mistral, Cohere,
+- **Full, standalone implementations** — Anthropic, Cohere,
   Bedrock, ElevenLabs: each speaks its vendor's wire format directly
   (own request/response structs, own SSE or event-stream framing, own
   auth) because it diverges too far from either shared base.

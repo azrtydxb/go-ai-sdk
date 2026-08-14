@@ -9,7 +9,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/azrtydxb/go-ai-sdk/internal/fetchimage"
+	"github.com/azrtydxb/go-ai-sdk/internal/fetchmedia"
 	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -152,7 +152,7 @@ func (m *imageModel) GenerateImages(ctx context.Context, call provider.ImageCall
 
 	images := make([]provider.GeneratedImage, 0, len(urls))
 	for _, u := range urls {
-		data, mediaType, err := fetchimage.Fetch(ctx, m.provider.client(), u, "replicate")
+		data, mediaType, err := fetchmedia.FetchImage(ctx, m.provider.client(), u, "replicate")
 		if err != nil {
 			return nil, err
 		}

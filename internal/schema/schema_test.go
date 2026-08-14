@@ -469,11 +469,11 @@ func TestForType_RequiredOrderIsDeterministic(t *testing.T) {
 
 func TestForTypeCached(t *testing.T) {
 	type S struct{ A string }
-	first, err := ForType(reflect.TypeOf(S{}))
+	first, err := forType(reflect.TypeOf(S{}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := ForType(reflect.TypeOf(S{}))
+	second, err := forType(reflect.TypeOf(S{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -504,7 +504,7 @@ func TestForTypeConcurrentConvergesOnOneSchema(t *testing.T) {
 		go func(i int) {
 			defer done.Done()
 			start.Wait() // line every goroutine up to fire together
-			results[i], errs[i] = ForType(typ)
+			results[i], errs[i] = forType(typ)
 		}(i)
 	}
 	start.Done()
@@ -530,10 +530,10 @@ func TestForTypeConcurrentConvergesOnOneSchema(t *testing.T) {
 
 func TestForTypeErrorNotCachedAsSuccess(t *testing.T) {
 	type Bad struct{ M map[int]string }
-	if _, err := ForType(reflect.TypeOf(Bad{})); err == nil {
+	if _, err := forType(reflect.TypeOf(Bad{})); err == nil {
 		t.Fatal("want error for int-keyed map")
 	}
-	if _, err := ForType(reflect.TypeOf(Bad{})); err == nil {
+	if _, err := forType(reflect.TypeOf(Bad{})); err == nil {
 		t.Fatal("want error again on second call")
 	}
 }
