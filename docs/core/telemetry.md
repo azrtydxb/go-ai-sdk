@@ -165,14 +165,14 @@ attributes (emitted as plain string keys, not from an imported `semconv`
 package version, so the bridge doesn't couple to a specific semconv
 release):
 
-| Attribute | Set at | Value |
-|---|---|---|
-| `gen_ai.operation.name` | Start | `"chat"` |
-| `gen_ai.system` | Start | `SpanInfo.ProviderName` |
-| `gen_ai.request.model` | Start | `SpanInfo.ModelID` |
-| `gen_ai.usage.input_tokens` | End | `SpanInfo.Usage.InputTokens` |
-| `gen_ai.usage.output_tokens` | End | `SpanInfo.Usage.OutputTokens` |
-| `gen_ai.response.finish_reasons` | End | `[]string{string(SpanInfo.FinishReason)}`, set only when `FinishReason` is non-empty |
+| Attribute                        | Set at | Value                                                                                |
+| -------------------------------- | ------ | ------------------------------------------------------------------------------------ |
+| `gen_ai.operation.name`          | Start  | `"chat"`                                                                             |
+| `gen_ai.system`                  | Start  | `SpanInfo.ProviderName`                                                              |
+| `gen_ai.request.model`           | Start  | `SpanInfo.ModelID`                                                                   |
+| `gen_ai.usage.input_tokens`      | End    | `SpanInfo.Usage.InputTokens`                                                         |
+| `gen_ai.usage.output_tokens`     | End    | `SpanInfo.Usage.OutputTokens`                                                        |
+| `gen_ai.response.finish_reasons` | End    | `[]string{string(SpanInfo.FinishReason)}`, set only when `FinishReason` is non-empty |
 
 If `SpanInfo.Err != nil`, the bridge calls `span.RecordError(err)` and sets
 status `codes.Error` with the error's message; otherwise it sets status

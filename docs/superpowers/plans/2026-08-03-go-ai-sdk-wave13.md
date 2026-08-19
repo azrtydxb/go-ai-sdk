@@ -24,12 +24,14 @@
 ### Task 1: MCP resources + resource templates + prompts
 
 **Files:**
+
 - Create: `mcp/resources.go`, `mcp/resources_test.go`, `mcp/prompts.go`, `mcp/prompts_test.go`
 - Modify: `mcp/client.go` (capability storage on Client — see below)
 
 **Interfaces (Produces):**
 
 Store the server's advertised capabilities from `initialize`'s result so the new methods can return a clear "server does not support X" error instead of a raw RPC error. Add to `Client` (unexported field set in Initialize): `serverCaps map[string]json.RawMessage` (the raw `capabilities` object). Add:
+
 ```go
 // Resources
 type Resource struct {
@@ -82,6 +84,7 @@ type PromptPart struct {
 func (c *Client) ListPrompts(ctx context.Context) ([]Prompt, error)                              // prompts/list, paginated
 func (c *Client) GetPrompt(ctx context.Context, name string, args map[string]string) (description string, messages []PromptMessage, error) // prompts/get
 ```
+
 Rules: pagination follows `nextCursor` like ListTools (extract a shared `paginate` helper in client.go if clean — `ListTools` becomes a caller; do NOT change ListTools' behavior). Base64 `blob` decoded to `Blob`; `text` → `Text`. Capability gate: if `serverCaps["resources"]`/`["prompts"]` absent, return a typed `*CapabilityError{Capability string}` (new, in client.go) BEFORE sending the request. Unknown content-part types in prompt messages preserved as `Type` with raw Text empty (no error).
 
 **Tests** (pipeTransport-based, like client_test.go): list+read resources incl. pagination + binary blob decode; templates list; capability-absent → CapabilityError without a wire send (assert the fake server received nothing); prompts list with arguments; get prompt with args producing multi-part messages incl. embedded resource; error passthrough (RPCError).
@@ -93,10 +96,12 @@ Rules: pagination follows `nextCursor` like ListTools (extract a shared `paginat
 ### Task 2: MCP completions + elicitation
 
 **Files:**
+
 - Create: `mcp/completion.go`, `mcp/completion_test.go`, `mcp/elicitation.go`, `mcp/elicitation_test.go`
 - Modify: `mcp/client.go` (declare elicitation capability in Initialize; add server-initiated-request dispatch), `mcp/jsonrpc.go` (recvLoop must dispatch server→client requests — currently dropped)
 
 **Interfaces (Produces):**
+
 ```go
 // Completions (argument autocompletion) — completion/complete
 type CompletionRef struct {
@@ -111,7 +116,9 @@ type Completion struct {
 }
 func (c *Client) Complete(ctx context.Context, ref CompletionRef, argName, argValue string) (*Completion, error)
 ```
+
 **Elicitation** (server → client request `elicitation/create`): the server can ask the client to gather user input mid-session. This requires recvLoop to dispatch server-initiated requests, which the current transport-limited HTTP path cannot receive (only stdio can). Implement the dispatch generically; document that HTTP won't exercise it (no server-initiated channel).
+
 ```go
 type ElicitationRequest struct {
 	Message         string
@@ -129,6 +136,7 @@ type ElicitationHandler func(ctx context.Context, req ElicitationRequest) (Elici
 // gated on a handler being set.
 func (c *Client) SetElicitationHandler(h ElicitationHandler)
 ```
+
 recvLoop change (jsonrpc.go): a message with a non-nil `id` AND a `method` is a server→client REQUEST (today only responses have ids and are matched to pending; requests are dropped). Route these to a `serverRequestHandler` on Client that switches on method: `elicitation/create` → the handler (or auto-decline) → send an `rpcResponse` with the same id. Unknown server methods → respond with JSON-RPC error `-32601 Method not found`. Keep this dispatch on the recvLoop goroutine but run the handler in a new goroutine so a slow handler doesn't block response reading (the response send is serialized via sendMu like any write). Initialize declares `capabilities.elicitation = {}` only when a handler was set.
 
 **Tests:** completion/complete happy path (prompt ref + resource ref, values/total/hasMore); Complete capability-gated if server lacks `completions` cap → CapabilityError. Elicitation: a pipeTransport test where the fake server sends an `elicitation/create` request after initialize, asserts the client invokes the handler and sends back the accept/decline response with matching id; nil-handler auto-decline; unknown server method → -32601; handler-returns-error → decline-with-... (define: error → respond action cancel). Initialize declares the capability only with a handler set (assert both ways). Race test: server request arrives concurrent with a client call.
@@ -140,10 +148,12 @@ recvLoop change (jsonrpc.go): a message with a non-nil `id` AND a `method` is a 
 ### Task 3: MCP token-provider auth + retries on the HTTP transport
 
 **Files:**
+
 - Modify: `mcp/http.go` (TokenProvider option + retry option), `mcp/http_test.go`
 - Create: `mcp/http_auth_test.go` (focused auth/retry tests)
 
 **Interfaces (Produces):**
+
 ```go
 // TokenProvider supplies a bearer token per request, enabling refresh/rotation.
 // Returned token is sent as "Authorization: Bearer <token>" unless Header is set.
@@ -163,6 +173,7 @@ func WithHTTPClientOpt(c *http.Client) HTTPOption
 // New signature (additive: keep the old constructor, add an option-taking one)
 func NewStreamableHTTPTransportWithOptions(url string, opts ...HTTPOption) Transport
 ```
+
 Keep `NewStreamableHTTPTransport(url, headers)` unchanged (delegates to the options form with a static-headers option `withStaticHeaders(headers)`). TokenProvider is called on every Send; its result sets Authorization (or the custom header) fresh each request — this is the refresh story. Retry: only when `maxRetries > 0`, retry on HTTP 429/503 and connection errors with capped exponential backoff honoring `Retry-After` when present; respect ctx; never retry once any response bytes have been consumed from an SSE stream (at-most-once for streaming). A retried request re-invokes TokenProvider (fresh token on 401? — 401 is NOT retried by default; document: token refresh is the provider's job, transport only retries transient 429/503/network).
 
 **Tests:** TokenProvider called per-request (2 sends → 2 token calls, tokens can differ); custom auth header; static-headers backward-compat unchanged; retry on 429 then 200 (assert attempt count + Retry-After honored via a tiny duration); retry exhausted → error; no-retry on 400; ctx cancel during backoff; SSE response not retried mid-stream. -race.
@@ -174,9 +185,11 @@ Keep `NewStreamableHTTPTransport(url, headers)` unchanged (delegates to the opti
 ### Task 4: openai-compat preset fleet (8 providers)
 
 **Files:**
+
 - Create per provider (mirror providers/cerebras exactly — provider file + test): `providers/moonshot/`, `providers/qwen/`, `providers/minimax/`, `providers/deepinfra/`, `providers/huggingface/`, `providers/baseten/`, `providers/lmstudio/`, `providers/nvidia/`
 
 **Config per provider (all `Name`, `APIKey` env, `BaseURL`, plus quirks):**
+
 - **moonshot**: env `MOONSHOT_API_KEY`, base `https://api.moonshot.ai/v1`, NativeJSON true. Model + (Moonshot has embeddings? no — Model only).
 - **qwen** (Alibaba DashScope, OpenAI-compatible mode): env `DASHSCOPE_API_KEY`, base `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`, NativeJSON true, MaxTokensParam `"max_tokens"`. Model + EmbeddingModel (EmbedBatch 10, `text-embedding-v3`).
 - **minimax**: env `MINIMAX_API_KEY`, base `https://api.minimax.io/v1`, NativeJSON true, MaxTokensParam `"max_tokens"`. Model only.
@@ -195,12 +208,14 @@ Each: `Provider{apiKey, baseURL, httpClient}`, `WithAPIKey/WithBaseURL/WithHTTPC
 ### Task 5: Voyage (embeddings + rerank) + Mixedbread (rerank)
 
 **Files:**
+
 - Create: `providers/voyage/{voyage.go,embedding.go,rerank.go,wire.go}` (+tests), `providers/mixedbread/{mixedbread.go,rerank.go}` (+tests)
 
 **Voyage** (env `VOYAGE_API_KEY`, base `https://api.voyageai.com/v1`, `Authorization: Bearer`):
+
 - `EmbeddingModel(id)` (e.g. "voyage-3"): POST `/embeddings` `{"model","input":[...],"input_type"?}` → `{"data":[{"embedding":[...],"index"}],"usage":{"total_tokens"}}`. MaxBatchSize 128. Implement as `provider.EmbeddingModelWithOptions` (ProviderOptions["voyage"] merged — e.g. input_type, output_dimension). Mirror cohere/embedding.go structure.
 - `RerankingModel(id)` (e.g. "rerank-2"): POST `/rerank` `{"model","query","documents":[...],"top_k"?}` → `{"data":[{"index","relevance_score"}],"usage":{"total_tokens"}}` → RankedDocument. Usage.TotalTokens from usage. Mirror cohere/rerank.go.
-**Mixedbread** (env `MXBAI_API_KEY`, base `https://api.mixedbread.com/v1`, Bearer):
+  **Mixedbread** (env `MXBAI_API_KEY`, base `https://api.mixedbread.com/v1`, Bearer):
 - `RerankingModel(id)` (e.g. "mixedbread-ai/mxbai-rerank-large-v1"): POST `/rerank` `{"model","query","input":[...],"top_k"?,"return_input":false}` → `{"data":[{"index","score"}]}` → RankedDocument. (Note the field names: `input` not `documents`, `score` not `relevance_score`.)
 
 Tests: embed request/response shape + batch size + options merge (voyage); rerank shapes both providers (field-name differences asserted), top_n/top_k omitted when 0, order preserved, 401/429, ctx. Registry lookup works (EmbeddingModel/RerankingModel provider interfaces satisfied).
@@ -212,13 +227,14 @@ Tests: embed request/response shape + batch size + options merge (voyage); reran
 ### Task 6: Cartesia (speech) + Prodia + Black Forest Labs (image)
 
 **Files:**
+
 - Create: `providers/cartesia/{cartesia.go,speech.go}` (+test), `providers/prodia/{prodia.go,image.go}` (+test), `providers/bfl/{bfl.go,image.go}` (+test)
 
 **Cartesia** (env `CARTESIA_API_KEY`, base `https://api.cartesia.ai`, headers `Authorization: Bearer <key>` + `Cartesia-Version: 2024-11-13`): `SpeechModel(id)` (e.g. "sonic-2"): POST `/tts/bytes` `{"model_id":id,"transcript":Text,"voice":{"mode":"id","id":Voice},"output_format":{"container":<from OutputFormat, default "mp3">,"encoding":"mp3"/"pcm_f32le"...,"sample_rate":44100},"language":Language(omit "")}` + ProviderOptions["cartesia"] merged. Returns raw audio bytes; MediaType from container ("mp3"→audio/mpeg, "wav"→audio/wav, "raw"→application/octet-stream). Mirror lmnt/speech.go. Voice required — if empty, error (Cartesia needs a voice id).
 **Prodia** (env `PRODIA_API_KEY`, base `https://inference.prodia.com/v2`, `Authorization: Bearer`): `ImageModel(id)`: POST `/job` (sync-ish; Prodia v2 returns the image inline on the job endpoint with Accept: image/jpeg) `{"type":"inference.<id>.txt2img"?, "config":{"prompt":Prompt, ...}}` — SIMPLIFY to Prodia's documented v2 shape: POST `/job` with `{"type": id, "config":{"prompt":...}}`, Accept `image/jpeg`, response body IS the image bytes → GeneratedImage{Data, MediaType:"image/jpeg"}. ProviderOptions merged into config. (Fixture-tested; live shape flagged uncertain in the doc.)
 **Black Forest Labs** (env `BFL_API_KEY`, base `https://api.bfl.ai`, header `x-key: <key>`): `ImageModel(id)` (e.g. "flux-pro-1.1"): async poll — POST `/v1/<id>` `{"prompt":Prompt, "width"?, "height"? from Size "WxH", ...}` → `{"id","polling_url"}`; poll the returned `polling_url` (absolute URL) until `{"status":"Ready","result":{"sample":<url>}}` (fetch the sample URL for bytes) or `status` in {Error,Content Moderated,...} → error. WithPollInterval option (default 500ms). Mirror luma/image.go poll discipline; fetch bytes via internal/fetchimage.
 
-Tests: cartesia speech (request shape incl. Cartesia-Version header, output_format mapping, media type, voice-required error); prodia (job POST shape, image bytes passthrough, 401); bfl (create+poll fixture sequence via pollBodies pattern, polling_url follow, Ready→sample fetch, error status, ctx cancel mid-poll, x-key header). 
+Tests: cartesia speech (request shape incl. Cartesia-Version header, output_format mapping, media type, voice-required error); prodia (job POST shape, image bytes passthrough, 401); bfl (create+poll fixture sequence via pollBodies pattern, polling_url follow, Ready→sample fetch, error status, ctx cancel mid-poll, x-key header).
 
 - [ ] **Step 1: Failing tests → implement → green. Full check suite. Commit** — `feat: Cartesia (speech), Prodia and Black Forest Labs (image)`
 
@@ -227,6 +243,7 @@ Tests: cartesia speech (request shape incl. Cartesia-Version header, output_form
 ### Task 7: AI Gateway provider
 
 **Files:**
+
 - Create: `providers/gateway/{gateway.go,gateway_test.go}`
 
 **Vercel AI Gateway** is an OpenAI-compatible routing endpoint that fronts many upstream models via `provider/model` slugs. Implement as an openaicompat preset with a twist: env `AI_GATEWAY_API_KEY`, base `https://ai-gateway.vercel.sh/v1` (WithBaseURL overridable), NativeJSON false (upstreams vary — conservative default; document that ProviderOptions/model choice governs). `Model(id)` where id is a gateway slug like `"openai/gpt-4o"` or `"anthropic/claude-3-5-sonnet"` — passed through as the `model` field verbatim. Model + EmbeddingModel (EmbedBatch 1 — conservative). Auth `Authorization: Bearer`. Also support an `WithAPIKey` fallback to env `VERCEL_OIDC_TOKEN`? No — keep to `AI_GATEWAY_API_KEY` only, document the OIDC path as out of scope.
@@ -241,6 +258,7 @@ Tests: TestConformance (compattest fixture with name "gateway"), TestDefaults, T
 ### Task 8: Wave-13 docs + CHANGELOG
 
 **Files:**
+
 - Create: `docs/providers/{moonshot,qwen,minimax,deepinfra,huggingface,baseten,lmstudio,nvidia,voyage,mixedbread,cartesia,prodia,bfl,gateway}.md` (14 pages, mirror an existing preset/rerank/speech/image page's structure)
 - Modify: `mcp.md` (resources/prompts/completions/elicitation/token-provider auth/retries — a major expansion; update the "tools-only" limitations section — it's no longer tools-only; keep the transport-deviation notes accurate: HTTP still can't receive server-initiated elicitation), `docs/providers/README.md` (matrix +14 rows, construction table +14, provider bullets +14, count 25→39; the 3 canonical matrix copies: README.md + docs/core/media.md too), `docs/core/embeddings.md` (Voyage embed + rerank; Mixedbread rerank), `docs/core/media.md` (Cartesia speech; Prodia/BFL image matrices), `docs/getting-started.md` (env var rows +14), `README.md` (provider list + count), `docs/migrating-from-vercel-ai-sdk.md` (MCP extensions row → Shipped with the elicitation-over-HTTP caveat; provider-fleet row → Shipped; rerank row → Voyage/Mixedbread now shipped; update the "MCP is tools-only" section — retitle, it now covers resources/prompts/etc.), `CHANGELOG.md` (Wave 13 entries), `docs/README.md` (verify provider list/index).
 - Verification discipline as prior waves: snippets compile-verified, claims grepped, matrix cell counts (39 rows × columns), links resolve, env var table complete.

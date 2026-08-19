@@ -22,11 +22,13 @@
 ### Task 1: Wire ProviderOptions everywhere
 
 **Files:**
+
 - Modify: `internal/openaicompat/{wire.go,image.go,speech.go,transcription.go,embedding.go}`, `internal/geminicompat/{wire.go,image.go,embedding.go}`, `providers/anthropic/wire.go`, `providers/cohere/wire.go`, `providers/mistral/wire.go`, `providers/bedrock/wire.go`, `providers/elevenlabs/{speech.go,transcription.go}`, `providers/vertex/embedding.go`
 - Modify: `ai/options.go`, `provider/call.go` (doc comments only — drop "reserved/ignored"), README status note
 - Test: per-package request-shape tests
 
 **Semantics (uniform rule, document on `provider.Call.ProviderOptions`):**
+
 - `ProviderOptions` is keyed by provider name (`Call.ProviderOptions["anthropic"]`), value `map[string]any`. Each provider looks up ITS key (`cfg.Name` for compat bases — so azure reads `"azure"`, groq reads `"groq"`) and shallow-merges the entries into the top-level request JSON object AFTER building it (option entries win over SDK-built fields). Non-`map[string]any` values under the provider key are ignored. Other providers' keys are ignored.
 - Implementation helper: one shared func per compat base / provider file: `applyProviderOptions(body map[string]any, opts map[string]any, name string)`. Since most request builders marshal structs (not maps), the merge point is: marshal struct → unmarshal into `map[string]any` → merge → marshal. To avoid that cost when no options are set (the common case), short-circuit: `if len(providerOptions[name]) == 0 { return structBytes }`.
 - ImageCall/SpeechCall/TranscriptionCall ProviderOptions follow the same rule. `ai.GenerateTextOpts.ProviderOptions` already threads into Call — same for the media opts (verify; wire where missing).
@@ -40,11 +42,13 @@
 ### Task 2: Reasoning support + usage details
 
 **Files:**
+
 - Modify: `provider/message.go` (+`ReasoningPart`), `provider/stream.go` (+`ReasoningDelta`), `provider/response.go` (+`Response.ReasoningText()` helper; `Usage` gains `CachedInputTokens`, `ReasoningTokens int`)
 - Modify: `providers/anthropic/{wire.go,language_model.go}` (thinking blocks), `internal/openaicompat/{wire.go,language_model.go}` (`reasoning_content`, usage detail fields), `ai/generate_text.go` (+`GenerateTextResult.ReasoningText`, `Step.ReasoningText`), `ai/stream_text.go` (+`TextStream.ReasoningText()`)
 - Test: each touched package
 
 **Semantics:**
+
 - `provider.ReasoningPart{Text string; Redacted bool; Signature string}` (content part; Signature/Redacted for Anthropic round-tripping). `provider.ReasoningDelta{Text string}` (stream part).
 - **Anthropic**: response `thinking` blocks → `ReasoningPart{Text: thinking, Signature: signature}`; `redacted_thinking` → `ReasoningPart{Redacted: true, Text: data}`. Assistant-message conversion sends reasoning parts back as `thinking`/`redacted_thinking` blocks (signature preserved) BEFORE other blocks (Anthropic requires thinking first). Streaming: `content_block_delta` `thinking_delta` → ReasoningDelta; `signature_delta` accumulates into the part emitted at `content_block_stop` (no new stream part for signatures — the accumulated ReasoningPart lands in the step content; simplest conforming behavior: emit ReasoningDelta for thinking_delta text and nothing for signature_delta). Enabling thinking is via ProviderOptions (Task 1): `{"anthropic": {"thinking": {"type":"enabled","budget_tokens":N}}}` — no new typed knob (document in the package doc).
 - **openaicompat**: response `choices[0].message.reasoning_content` (DeepSeek-R1 style) → ReasoningPart; stream `delta.reasoning_content` → ReasoningDelta. Usage details: `usage.prompt_tokens_details.cached_tokens` → `Usage.CachedInputTokens`; `usage.completion_tokens_details.reasoning_tokens` → `Usage.ReasoningTokens`.
@@ -58,6 +62,7 @@
 ### Task 3: Middlewares + registry + CosineSimilarity
 
 **Files:**
+
 - Create: `ai/middleware.go` (three middlewares), `ai/registry.go`, `ai/similarity.go`
 - Test: `ai/middleware_test.go`, `ai/registry_test.go`, `ai/similarity_test.go`
 
@@ -116,6 +121,7 @@ Tests: extract-reasoning both modes (Generate + Stream, tag split across deltas,
 ### Task 4: Agent-loop controls — StopWhen, PrepareStep, OnStepFinish
 
 **Files:**
+
 - Modify: `ai/options.go`, `ai/generate_text.go`, `ai/stream_text.go`
 - Test: `ai/tool_loop_test.go`, `ai/stream_text_test.go` additions
 
@@ -148,6 +154,7 @@ Tests: StopWhen stops before MaxSteps; StopWhen default cap 16 documented+enforc
 ### Task 5: SmoothStream + SourcePart + Google grounding
 
 **Files:**
+
 - Create: `ai/smooth.go`
 - Modify: `provider/message.go` (+`SourcePart`), `provider/stream.go` (+`SourcePart` passthrough as stream part `SourceDelta`? — NO: sources arrive whole; add stream part `SourceEvent{Source SourcePart}`), `internal/geminicompat/{wire.go,language_model.go}` (groundingMetadata → sources), `ai/generate_text.go` (+`Step.Sources`, `GenerateTextResult.Sources`), `ai/stream_text.go` (accessor)
 - Test: each touched package
@@ -187,6 +194,7 @@ Tests: word/line chunking correctness incl. multi-word deltas and words split ac
 ### Task 6: imagesniff dedup + docs
 
 **Files:**
+
 - Create: `internal/imagesniff/imagesniff.go` (move the duplicated sniffer from openaicompat + geminicompat; both import it)
 - Modify: `README.md`, `docs/superpowers/specs/2026-08-02-go-ai-sdk-design.md`
 - Test: `internal/imagesniff/imagesniff_test.go` (moved cases)

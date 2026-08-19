@@ -109,12 +109,12 @@ omits `Reason` from the message when it's empty:
 Several `ai.*Opts` structs validate required fields before making any call,
 returning a plain (non-typed) sentinel error via `errors.New`:
 
-| Error | Returned by |
-|---|---|
-| `ai.ErrModelRequired` | `GenerateText`, `StreamText`, `Embed`, `EmbedMany`, `GenerateImage`, `GenerateSpeech`, `Transcribe` — whenever `Model` is `nil` |
-| `ai.ErrPromptRequired` | `GenerateImage`, when `Prompt` is empty |
-| `ai.ErrTextRequired` | `GenerateSpeech`, when `Text` is empty |
-| `ai.ErrAudioRequired` | `Transcribe`, when `Audio` is empty |
+| Error                  | Returned by                                                                                                                     |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `ai.ErrModelRequired`  | `GenerateText`, `StreamText`, `Embed`, `EmbedMany`, `GenerateImage`, `GenerateSpeech`, `Transcribe` — whenever `Model` is `nil` |
+| `ai.ErrPromptRequired` | `GenerateImage`, when `Prompt` is empty                                                                                         |
+| `ai.ErrTextRequired`   | `GenerateSpeech`, when `Text` is empty                                                                                          |
+| `ai.ErrAudioRequired`  | `Transcribe`, when `Audio` is empty                                                                                             |
 
 These are checked with `errors.Is`, not `errors.As` (they're sentinel
 values, not types):
@@ -155,12 +155,12 @@ if err != nil {
 
 `NewAPICallError` marks a call retryable based on HTTP status code:
 
-| Status | Retryable |
-|---|---|
-| `429` (rate limited) | yes |
-| `408` (request timeout) | yes |
-| `>= 500` (server error) | yes |
-| everything else (e.g. `400`, `401`, `404`) | no |
+| Status                                     | Retryable |
+| ------------------------------------------ | --------- |
+| `429` (rate limited)                       | yes       |
+| `408` (request timeout)                    | yes       |
+| `>= 500` (server error)                    | yes       |
+| everything else (e.g. `400`, `401`, `404`) | no        |
 
 An error is retried only if it implements `Retryable` (`IsRetryable() bool`)
 **and** that method returns `true` — the retry wrapper uses `errors.As` to

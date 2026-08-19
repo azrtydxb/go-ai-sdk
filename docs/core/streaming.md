@@ -204,7 +204,7 @@ for part := range smoothed {
 - **`Chunking`** — `ai.ChunkingWord` (default when empty) splits on
   whitespace boundaries; `ai.ChunkingLine` splits on newlines. Any
   unrecognized value falls back to word chunking. Each emitted chunk is the
-  content unit *plus* its trailing delimiter — word mode emits `"hello "`
+  content unit _plus_ its trailing delimiter — word mode emits `"hello "`
   (not `"hello"` then `" "` separately), line mode emits `"first line\n"`.
   A word/line split across multiple input `TextDelta`s is buffered and
   coalesced: nothing is emitted for a partial word/line until its trailing

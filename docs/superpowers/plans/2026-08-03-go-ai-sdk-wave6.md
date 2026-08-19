@@ -21,10 +21,12 @@
 ### Task 1: `mcp` package — JSON-RPC core + stdio transport
 
 **Files:**
+
 - Create: `mcp/jsonrpc.go`, `mcp/transport.go`, `mcp/stdio.go`, `mcp/client.go`
 - Test: `mcp/client_test.go` (scripted in-process server over io.Pipe), `mcp/stdio_test.go` (subprocess: `go run` a tiny helper via TestMain-built binary is overkill — use an `os/exec` of `cat`-like scripted responder written as a testdata Go helper compiled with `go build` in TestMain, OR simpler: test stdio framing against an io.Pipe pair since StdioTransport should accept arbitrary io.ReadWriteCloser internally; subprocess-specific code kept thin)
 
 **Interfaces:**
+
 - Produces:
 
 ```go
@@ -80,10 +82,12 @@ Tests: scripted server over an in-process Transport (channel-backed test transpo
 ### Task 2: `mcp` streamable HTTP transport + `Tools()` ai adapter
 
 **Files:**
+
 - Create: `mcp/http.go`, `mcp/tools.go`
 - Test: `mcp/http_test.go` (httptest server), `mcp/tools_test.go`
 
 **Interfaces:**
+
 - Produces:
 
 ```go
@@ -114,11 +118,13 @@ Tests: httptest server covering direct-JSON response, SSE response (two messages
 ### Task 3: Telemetry middleware + stream lifecycle callbacks
 
 **Files:**
+
 - Create: `ai/telemetry.go`
 - Modify: `ai/options.go`, `ai/stream_text.go`, `ai/generate_text.go`
 - Test: `ai/telemetry_test.go`, additions to `ai/stream_text_test.go`
 
 **Interfaces:**
+
 - Produces:
 
 ```go
@@ -159,10 +165,12 @@ Tests: middleware Generate span (usage/finish populated, Err on failure); middle
 ### Task 4: RepairToolCall + ActiveTools
 
 **Files:**
+
 - Modify: `ai/options.go`, `ai/generate_text.go`, `ai/stream_text.go`
 - Test: `ai/tool_loop_test.go`, `ai/stream_text_test.go` additions
 
 **Interfaces:**
+
 - Produces (GenerateTextOpts fields, both loops):
 
 ```go
@@ -190,10 +198,12 @@ Tests: ActiveTools filters Call.Tools (recorded call assertions) while full-list
 ### Task 5: FilePart support (anthropic, geminicompat, openaicompat)
 
 **Files:**
+
 - Modify: `providers/anthropic/wire.go`, `internal/geminicompat/wire.go`, `internal/openaicompat/wire.go` (+ their tests)
 - Modify: `provider/message.go` (FilePart doc comment update: supported by anthropic/google/vertex/openai-compatible for PDFs; other providers error)
 
 **Wire mappings (user-message file parts only; assistant-message FilePart remains an error everywhere):**
+
 - **anthropic**: FilePart{MediaType:"application/pdf"} → content block `{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":<b64>}}`; any other MediaType → existing descriptive error.
 - **geminicompat** (google + vertex): FilePart (any MediaType) → `{"inlineData":{"mimeType":<MediaType>,"data":<b64>}}` (Gemini accepts PDFs, audio, video inline).
 - **openaicompat**: FilePart{MediaType:"application/pdf"} → content part `{"type":"file","file":{"filename":<Filename or "file.pdf">,"file_data":"data:application/pdf;base64,<b64>"}}` (OpenAI chat-completions file part shape); other MediaTypes → existing error. Presets inherit; note in doc comment that only OpenAI itself is known to accept it (compat servers may reject — passthrough is correct behavior).
@@ -207,6 +217,7 @@ Tests per converter: request-shape assertions for the PDF case; non-PDF error pr
 ### Task 6: ProviderMetadata + docs
 
 **Files:**
+
 - Modify: `provider/response.go` (`Response.ProviderMetadata map[string]any` — nil when none), `providers/anthropic` (populate `{"anthropic": {"cache_creation_input_tokens": n}}` when non-zero), `internal/openaicompat` (populate `{"<name>": {"system_fingerprint": s}}` when present)
 - Modify: `README.md`, `docs/superpowers/specs/2026-08-02-go-ai-sdk-design.md`
 - Test: per-provider metadata tests

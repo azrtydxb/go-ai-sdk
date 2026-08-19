@@ -149,7 +149,7 @@ for _, msg := range messages {
 - `GetPrompt(ctx, name, args)` returns the server's `description` alongside
   `[]PromptMessage{Role, Content []PromptPart}`.
 - `PromptPart{Type, Text, Resource *ResourceContents, Data []byte,
-  MimeType}` — `Type` is always set; which other field is populated depends
+MimeType}` — `Type` is always set; which other field is populated depends
   on it: `"text"` → `Text`, `"resource"` → `Resource` (decoded through the
   same `ResourceContents` shape `ReadResource` uses — an embedded resource
   in a prompt message has the identical wire shape as a `resources/read`
@@ -188,7 +188,7 @@ or `"ref/resource"` (with `URI` set, identifying a resource template).
 Elicitation is the one MCP extension that's **server-initiated**: the
 server sends the client an `elicitation/create` request mid-session,
 asking it to gather structured input from the user. Install a handler
-*before* `Initialize` — the client only declares the `"elicitation"`
+_before_ `Initialize` — the client only declares the `"elicitation"`
 capability to the server when a handler is set:
 
 ```go
@@ -226,7 +226,7 @@ if err := client.Initialize(ctx); err != nil {
   response — the dispatch mechanism is generic.
 - **Malformed `elicitation/create` params** (the request's `params` doesn't
   decode into `{message, requestedSchema}`) get a JSON-RPC `-32602 Invalid
-  params` error response, not a synthesized `Action: "cancel"` result — a
+params` error response, not a synthesized `Action: "cancel"` result — a
   protocol-level shape error is distinct from the handler declining/erroring
   on a well-formed request.
 
@@ -265,7 +265,7 @@ transport is already closed.
 
 **⚠ HTTP transport cannot receive server-initiated requests.** The dispatch
 machinery above is transport-agnostic, but the Streamable HTTP transport has
-no server→client channel to *receive* one on — there is no standalone `GET`
+no server→client channel to _receive_ one on — there is no standalone `GET`
 opening a server-initiated SSE stream (see
 [Transports' documented deviations](#transports-documented-deviations)
 below), so `elicitation/create` (or any other server-initiated request) can
@@ -279,7 +279,7 @@ Sampling is the second **server-initiated** MCP extension: the server
 sends the client a `sampling/createMessage` request mid-session, asking it
 to run an LLM completion on the client's behalf (e.g. so a tool
 implementation can delegate a sub-task to the model without the server
-holding its own API credentials). Install a handler *before*
+holding its own API credentials). Install a handler _before_
 `Initialize` — the client only declares the `"sampling"` capability to the
 server when a handler is set:
 
@@ -302,12 +302,12 @@ if err := client.Initialize(ctx); err != nil {
 ```
 
 - `CreateMessageRequest{Messages []SamplingMessage, SystemPrompt, MaxTokens,
-  ModelPreferences json.RawMessage}`. `SamplingMessage{Role, Content
-  json.RawMessage}`.
+ModelPreferences json.RawMessage}`. `SamplingMessage{Role, Content
+json.RawMessage}`.
 - `CreateMessageResult{Role, Content json.RawMessage, Model, StopReason}`.
 - **No handler installed** → the client replies to any
   `sampling/createMessage` it receives with a JSON-RPC `-32601 Method not
-  found` error, and does not declare the `"sampling"` capability during
+found` error, and does not declare the `"sampling"` capability during
   `Initialize` at all — this mirrors the unknown-server-method path rather
   than elicitation's auto-decline, since there's no neutral
   `CreateMessageResult` to synthesize in place of an actual completion.
@@ -315,7 +315,7 @@ if err := client.Initialize(ctx); err != nil {
   with a JSON-RPC `-32603 Internal error`, same as an
   `ElicitationHandler` error (see [Elicitation](#elicitation)).
 - **Malformed `sampling/createMessage` params** get a JSON-RPC `-32602
-  Invalid params` error response, same treatment as malformed
+Invalid params` error response, same treatment as malformed
   `elicitation/create` params.
 - Subject to the same dispatch, bounding, `Close`-drain, and HTTP-transport
   limitations documented under [Elicitation](#elicitation) — the mechanism
@@ -326,7 +326,7 @@ if err := client.Initialize(ctx); err != nil {
 Roots let the client tell the server which filesystem locations it's
 scoped to work with. Unlike elicitation and sampling, `roots/list` carries
 no user-supplied logic — the client just reports a fixed list — so there's
-no handler to install; call `SetRoots` *before* `Initialize` instead. The
+no handler to install; call `SetRoots` _before_ `Initialize` instead. The
 client only declares the `"roots"` capability (`{"listChanged": false}` —
 this SDK has no dynamic root updates) when roots have been set:
 
@@ -354,7 +354,7 @@ if err := client.Initialize(ctx); err != nil {
 
 Notifications are server-to-client JSON-RPC messages with no `id` — the
 server owes no reply and expects none, e.g. `notifications/message` or
-`notifications/resources/updated`. Install a handler *before*
+`notifications/resources/updated`. Install a handler _before_
 `Initialize` so no notification sent early in the session (for example
 immediately after the server processes `initialized`) is missed:
 
@@ -430,14 +430,14 @@ client := mcp.NewClient(transport)
   never reached the server, so retrying can't double-execute a
   side-effecting call like `tools/call`. A generic `client.Do` error
   outside that allowlist (e.g. "connection reset by peer" while reading the
-  response, which can happen *after* the server already processed the
+  response, which can happen _after_ the server already processed the
   POST) is deliberately **not** retried, since the transport can't tell
   whether the server acted on the request — retrying it could execute a
   non-idempotent tool call twice. If your deployment needs broader retry
   coverage, wrap the `*http.Client` (`WithHTTPClientOpt`) with your own
   idempotency-aware retry logic instead. Backoff is capped exponential
   (`Retry-After` honored when present, either as integer seconds or an
-  HTTP-date) with ctx-aware backoff waits. `maxRetries` is retries *after*
+  HTTP-date) with ctx-aware backoff waits. `maxRetries` is retries _after_
   the initial attempt — `0` (the default) disables retrying entirely.
   **Never retried:** 4xx responses other than 429, and any failure once
   response bytes (a JSON body or an SSE stream) have started being
@@ -515,7 +515,7 @@ corresponding `Send` in flight. For an SSE response, `Send` hands the body
 to a background drain goroutine and returns as soon as headers are read
 (it doesn't block for the whole stream); this is deliberate, since `Client`
 serializes all `Send`s behind one mutex and the spec only says a server
-*should* (not *must*) close its SSE stream after responding — draining
+_should_ (not _must_) close its SSE stream after responding — draining
 synchronously would let a server that keeps the stream open wedge every
 subsequent call.
 
@@ -616,7 +616,7 @@ if err != nil {
   transport — the Streamable HTTP transport has no server→client channel to
   receive them on. See [Elicitation](#elicitation), [Sampling](#sampling),
   and [Transports' documented deviations](#transports-documented-deviations).
-- **No session termination *handshake*** on the HTTP transport: `Close`
+- **No session termination _handshake_** on the HTTP transport: `Close`
   issues a best-effort `DELETE` carrying the session id to let the server
   free state promptly, but the response status and any error are ignored
   (a server MAY reject it, e.g. `405` if it doesn't support client-initiated

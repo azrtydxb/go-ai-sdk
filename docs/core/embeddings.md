@@ -118,24 +118,24 @@ Every embedding-capable provider implements `MaxBatchSize()`; `EmbedMany`
 reads it directly off `opts.Model` (a batch size of zero or less is treated
 as 1, to avoid an infinite loop):
 
-| Provider | `MaxBatchSize()` |
-|---|---|
-| OpenAI | 2048 |
-| Azure OpenAI | 2048 |
-| Google (Gemini) | 100 |
-| Together AI | 100 |
-| Fireworks | 100 |
-| Vertex AI | 250 |
-| Cohere | 96 |
-| Mistral | 32 |
-| Amazon Bedrock | 1 |
-| Qwen | 10 |
-| DeepInfra | 1024 |
-| Baseten | 1 |
-| LM Studio | 1 |
-| NVIDIA NIM | 1 |
-| Vercel AI Gateway | 1 |
-| Voyage | 128 |
+| Provider          | `MaxBatchSize()` |
+| ----------------- | ---------------- |
+| OpenAI            | 2048             |
+| Azure OpenAI      | 2048             |
+| Google (Gemini)   | 100              |
+| Together AI       | 100              |
+| Fireworks         | 100              |
+| Vertex AI         | 250              |
+| Cohere            | 96               |
+| Mistral           | 32               |
+| Amazon Bedrock    | 1                |
+| Qwen              | 10               |
+| DeepInfra         | 1024             |
+| Baseten           | 1                |
+| LM Studio         | 1                |
+| NVIDIA NIM        | 1                |
+| Vercel AI Gateway | 1                |
+| Voyage            | 128              |
 
 Anthropic has no embeddings API and does not implement
 `provider.EmbeddingModel` at all — matching the TS AI SDK's behavior.

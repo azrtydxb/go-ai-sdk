@@ -22,6 +22,7 @@
 ### Task 1: Hardening backlog (deferred minors from waves 1–2 — all of them)
 
 **Files:**
+
 - Modify: `providers/cohere/wire.go` (+ its tests), `internal/openaicompat/embedding.go`, `providers/mistral/embedding.go` (+ tests), `internal/openaicompat/compattest/compattest.go`, `provider/providertest/providertest.go`, `provider/stream.go`, `provider/message.go`, `ai/stream_text.go`, `ai/stream_object.go`
 
 **Work items (each gets a covering test where behavior changes):**
@@ -41,11 +42,13 @@
 ### Task 2: Azure OpenAI provider
 
 **Files:**
+
 - Modify: `internal/openaicompat/openaicompat.go` (Config + auth header logic), `internal/openaicompat/compattest/compattest.go` (header capture accessor)
 - Create: `providers/azure/azure.go`
 - Test: `providers/azure/azure_test.go`, extend `internal/openaicompat/wire_requestshape_test.go`
 
 **Interfaces:**
+
 - Produces: `openaicompat.Config` gains `APIKeyHeader string` — empty (default) → `Authorization: Bearer <key>`; non-empty → header `<APIKeyHeader>: <key>` (no Bearer prefix). `compattest.Server` gains `func (s *Server) HeaderValues(name string) []string` (the named header of each request, in arrival order).
 - Produces: `providers/azure` package:
 
@@ -71,11 +74,13 @@ func (p *Provider) EmbeddingModel(id string) provider.EmbeddingModel // EmbedBat
 ### Task 3: Extract `internal/geminicompat` from `providers/google`
 
 **Files:**
+
 - Create: `internal/geminicompat/{geminicompat.go,language_model.go,wire.go,embedding.go}` (moved from `providers/google/`, parameterized)
 - Modify: `providers/google/google.go` (delegate), delete moved files
 - Test: existing `providers/google` tests stay green with zero substantive edits (same guard as the wave-2 openaicompat extraction; white-box wire tests may relocate into geminicompat if they touch now-unexported symbols — assertions intact)
 
 **Interfaces:**
+
 - Produces:
 
 ```go
@@ -106,10 +111,12 @@ func NewEmbeddingModel(cfg Config, modelID string) provider.EmbeddingModel
 ### Task 4: Google Vertex AI provider (+ `internal/gauth`)
 
 **Files:**
+
 - Create: `internal/gauth/gauth.go`, `providers/vertex/vertex.go`, `providers/vertex/embedding.go`
 - Test: `internal/gauth/gauth_test.go`, `providers/vertex/vertex_test.go`, `providers/vertex/embedding_test.go`
 
 **Interfaces:**
+
 - Produces `internal/gauth`:
 
 ```go
@@ -161,10 +168,12 @@ Language model = `geminicompat.NewLanguageModel` with `EndpointFor` → `{base}/
 ### Task 5: `internal/sigv4` + `internal/eventstream` + Bedrock language model
 
 **Files:**
+
 - Create: `internal/sigv4/sigv4.go`, `internal/eventstream/eventstream.go`, `providers/bedrock/{bedrock.go,language_model.go,wire.go}`
 - Test: `internal/sigv4/sigv4_test.go`, `internal/eventstream/eventstream_test.go`, `providers/bedrock/bedrock_test.go`
 
 **Interfaces:**
+
 - Produces `internal/sigv4`:
 
 ```go
@@ -221,11 +230,13 @@ Fixture: httptest handler using `eventstream.Encode` for stream scenarios; asser
 ### Task 6: Bedrock embeddings (Titan) + docs
 
 **Files:**
+
 - Create: `providers/bedrock/embedding.go`
 - Test: `providers/bedrock/embedding_test.go`
 - Modify: `README.md`, `docs/superpowers/specs/2026-08-02-go-ai-sdk-design.md`
 
 **Interfaces:**
+
 - Produces: `func (p *Provider) EmbeddingModel(id string) provider.EmbeddingModel` — Titan embeddings via `POST {base}/model/{id}/invoke` (SigV4-signed), body `{"inputText": <one value>}` → `{"embedding":[...], "inputTextTokenCount":n}`. Titan accepts ONE text per call → `MaxBatchSize() == 1` (ai.EmbedMany loops); Embed(values) with len>1 → error. Usage: inputTextTokenCount summed.
 - Docs: README capability table + roadmap gain azure/vertex/bedrock (embeddings: azure yes, vertex yes, bedrock yes; structured output: azure native, vertex native, bedrock tool-mode footnote); spec waves table wave-3 row "(shipped)".
 

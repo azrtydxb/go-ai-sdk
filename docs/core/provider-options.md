@@ -130,8 +130,8 @@ carries the same shape for the streaming API — see
 - **Anthropic** — `ProviderMetadata["anthropic"]["cache_creation_input_tokens"]`,
   populated when the response reports a non-zero
   `cache_creation_input_tokens` in its usage block (the number of input
-  tokens *written* to the prompt cache, distinct from
-  `Usage.CachedInputTokens`, which tracks tokens *read* from cache).
+  tokens _written_ to the prompt cache, distinct from
+  `Usage.CachedInputTokens`, which tracks tokens _read_ from cache).
 - **OpenAI-compatible (`openaicompat`)** — `ProviderMetadata["<name>"]["system_fingerprint"]`,
   populated from the first non-empty `system_fingerprint` observed
   (identifies the backend configuration that served the request; `<name>`

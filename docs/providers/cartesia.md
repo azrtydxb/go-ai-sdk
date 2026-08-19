@@ -22,7 +22,7 @@ defaults to `"https://api.cartesia.ai"`; `WithHTTPClient` overrides the
 `Cartesia-Version: 2024-11-13` header on every request.
 
 > **Note:** Cartesia's docs have historically shown both `Authorization:
-> Bearer <key>` and `X-API-Key: <key>` for authentication. This SDK sends
+Bearer <key>` and `X-API-Key: <key>` for authentication. This SDK sends
 > `Authorization: Bearer` (this is not currently configurable —
 > `ProviderOptions` only affects the JSON body, not headers). If requests
 > fail with an authentication error against your account/API version, check
@@ -52,15 +52,16 @@ defaults to `"https://api.cartesia.ai"`; `WithHTTPClient` overrides the
   always a fixed 128000 (`defaultBitRate`), both in
   `providers/cartesia/speech.go`:
 
-  | `OutputFormat` | `container` | `encoding` | `bit_rate` | `MediaType` |
-  |---|---|---|---|---|
-  | `"mp3"` or `""` (default) | `"mp3"` | *(absent)* | `128000` | `audio/mpeg` |
-  | `"wav"` | `"wav"` | `"pcm_s16le"` | *(absent)* | `audio/wav` |
-  | anything else (e.g. `"raw"`) | passed through verbatim | `"pcm_f32le"` | *(absent)* | `application/octet-stream` |
+  | `OutputFormat`               | `container`             | `encoding`    | `bit_rate` | `MediaType`                |
+  | ---------------------------- | ----------------------- | ------------- | ---------- | -------------------------- |
+  | `"mp3"` or `""` (default)    | `"mp3"`                 | _(absent)_    | `128000`   | `audio/mpeg`               |
+  | `"wav"`                      | `"wav"`                 | `"pcm_s16le"` | _(absent)_ | `audio/wav`                |
+  | anything else (e.g. `"raw"`) | passed through verbatim | `"pcm_f32le"` | _(absent)_ | `application/octet-stream` |
 
   This per-container mapping is a best-effort default (not spelled out
   exhaustively in Cartesia's docs) — flagged the same way as the package's
   live-testing caveat.
+
 - **Model ID is a wire field.** `SpeechModel(id)`'s `id` (e.g. `"sonic-2"`)
   is sent as the request's `model_id` field.
 - **`Language` passes through directly**, `omitempty`, with no

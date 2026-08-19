@@ -24,10 +24,12 @@
 ### Task 1: Tool execution panic recovery (P1)
 
 **Files:**
+
 - Modify: `ai/tool.go` (Execute, ~line 180)
 - Test: `ai/tool_test.go`
 
 **Interfaces:**
+
 - Produces: no new API. `(*tool).Execute` converts a user-tool panic into `*ToolExecutionError`.
 
 - [ ] **Step 1: Write the failing tests** in `ai/tool_test.go`:
@@ -104,6 +106,7 @@ Import `runtime/debug`. Place the `defer` AFTER the arg-decoding block so decode
 ### Task 2: Minor hardening — framedTransport.Close errors.Join + RuntimeContext concurrency doc (P6, P2)
 
 **Files:**
+
 - Modify: `mcp/stdio.go:246-262`, `ai/runtime_context.go`
 - Test: `mcp/stdio_test.go`
 
@@ -160,10 +163,12 @@ err = errors.Join(werr, cerr)
 ### Task 3: ChainMiddleware helper (F5)
 
 **Files:**
+
 - Modify: `ai/middleware.go` (append)
 - Test: `ai/middleware_test.go`
 
 **Interfaces:**
+
 - Produces: `func ChainMiddleware(model provider.LanguageModel, middlewares ...func(provider.LanguageModel) provider.LanguageModel) provider.LanguageModel`
 
 - [ ] **Step 1: Write the failing test:**
@@ -230,6 +235,7 @@ func ChainMiddleware(model provider.LanguageModel, middlewares ...func(provider.
 ### Task 4: Schema caching (P9)
 
 **Files:**
+
 - Modify: `internal/schema/schema.go`
 - Test: `internal/schema/schema_test.go`
 
@@ -292,10 +298,12 @@ In `ForType`, after the pointer-deref loop and struct check, look up `schemaCach
 ### Task 5: MCP incoming notification handler (P3)
 
 **Files:**
+
 - Modify: `mcp/jsonrpc.go` (recvLoop, ~line 287), `mcp/client.go` (handler field + setter near SetElicitationHandler's pattern)
 - Test: `mcp/client_test.go` (follow the existing recvLoop test harness — there are existing tests driving a fake Transport; reuse that pattern)
 
 **Interfaces:**
+
 - Produces: `type NotificationHandler func(method string, params json.RawMessage)`; `func (c *Client) SetNotificationHandler(h NotificationHandler)`
 
 - [ ] **Step 1: Write the failing test:** using the package's existing fake transport, feed the client `{"jsonrpc":"2.0","method":"notifications/message","params":{"level":"info","data":"hi"}}` and assert the installed handler receives method + params; also assert that with no handler installed the message is still dropped harmlessly (no panic, client keeps serving a normal call afterward).
@@ -343,10 +351,12 @@ if idIsAbsent(resp.ID) {
 ### Task 6: MCP CallTool structured content (P4)
 
 **Files:**
+
 - Modify: `mcp/client.go:216-264`
 - Test: `mcp/client_test.go`
 
 **Interfaces:**
+
 - Produces:
 
 ```go
@@ -376,11 +386,13 @@ type ToolContent struct {
 ### Task 7: MCP sampling/createMessage handler (F2)
 
 **Files:**
+
 - Create: `mcp/sampling.go`
 - Modify: `mcp/elicitation.go:71-78` (dispatch switch), `mcp/client.go` (Initialize capability declaration), `docs/mcp.md`
 - Test: `mcp/sampling_test.go`
 
 **Interfaces:**
+
 - Produces:
 
 ```go
@@ -419,11 +431,13 @@ func (c *Client) SetSamplingHandler(h SamplingHandler)
 ### Task 8: MCP roots support (F3)
 
 **Files:**
+
 - Create: `mcp/roots.go`
 - Modify: `mcp/elicitation.go` (dispatch switch), `mcp/client.go` (Initialize), `docs/mcp.md`
 - Test: `mcp/roots_test.go`
 
 **Interfaces:**
+
 - Produces:
 
 ```go
@@ -454,6 +468,7 @@ func (c *Client) SetRoots(roots []Root)
 ### Task 9: MCP HTTP DELETE session termination + transport trust-model docs (F4, S1, S2)
 
 **Files:**
+
 - Modify: `mcp/http.go` (Close + doc comment), `mcp/stdio.go` (NewStdioTransport doc)
 - Test: `mcp/http_test.go`
 
@@ -474,10 +489,12 @@ func (c *Client) SetRoots(roots []Root)
 ### Task 10: Lifecycle callbacks for Translate/Transcribe/Speech/Image/Video (I4)
 
 **Files:**
+
 - Modify: `ai/translate.go`, `ai/transcribe.go`, `ai/generate_speech.go`, `ai/generate_image.go`, `ai/generate_video.go`
 - Test: each file's existing `_test.go`
 
 **Interfaces:**
+
 - Produces, following the Embed pattern verbatim (`OnEmbedStart`/`OnEmbedEnd` at ai/embed.go:26-33 — Start fires once before the first attempt; End fires once after the final attempt with the SAME error the function returns, resp nil on error):
 
 ```go
@@ -506,10 +523,12 @@ func (c *Client) SetRoots(roots []Root)
 ### Task 11: StreamText + Output (F1)
 
 **Files:**
+
 - Modify: `ai/stream_text.go`, `ai/output.go`, `ai/generate_text.go` (opts doc only), `ai/options.go` (OnPartialOutput)
 - Test: `ai/stream_text_output_test.go` (new file)
 
 **Interfaces:**
+
 - Produces:
   - `StreamText` accepts `opts.Output` (drop the early `ErrOutputWithStreamText` return; keep the var with a `// Deprecated: no longer returned.` note).
   - `GenerateTextOpts.OnPartialOutput func(v any)` — during streaming with Output set, fires on each successfully parsed, distinct partial value (repair-parse of the accumulating JSON via `internal/partialjson`, dedup via `reflect.DeepEqual`, mirroring ai/stream_object.go:107-110). Never fires for OutputChoice (choices are atomic). No-op when Output is nil or in GenerateText.
@@ -543,6 +562,7 @@ func (c *Client) SetRoots(roots []Root)
 ### Task 12: Docs, changelog, full verification
 
 **Files:**
+
 - Modify: `CHANGELOG.md`, `docs/mcp.md`, `README.md`, `docs/providers/README.md` (only if it references fixed gaps)
 
 - [ ] **Step 1:** CHANGELOG `v0.3.0` section: every task above, one line each; note the carried minors explicitly (StreamObject repair-reparse cost, EmbedMany sequential batches, Call.Headers embed/media gap).

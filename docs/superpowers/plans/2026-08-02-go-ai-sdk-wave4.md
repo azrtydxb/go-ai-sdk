@@ -22,12 +22,14 @@
 ### Task 1: `provider` capability interfaces + `ai` core functions + mocks
 
 **Files:**
+
 - Create: `provider/image.go`, `provider/speech.go`, `provider/transcription.go`
 - Create: `ai/generate_image.go`, `ai/generate_speech.go`, `ai/transcribe.go`
 - Modify: `ai/aitest/mock.go` (MockImageModel, MockSpeechModel, MockTranscriptionModel)
 - Test: `ai/generate_image_test.go`, `ai/generate_speech_test.go`, `ai/transcribe_test.go`
 
 **Interfaces:**
+
 - Produces (used verbatim by Tasks 2–4):
 
 ```go
@@ -172,11 +174,13 @@ Tests (per function): happy path maps opts→call and result correctly; validati
 ### Task 2: openaicompat image + transcription; openai speech; expose on openai preset
 
 **Files:**
+
 - Create: `internal/openaicompat/image.go`, `internal/openaicompat/transcription.go`, `providers/openai/speech.go` (speech is OpenAI-only for now — implement directly in the openai package using cfg-style plumbing via openaicompat? DECISION: put speech in `internal/openaicompat/speech.go` too — xAI/groq don't expose it, but the code is identical shape and keeps transport in one place)
 - Modify: `providers/openai/openai.go` (ImageModel/SpeechModel/TranscriptionModel constructors), `internal/openaicompat/compattest/compattest.go` (fixture endpoints)
 - Test: `providers/openai/image_test.go`, `providers/openai/speech_test.go`, `providers/openai/transcription_test.go`, openaicompat request-shape tests
 
 **Interfaces:**
+
 - Produces:
 
 ```go
@@ -192,6 +196,7 @@ func (p *Provider) TranscriptionModel(id string) provider.TranscriptionModel // 
 ```
 
 Wire mappings:
+
 - **Images**: `POST {base}/images/generations` `{"model","prompt","n","size","response_format":"b64_json"}` (omit n/size when zero-valued; seed unsupported → ignored with comment; AspectRatio unsupported → error if set: `"<name>: aspect ratio is not supported; use Size"`). Response `{"data":[{"b64_json":...}]}` → decode base64 → GeneratedImage{Data, MediaType:"image/png"}. gpt-image-1 ignores response_format and always returns b64_json — sending it is still accepted for dall-e models; keep sending it.
 - **Speech**: `POST {base}/audio/speech` `{"model","input","voice","response_format","speed"}` (voice default "alloy" when empty — OpenAI requires voice; format default "mp3"). Response = raw audio bytes; MediaType from format: mp3→audio/mpeg, wav→audio/wav, opus→audio/opus, aac→audio/aac, flac→audio/flac, pcm→audio/pcm.
 - **Transcription**: `POST {base}/audio/transcriptions` multipart/form-data: `file` (filename "audio.<ext from MediaType: audio/mpeg→mp3, audio/wav→wav, audio/mp4→mp4, audio/webm→webm, else bin>", content-type = MediaType), `model`, optional `language`, `prompt`, and `response_format=verbose_json`. Response `{"text","language","duration","segments":[{"text","start","end"}]}` → mapped. Models that reject verbose_json (gpt-4o-transcribe) → the request still sends `verbose_json`? NO — DECISION: send `response_format=json` for model IDs containing "gpt-4o", else `verbose_json` (whisper); parse both shapes (json shape has only text).
@@ -205,14 +210,17 @@ Wire mappings:
 ### Task 3: Google Imagen images + xAI images + Groq transcription
 
 **Files:**
+
 - Create: `providers/google/image.go` (Imagen via :predict), `providers/vertex/image.go` (same wire at vertex paths)
 - Modify: `providers/xai/xai.go` (+ImageModel via openaicompat), `providers/groq/groq.go` (+TranscriptionModel via openaicompat)
 - Test: `providers/google/image_test.go`, `providers/vertex/image_test.go`, xai/groq test additions
 
 **Interfaces:**
+
 - Produces: `google.Provider.ImageModel(id)` and `vertex.Provider.ImageModel(id)` (e.g. "imagen-3.0-generate-002"); `xai.Provider.ImageModel(id)` (e.g. "grok-2-image"); `groq.Provider.TranscriptionModel(id)` (e.g. "whisper-large-v3").
 
 Wire mappings:
+
 - **Imagen (Gemini API)**: `POST {base}/models/{id}:predict` (google auth header) `{"instances":[{"prompt":...}],"parameters":{"sampleCount":N,"aspectRatio":"16:9"(when set),"seed":seed(when set)}}` → `{"predictions":[{"bytesBase64Encoded":...,"mimeType":"image/png"}]}`. Size unsupported → error if set ("google: size is not supported; use AspectRatio"). Vertex: same body at the vertex path (`…/publishers/google/models/{id}:predict`, Bearer auth) — implement once in `internal/geminicompat/image.go` (`NewImageModel(cfg Config, modelID string)`) using Config.EndpointFor with method "predict" and reuse from both providers.
 - **xAI images**: openaicompat `NewImageModel` with xai config — but xAI's API ignores `size` and doesn't accept `response_format`... DECISION: xAI accepts the OpenAI images shape with `response_format:"b64_json"`; reuse openaicompat.NewImageModel unchanged. Test via compattest images endpoint (ProviderName "xai").
 - **Groq transcription**: openaicompat `NewTranscriptionModel` with groq config; groq is whisper-only → always `verbose_json` (the "gpt-4o" carve-out doesn't trigger). Test via compattest.
@@ -224,10 +232,12 @@ Wire mappings:
 ### Task 4: ElevenLabs provider (speech + transcription)
 
 **Files:**
+
 - Create: `providers/elevenlabs/{elevenlabs.go,speech.go,transcription.go}`
 - Test: `providers/elevenlabs/{elevenlabs_test.go,speech_test.go,transcription_test.go}`
 
 **Interfaces:**
+
 - Produces:
 
 ```go
@@ -238,6 +248,7 @@ func (p *Provider) TranscriptionModel(id string) provider.TranscriptionModel // 
 ```
 
 Wire mappings:
+
 - **Speech**: `POST {base}/v1/text-to-speech/{voiceID}?output_format={fmt}` — header `xi-api-key`. VoiceID from SpeechCall.Voice; empty → default voice id `"21m00Tcm4TlvDq8ikWAM"` (Rachel, ElevenLabs' documented default) with a doc comment. Body `{"text","model_id":<modelID>,"language_code":<Language when set>}`. output_format from OutputFormat: "mp3"/""→`mp3_44100_128`→audio/mpeg; "pcm"→`pcm_44100`→audio/pcm; "ulaw"→`ulaw_8000`→audio/basic; anything else passed through verbatim with MediaType "application/octet-stream". Response = audio bytes.
 - **Transcription**: `POST {base}/v1/speech-to-text` multipart: `file` (audio bytes, content type MediaType), `model_id`, optional `language_code`. Response `{"text","language_code","words":[{"text","start","end","type"}]}` → Text, Language; words with type "word" → segments (per-word segments: Text/StartSec/EndSec). Duration = last word's end.
 - Errors: non-2xx → NewAPICallError (message from `{"detail":{"message":...}}` or `{"detail":"..."}` best-effort).
@@ -250,10 +261,12 @@ Wire mappings:
 ### Task 5: Examples + docs + spec addendum
 
 **Files:**
+
 - Create: `examples/generate-image/main.go`, `examples/generate-speech/main.go`, `examples/transcribe/main.go`
 - Modify: `README.md`, `docs/superpowers/specs/2026-08-02-go-ai-sdk-design.md`
 
 **Work:**
+
 - Examples (~30 lines, env-guarded like existing ones): generate-image (openai gpt-image-1, writes out.png), generate-speech (openai tts writes out.mp3), transcribe (openai whisper on a file path arg).
 - README: new "Beyond text" section with the three functions and a capability matrix for the new model types (image: openai, google, vertex, xai; speech: openai, elevenlabs; transcription: openai, groq, elevenlabs). Verify each against code; check table cell counts.
 - Spec: append a "## Capability extension (wave 4, shipped)" section documenting the three interfaces and the provider matrix (this fulfills the original spec's "separate spec" note for these capabilities).

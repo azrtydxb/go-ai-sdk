@@ -100,8 +100,8 @@ if err := stream.Err(); err != nil { ... }  // bufio.Scanner pattern
 ```
 
 - **Tool loop**: when the model returns tool calls and `MaxSteps` allows, `ai` executes the tools, appends results as tool messages, and calls the model again. Each round is recorded in `res.Steps`. `StreamText` runs the same loop; tool activity surfaces as stream parts.
-- **Tools**: `ai.NewTool[Args](name, description, fn)` where `fn = func(ctx context.Context, args Args) (any, error)`. `Args` is a struct; its JSON Schema is derived via reflection from field types and struct tags (`json`, `jsonschema:"description=...,enum=..."`). This is Go's stand-in for Zod.
-- **Structured output**: `ai.GenerateObject[T](ctx, opts)` derives the schema from `T` the same way, requests JSON output (native JSON mode where the provider supports it, else tool-based extraction — chosen per provider capability flags), then decodes and validates into `T`. Failure returns `NoObjectGeneratedError` carrying the raw text. `StreamObject[T]` streams partial JSON and yields best-effort partial values.
+- **Tools**: `ai.NewTool[Args]` taking `name, description, fn` where `fn = func(ctx context.Context, args Args) (any, error)`. `Args` is a struct; its JSON Schema is derived via reflection from field types and struct tags (`json`, `jsonschema:"description=...,enum=..."`). This is Go's stand-in for Zod.
+- **Structured output**: `ai.GenerateObject[T]` (taking `ctx, opts`) derives the schema from `T` the same way, requests JSON output (native JSON mode where the provider supports it, else tool-based extraction — chosen per provider capability flags), then decodes and validates into `T`. Failure returns `NoObjectGeneratedError` carrying the raw text. `StreamObject[T]` streams partial JSON and yields best-effort partial values.
 - **Embeddings**: `ai.Embed(ctx, EmbedOpts)` (single value) and `ai.EmbedMany` (splits input into batches of `MaxBatchSize`, runs them, reassembles in order).
 - **Retries**: exponential backoff with jitter on retryable errors (429, 5xx, network), default 2 retries, configurable via `MaxRetries`. Implemented once in `ai`/`internal`, never in providers.
 
@@ -128,12 +128,12 @@ Shared SSE parser in `internal/sse` (handles `data:` framing, `[DONE]`, comment 
 
 ## Provider waves
 
-| Wave | Providers | Status |
-|---|---|---|
-| 1 | OpenAI, Anthropic, Google (Gemini) | Shipped — three genuinely different wire formats prove the abstraction |
-| 2 (shipped) | Groq, xAI, DeepSeek, Together, Fireworks, Cerebras, Perplexity | Thin presets over the OpenAI-compatible base |
-| 2 (shipped) | Mistral, Cohere | Own APIs, full provider implementations |
-| 3 (shipped) | Azure OpenAI, Vertex AI, Amazon Bedrock | Platform auth: Azure (API-key preset over the OpenAI-compatible base), Vertex AI (Google service-account/ADC auth), Bedrock (AWS SigV4 request signing); no submodule split was needed |
+| Wave        | Providers                                                                   | Status                                                                                                                                                                                                                                                                  |
+| ----------- | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1           | OpenAI, Anthropic, Google (Gemini)                                          | Shipped — three genuinely different wire formats prove the abstraction                                                                                                                                                                                                  |
+| 2 (shipped) | Groq, xAI, DeepSeek, Together, Fireworks, Cerebras, Perplexity              | Thin presets over the OpenAI-compatible base                                                                                                                                                                                                                            |
+| 2 (shipped) | Mistral, Cohere                                                             | Own APIs, full provider implementations                                                                                                                                                                                                                                 |
+| 3 (shipped) | Azure OpenAI, Vertex AI, Amazon Bedrock                                     | Platform auth: Azure (API-key preset over the OpenAI-compatible base), Vertex AI (Google service-account/ADC auth), Bedrock (AWS SigV4 request signing); no submodule split was needed                                                                                  |
 | 8 (shipped) | fal, Replicate, Luma (image); Deepgram (transcription); LMNT, Hume (speech) | Standalone media-only implementations against documented wire formats; closes the Vercel-supported media roster targeted for v0.1. Not yet smoke-tested against live APIs — see [Provider overview: Live-testing status](../../providers/README.md#live-testing-status) |
 
 ## Testing
@@ -173,6 +173,7 @@ type TranscriptionModel interface {
 ```
 
 Unified types:
+
 - `ImageCall`: prompt, N (count), size, aspect ratio, seed.
 - `SpeechCall`: text, voice, output format, speed, language.
 - `TranscriptionCall`: audio bytes, media type, language, prompt (for context).
@@ -188,11 +189,11 @@ Each follows the established pattern: validates required fields, wraps the call 
 
 ### Provider coverage
 
-| Capability | OpenAI | Google | Vertex AI | xAI | ElevenLabs | Groq |
-|---|---|---|---|---|---|---|
-| `GenerateImage` | ✅ | ✅ | ✅ | ✅ | — | — |
-| `GenerateSpeech` | ✅ | — | — | — | ✅ | — |
-| `Transcribe` | ✅ | — | — | — | ✅ | ✅ |
+| Capability       | OpenAI | Google | Vertex AI | xAI | ElevenLabs | Groq |
+| ---------------- | ------ | ------ | --------- | --- | ---------- | ---- |
+| `GenerateImage`  | ✅     | ✅     | ✅        | ✅  | —          | —    |
+| `GenerateSpeech` | ✅     | —      | —         | —   | ✅         | —    |
+| `Transcribe`     | ✅     | —      | —         | —   | ✅         | ✅   |
 
 **Shared implementation:** OpenAI-compatible providers (groq, xai) reuse the `openaicompat` helpers introduced for text. Google-based providers (vertex) reuse the `geminicompat` base. ElevenLabs gets its own full implementation.
 
@@ -350,15 +351,15 @@ SDK's `experimental_createMCPClient`:
   handshake (`initialize` request, then a `notifications/initialized`
   notification). `Client.Close()` shuts down the transport.
 - Two `Transport` implementations: `mcp.NewStdioTransport(cmd []string, env
-  []string) (Transport, error)` launches `cmd` as a child process and speaks
+[]string) (Transport, error)` launches `cmd` as a child process and speaks
   newline-delimited JSON-RPC over its stdin/stdout (stderr passed through to
   the parent's); `mcp.NewStreamableHTTPTransport(url string, headers
-  map[string]string) Transport` speaks the MCP Streamable HTTP transport
+map[string]string) Transport` speaks the MCP Streamable HTTP transport
   (POST per message, response either a direct JSON body or an SSE stream,
   session id captured from `Mcp-Session-Id` and echoed on later requests).
 - `Client.ListTools(ctx) ([]ToolDef, error)` calls `tools/list`,
   transparently paginating via `nextCursor`. `Client.CallTool(ctx, name,
-  args) (*ToolResult, error)` calls `tools/call`, concatenating `"text"`
+args) (*ToolResult, error)` calls `tools/call`, concatenating `"text"`
   content parts into `ToolResult.Text` (other content types, e.g. images,
   are ignored in v1).
 - `mcp.Tools(ctx, client) ([]ai.Tool, error)` adapts every tool the server
@@ -430,7 +431,7 @@ Two more `GenerateTextOpts` fields, also shared by `GenerateText` and
   treated as unknown (`*NoSuchToolError`) even if it's present in `Tools`.
   `nil` means every tool is active.
 - `RepairToolCall func(ctx, call ToolCallRecord, toolErr error)
-  (ToolCallRecord, bool)` is invoked when a tool call fails to validate — an
+(ToolCallRecord, bool)` is invoked when a tool call fails to validate — an
   unknown name or an `*InvalidToolArgumentsError` from `Execute` — and may
   return a corrected call, retried once. If the repaired call fails again,
   `RepairToolCall` is not invoked a second time for that original call, and
@@ -443,12 +444,12 @@ content part for file attachments, alongside `TextPart`/`ImagePart`.
 Support is intentionally uneven across providers (documented on the type
 itself, `provider/message.go`):
 
-| Provider(s) | Support |
-|---|---|
-| anthropic | `application/pdf` only, sent as a `"document"` content block |
-| google, vertex (`geminicompat`) | any `MediaType`, sent inline via `inlineData` |
+| Provider(s)                                                                                             | Support                                                                                                                                                             |
+| ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| anthropic                                                                                               | `application/pdf` only, sent as a `"document"` content block                                                                                                        |
+| google, vertex (`geminicompat`)                                                                         | any `MediaType`, sent inline via `inlineData`                                                                                                                       |
 | openai + `openaicompat` presets (azure, cerebras, deepseek, fireworks, groq, perplexity, together, xai) | `application/pdf` only, sent as a `"file"` content part with a `data:` URL — OpenAI itself is confirmed to accept it; other OpenAI-compatible servers may reject it |
-| cohere, mistral, bedrock | unsupported; a `FilePart` in a user message returns a descriptive error |
+| cohere, mistral, bedrock                                                                                | unsupported; a `FilePart` in a user message returns a descriptive error                                                                                             |
 
 ### ProviderMetadata
 
@@ -469,7 +470,7 @@ step. Two providers populate it in this wave, on both the `Generate` and
 - `anthropic`: `ProviderMetadata["anthropic"]["cache_creation_input_tokens"]`
   when the usage block reports a non-zero `cache_creation_input_tokens`
   (tokens newly written to the prompt cache, as opposed to
-  `Usage.CachedInputTokens`, which tracks cache *reads*) — on `Generate`,
+  `Usage.CachedInputTokens`, which tracks cache _reads_) — on `Generate`,
   from the non-streaming response's `usage`; on `Stream`, from the
   `message_start` event's `usage` (the only place Anthropic's SSE stream
   reports it).

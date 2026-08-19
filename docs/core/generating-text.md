@@ -61,12 +61,12 @@ These five settings are threaded through unchanged to the identically-named
 support and wire-name mapping lives in each field's doc comment in
 [`provider/call.go`](../../provider/call.go). Summarized:
 
-| Setting | Supported by | Ignored by (silently, no wire param, no error) |
-|---|---|---|
-| `TopK` | anthropic, geminicompat (Google/Vertex), cohere (wire field `k`) | openaicompat-based providers (OpenAI, Azure, Groq, xAI, DeepSeek, Together, Fireworks, Cerebras, Perplexity), mistral, bedrock |
-| `PresencePenalty` / `FrequencyPenalty` | openaicompat-based providers, cohere, mistral (wire fields `presence_penalty`/`frequency_penalty`) | anthropic, geminicompat, bedrock |
-| `Seed` | openaicompat-based providers (`seed`), cohere (`seed`), mistral (`random_seed`) | anthropic, geminicompat, bedrock |
-| `Headers` | every language-model request path: openaicompat, geminicompat, anthropic, cohere, mistral, bedrock; and (since v0.4.0) `ai.EmbedOpts`/`ai.EmbedManyOpts`, `ai.GenerateImageOpts`, `ai.GenerateSpeechOpts`, `ai.GenerateVideoOpts`, `ai.TranscribeOpts`, `ai.TranslateOpts`, `ai.RerankOpts`, `ai.UploadFileOpts` — each threaded to its `provider.*Call.Headers` field | for Embed/EmbedMany, a `Model` that does not implement `provider.EmbeddingModelWithOptions` (silently ignored, same as `ProviderOptions`) |
+| Setting                                | Supported by                                                                                                                                                                                                                                                                                                                                                           | Ignored by (silently, no wire param, no error)                                                                                            |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `TopK`                                 | anthropic, geminicompat (Google/Vertex), cohere (wire field `k`)                                                                                                                                                                                                                                                                                                       | openaicompat-based providers (OpenAI, Azure, Groq, xAI, DeepSeek, Together, Fireworks, Cerebras, Perplexity), mistral, bedrock            |
+| `PresencePenalty` / `FrequencyPenalty` | openaicompat-based providers, cohere, mistral (wire fields `presence_penalty`/`frequency_penalty`)                                                                                                                                                                                                                                                                     | anthropic, geminicompat, bedrock                                                                                                          |
+| `Seed`                                 | openaicompat-based providers (`seed`), cohere (`seed`), mistral (`random_seed`)                                                                                                                                                                                                                                                                                        | anthropic, geminicompat, bedrock                                                                                                          |
+| `Headers`                              | every language-model request path: openaicompat, geminicompat, anthropic, cohere, mistral, bedrock; and (since v0.4.0) `ai.EmbedOpts`/`ai.EmbedManyOpts`, `ai.GenerateImageOpts`, `ai.GenerateSpeechOpts`, `ai.GenerateVideoOpts`, `ai.TranscribeOpts`, `ai.TranslateOpts`, `ai.RerankOpts`, `ai.UploadFileOpts` — each threaded to its `provider.*Call.Headers` field | for Embed/EmbedMany, a `Model` that does not implement `provider.EmbeddingModelWithOptions` (silently ignored, same as `ProviderOptions`) |
 
 An "ignored by" provider drops the field entirely — nothing is sent on the
 wire, and no error is returned. `ProviderOptions` can still reach an
@@ -145,7 +145,7 @@ end:
   `OnError`, if set) — this is an SDK-imposed limit, i.e. an error, not a
   user abort.
 - If the caller's own `ctx` is canceled or reaches its own deadline
-  *first*, the run ends exactly as it always has: the plain ctx error from
+  _first_, the run ends exactly as it always has: the plain ctx error from
   `GenerateText`'s return value, or `OnAbort` in `StreamText` (see
   [OnAbort](#onabort) above) — never a `*ai.TimeoutError`. A generous
   `Timeout` (or none at all) never changes this path.
@@ -261,7 +261,7 @@ result, err := ai.GenerateText(context.Background(), ai.GenerateTextOpts{
 ```
 
 **Model-swap persistence rule:** setting `StepPlan.Model` swaps the model
-used for that step's call *and every step after it*, until `PrepareStep`
+used for that step's call _and every step after it_, until `PrepareStep`
 swaps again. This is a deliberate divergence from a strictly per-step swap:
 a swap made at step N doesn't need to be re-asserted at every later step to
 "stick," which matches the common case of routing to a cheaper model partway
@@ -430,7 +430,7 @@ if err != nil {
 fmt.Println(recipe.Name)
 ```
 
-`OutputAs[T](result)` extracts `result.Output` (typed `any` on
+`OutputAs[T]` called on `result` extracts `result.Output` (typed `any` on
 `*GenerateTextResult`) as a concrete `T`, returning a descriptive error
 (never a panic) if `result.Output` is `nil` or its dynamic type doesn't
 match `T`. For `OutputArray[T]`, extract as `[]T` (not `T`):
@@ -496,7 +496,7 @@ a real tool: `GenerateText` decodes `Output` straight from that call's raw
 arguments and ends the loop in exactly one step, without running
 `OnToolExecutionStart`/`OnToolExecutionEnd` for it (see
 [Lifecycle callbacks](#lifecycle-callbacks-model-call-and-tool-execution)
-below). That step also does not evaluate `StopWhen` — the forced call *is*
+below). That step also does not evaluate `StopWhen` — the forced call _is_
 the structured output, so the loop ends there unconditionally (see
 `StopWhen`'s doc comment for this one exception).
 
@@ -545,7 +545,7 @@ up-front check, same forced-call scrubbing — but adds two ways to observe
 the value as it streams in, instead of only after the call returns:
 
 - **`GenerateTextOpts.OnPartialOutput func(v any)`** — called during
-  `Parts()` iteration with each successfully repair-parsed, *distinct*
+  `Parts()` iteration with each successfully repair-parsed, _distinct_
   intermediate value, as the accumulated text (or, in the tool-mode
   fallback, the forced output tool's streaming arguments) grows. Fires zero
   or more times; skipped for a raw prefix that doesn't yet repair-parse into
@@ -700,7 +700,7 @@ unanswered assistant tool-call batch becomes resumable this way, including
 one built up manually rather than returned from a suspended
 `GenerateText`/`StreamText` call.
 
-If that leading batch is *itself* still pending after resume (no decision
+If that leading batch is _itself_ still pending after resume (no decision
 available for some call in it), the run suspends again immediately —
 `Steps` is empty, `Messages` is unchanged, `FinishReason` is
 `provider.FinishToolCalls` — without ever calling the model. This is
@@ -709,7 +709,7 @@ new step is appended, since no new model call happened.
 
 ## Result anatomy
 
-`*GenerateTextResult` reflects the *last* step's text/tool calls/finish
+`*GenerateTextResult` reflects the _last_ step's text/tool calls/finish
 reason at the top level, alongside the full history:
 
 - **`Steps`** (`[]Step`) — one entry per model call in the loop. Each `Step`

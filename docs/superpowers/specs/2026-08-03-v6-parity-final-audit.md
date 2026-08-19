@@ -29,7 +29,7 @@ each closed this wave (tasks 1–5 of the wave-14 plan):
 Closing all four is what "full v6 core parity" in this document's title
 means: not that every literal AI SDK 6 API surface exists byte-for-byte
 (some are deliberately re-shaped for Go, see the divergences in the
-migration guide), but that every feature *category* the v6 core exposes
+migration guide), but that every feature _category_ the v6 core exposes
 has a `go-ai-sdk` equivalent, documented, tested, and shipped.
 
 ## The have-list: AI SDK 6 core surface covered
@@ -41,6 +41,7 @@ divergence — see
 for those.
 
 **Text generation & the tool loop**
+
 - `GenerateText`/`StreamText` core loop: `MaxSteps`, `StopWhen`
   (`StepCountIs`, `HasToolCall`, `LoopFinished`), `PrepareStep`
   (model-swap-with-persistence semantics), full call settings (`TopK`,
@@ -58,6 +59,7 @@ for those.
   tracked below, not a parity gap.
 
 **Tools**
+
 - `NewTool[Args]` reflection-derived JSON Schema, `ActiveTools`,
   `RepairToolCall`, the typed execution-error taxonomy
   (`InvalidToolArgumentsError`/`ToolExecutionError`/`NoSuchToolError`/
@@ -73,12 +75,14 @@ for those.
   `OnInputStart`/`OnInputDelta`/`OnInputAvailable`) — wave 14.
 
 **Structured output & embeddings**
+
 - `GenerateObject[T]`/`StreamObject[T]` (native-JSON and forced-tool-call
   modes).
 - `Embed`/`EmbedMany` (automatic batching), `CosineSimilarity`.
 - `Rerank`/`provider.RerankingModel` (Cohere, Voyage, Mixedbread).
 
 **Streaming**
+
 - `TextStream.Parts()` (`iter.Seq[provider.StreamPart]`): text, tool-call,
   reasoning, source, and finish parts, uniformly across providers.
 - `SmoothStream` (word/line chunking, explicit `Delay`).
@@ -86,11 +90,13 @@ for those.
   `GenerateText`.
 
 **Reasoning**
+
 - Unified `Reasoning` request option (`Effort`/`BudgetTokens`), mapped per
   provider; `ReasoningPart`/`ReasoningDelta`/`ReasoningEnd` surfaced
   uniformly across every provider that supports it.
 
 **Middleware & registry**
+
 - `ExtractReasoningMiddleware`, `SimulateStreamingMiddleware`,
   `DefaultSettingsMiddleware`, `ExtractJSONMiddleware`,
   `AddToolInputExamplesMiddleware` (wave 14) — five `provider.LanguageModel`
@@ -99,11 +105,13 @@ for those.
 - `Registry` (`"provider:model"` resolution across six model kinds).
 
 **Agents & Code Mode**
+
 - `agent.Agent` (`Generate`/`Stream`, `RunOpts`, its own `MaxSteps`
   default), `agent.AsTool` for sub-agent delegation.
 - `codemode.Tool`/`Sandbox`/`APIDoc`.
 
 **Media**
+
 - Image, video (`GenerateVideo`), speech, transcription (including live
   `StreamTranscribe`), and audio translation (`Translate`, REST-only).
 - File/skill upload (`UploadFile`/`DeleteFile`/`FileStore`,
@@ -111,11 +119,13 @@ for those.
 - A minimal OpenAI realtime voice session (`RealtimeSession`).
 
 **MCP**
+
 - Tools, resources/resource templates, prompts, argument completions,
   server-initiated elicitation (stdio-only), token-provider auth with
   transient HTTP retry.
 
 **Observability**
+
 - `ai.Telemetry`/`ai.TelemetryMiddleware` — the dependency-free seam,
   now `ctx`-aware with a `CorrelationID` for reliable span pairing (the
   program's one breaking change, wave 14).
@@ -124,6 +134,7 @@ for those.
   (wave 14).
 
 **Provider fleet**
+
 - 39 providers across chat/tools/structured-output/embeddings/reranking/
   images/video/speech/transcription, per the
   [provider overview](../../providers/README.md).
@@ -163,7 +174,7 @@ no "gap" here to close, because they were never in scope:
 - **`contextSchema`** — a schema attached to an agent/run's context object
   itself, distinct from `RuntimeContext`'s untyped bag.
 - **A top-level `reasoning` enum** on a message/part — a
-  response-shape-level concept, distinct from the *request*-side
+  response-shape-level concept, distinct from the _request_-side
   `Reasoning{Effort, BudgetTokens}` option this SDK already ships.
 - **A redesigned tool-execution approvals surface** — v7 reworks the
   approval message-part shape beyond what this SDK's

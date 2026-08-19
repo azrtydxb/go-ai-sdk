@@ -56,7 +56,7 @@ not a `?key=` query parameter (`providers/google/google.go:65-68`,
   (`internal/geminicompat/wire.go:402-440`.)
 - **Tool results are matched by name, not by call ID.** Gemini's
   `functionResponse` wire shape identifies which call it answers by tool
-  *name* (`trp.Name`), unlike Anthropic/OpenAI's ID-based correlation —
+  _name_ (`trp.Name`), unlike Anthropic/OpenAI's ID-based correlation —
   callers populating `provider.ToolResultPart` for a Gemini model must set
   `Name`; there's no ID fallback. (`internal/geminicompat/wire.go:345-354`,
   doc comment on `toolResultParts`.)

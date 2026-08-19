@@ -83,47 +83,47 @@ Every provider falls back to an environment variable when its corresponding
 `With...` option isn't passed to `New`. This is the full list, one row per
 provider package:
 
-| Provider | Package | Environment variable(s) | Notes |
-|---|---|---|---|
-| OpenAI | `providers/openai` | `OPENAI_API_KEY` | |
-| Anthropic | `providers/anthropic` | `ANTHROPIC_API_KEY` | |
-| Google (Gemini API) | `providers/google` | `GOOGLE_GENERATIVE_AI_API_KEY` | |
-| Vertex AI | `providers/vertex` | `GOOGLE_VERTEX_PROJECT`, `GOOGLE_VERTEX_LOCATION`, `GOOGLE_APPLICATION_CREDENTIALS` | `GOOGLE_VERTEX_LOCATION` defaults to `us-central1` if unset; `GOOGLE_APPLICATION_CREDENTIALS` points at a service-account JSON file used for auto-discovered credentials |
-| Azure OpenAI | `providers/azure` | `AZURE_API_KEY`, `AZURE_RESOURCE_NAME` | `AZURE_RESOURCE_NAME` is ignored when `WithBaseURL` is also given |
-| Amazon Bedrock | `providers/bedrock` | `AWS_REGION` (or `AWS_DEFAULT_REGION`), `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` | region falls back to `us-east-1` if neither AWS region var is set |
-| Groq | `providers/groq` | `GROQ_API_KEY` | |
-| xAI | `providers/xai` | `XAI_API_KEY` | |
-| DeepSeek | `providers/deepseek` | `DEEPSEEK_API_KEY` | |
-| Cerebras | `providers/cerebras` | `CEREBRAS_API_KEY` | |
-| Together AI | `providers/together` | `TOGETHER_AI_API_KEY` | |
-| Fireworks | `providers/fireworks` | `FIREWORKS_API_KEY` | |
-| Perplexity | `providers/perplexity` | `PERPLEXITY_API_KEY` | |
-| Moonshot | `providers/moonshot` | `MOONSHOT_API_KEY` | |
-| Qwen | `providers/qwen` | `DASHSCOPE_API_KEY` | |
-| MiniMax | `providers/minimax` | `MINIMAX_API_KEY` | |
-| DeepInfra | `providers/deepinfra` | `DEEPINFRA_API_KEY` | |
-| Hugging Face | `providers/huggingface` | `HF_TOKEN` | |
-| Baseten | `providers/baseten` | `BASETEN_API_KEY` | |
-| LM Studio | `providers/lmstudio` | `LMSTUDIO_API_KEY` | optional — local server needs no authentication |
-| NVIDIA NIM | `providers/nvidia` | `NVIDIA_API_KEY` | |
-| Vercel AI Gateway | `providers/gateway` | `AI_GATEWAY_API_KEY` | |
-| Mistral | `providers/mistral` | `MISTRAL_API_KEY` | |
-| Cohere | `providers/cohere` | `COHERE_API_KEY` | |
-| Voyage | `providers/voyage` | `VOYAGE_API_KEY` | |
-| Mixedbread | `providers/mixedbread` | `MXBAI_API_KEY` | |
-| ElevenLabs | `providers/elevenlabs` | `ELEVENLABS_API_KEY` | |
-| fal | `providers/fal` | `FAL_API_KEY` (falls back to `FAL_KEY`) | |
-| Replicate | `providers/replicate` | `REPLICATE_API_TOKEN` | |
-| Luma | `providers/luma` | `LUMA_API_KEY` | |
-| Deepgram | `providers/deepgram` | `DEEPGRAM_API_KEY` | |
-| LMNT | `providers/lmnt` | `LMNT_API_KEY` | |
-| Hume | `providers/hume` | `HUME_API_KEY` | |
-| AssemblyAI | `providers/assemblyai` | `ASSEMBLYAI_API_KEY` | |
-| Gladia | `providers/gladia` | `GLADIA_API_KEY` | |
-| Rev.ai | `providers/revai` | `REVAI_API_KEY` (falls back to `REV_AI_API_KEY`) | |
-| Cartesia | `providers/cartesia` | `CARTESIA_API_KEY` | |
-| Prodia | `providers/prodia` | `PRODIA_API_KEY` | |
-| Black Forest Labs | `providers/bfl` | `BFL_API_KEY` | |
+| Provider            | Package                 | Environment variable(s)                                                                                   | Notes                                                                                                                                                                    |
+| ------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| OpenAI              | `providers/openai`      | `OPENAI_API_KEY`                                                                                          |                                                                                                                                                                          |
+| Anthropic           | `providers/anthropic`   | `ANTHROPIC_API_KEY`                                                                                       |                                                                                                                                                                          |
+| Google (Gemini API) | `providers/google`      | `GOOGLE_GENERATIVE_AI_API_KEY`                                                                            |                                                                                                                                                                          |
+| Vertex AI           | `providers/vertex`      | `GOOGLE_VERTEX_PROJECT`, `GOOGLE_VERTEX_LOCATION`, `GOOGLE_APPLICATION_CREDENTIALS`                       | `GOOGLE_VERTEX_LOCATION` defaults to `us-central1` if unset; `GOOGLE_APPLICATION_CREDENTIALS` points at a service-account JSON file used for auto-discovered credentials |
+| Azure OpenAI        | `providers/azure`       | `AZURE_API_KEY`, `AZURE_RESOURCE_NAME`                                                                    | `AZURE_RESOURCE_NAME` is ignored when `WithBaseURL` is also given                                                                                                        |
+| Amazon Bedrock      | `providers/bedrock`     | `AWS_REGION` (or `AWS_DEFAULT_REGION`), `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` | region falls back to `us-east-1` if neither AWS region var is set                                                                                                        |
+| Groq                | `providers/groq`        | `GROQ_API_KEY`                                                                                            |                                                                                                                                                                          |
+| xAI                 | `providers/xai`         | `XAI_API_KEY`                                                                                             |                                                                                                                                                                          |
+| DeepSeek            | `providers/deepseek`    | `DEEPSEEK_API_KEY`                                                                                        |                                                                                                                                                                          |
+| Cerebras            | `providers/cerebras`    | `CEREBRAS_API_KEY`                                                                                        |                                                                                                                                                                          |
+| Together AI         | `providers/together`    | `TOGETHER_AI_API_KEY`                                                                                     |                                                                                                                                                                          |
+| Fireworks           | `providers/fireworks`   | `FIREWORKS_API_KEY`                                                                                       |                                                                                                                                                                          |
+| Perplexity          | `providers/perplexity`  | `PERPLEXITY_API_KEY`                                                                                      |                                                                                                                                                                          |
+| Moonshot            | `providers/moonshot`    | `MOONSHOT_API_KEY`                                                                                        |                                                                                                                                                                          |
+| Qwen                | `providers/qwen`        | `DASHSCOPE_API_KEY`                                                                                       |                                                                                                                                                                          |
+| MiniMax             | `providers/minimax`     | `MINIMAX_API_KEY`                                                                                         |                                                                                                                                                                          |
+| DeepInfra           | `providers/deepinfra`   | `DEEPINFRA_API_KEY`                                                                                       |                                                                                                                                                                          |
+| Hugging Face        | `providers/huggingface` | `HF_TOKEN`                                                                                                |                                                                                                                                                                          |
+| Baseten             | `providers/baseten`     | `BASETEN_API_KEY`                                                                                         |                                                                                                                                                                          |
+| LM Studio           | `providers/lmstudio`    | `LMSTUDIO_API_KEY`                                                                                        | optional — local server needs no authentication                                                                                                                          |
+| NVIDIA NIM          | `providers/nvidia`      | `NVIDIA_API_KEY`                                                                                          |                                                                                                                                                                          |
+| Vercel AI Gateway   | `providers/gateway`     | `AI_GATEWAY_API_KEY`                                                                                      |                                                                                                                                                                          |
+| Mistral             | `providers/mistral`     | `MISTRAL_API_KEY`                                                                                         |                                                                                                                                                                          |
+| Cohere              | `providers/cohere`      | `COHERE_API_KEY`                                                                                          |                                                                                                                                                                          |
+| Voyage              | `providers/voyage`      | `VOYAGE_API_KEY`                                                                                          |                                                                                                                                                                          |
+| Mixedbread          | `providers/mixedbread`  | `MXBAI_API_KEY`                                                                                           |                                                                                                                                                                          |
+| ElevenLabs          | `providers/elevenlabs`  | `ELEVENLABS_API_KEY`                                                                                      |                                                                                                                                                                          |
+| fal                 | `providers/fal`         | `FAL_API_KEY` (falls back to `FAL_KEY`)                                                                   |                                                                                                                                                                          |
+| Replicate           | `providers/replicate`   | `REPLICATE_API_TOKEN`                                                                                     |                                                                                                                                                                          |
+| Luma                | `providers/luma`        | `LUMA_API_KEY`                                                                                            |                                                                                                                                                                          |
+| Deepgram            | `providers/deepgram`    | `DEEPGRAM_API_KEY`                                                                                        |                                                                                                                                                                          |
+| LMNT                | `providers/lmnt`        | `LMNT_API_KEY`                                                                                            |                                                                                                                                                                          |
+| Hume                | `providers/hume`        | `HUME_API_KEY`                                                                                            |                                                                                                                                                                          |
+| AssemblyAI          | `providers/assemblyai`  | `ASSEMBLYAI_API_KEY`                                                                                      |                                                                                                                                                                          |
+| Gladia              | `providers/gladia`      | `GLADIA_API_KEY`                                                                                          |                                                                                                                                                                          |
+| Rev.ai              | `providers/revai`       | `REVAI_API_KEY` (falls back to `REV_AI_API_KEY`)                                                          |                                                                                                                                                                          |
+| Cartesia            | `providers/cartesia`    | `CARTESIA_API_KEY`                                                                                        |                                                                                                                                                                          |
+| Prodia              | `providers/prodia`      | `PRODIA_API_KEY`                                                                                          |                                                                                                                                                                          |
+| Black Forest Labs   | `providers/bfl`         | `BFL_API_KEY`                                                                                             |                                                                                                                                                                          |
 
 ## Streaming quickstart
 

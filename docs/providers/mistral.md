@@ -18,7 +18,8 @@ embedder := provider.EmbeddingModel("mistral-embed")
 `WithAPIKey` defaults to `os.Getenv("MISTRAL_API_KEY")`; `WithBaseURL`
 defaults to `"https://api.mistral.ai/v1"`; `WithHTTPClient` overrides the
 `*http.Client`. Auth is sent as `Authorization: Bearer <key>` on every
-request (`providers/mistral/language_model.go`, `embedding.go`).
+request (`providers/mistral/mistral.go` via the shared
+`internal/openaicompat` base).
 
 ## Capabilities
 
@@ -31,9 +32,9 @@ request (`providers/mistral/language_model.go`, `embedding.go`).
 
 ## Quirks
 
-- **Schema-dropped structured output.** `convertResponseFormat` in
-  `providers/mistral/wire.go` maps `provider.ResponseFormat{Type: "json"}`
-  to Mistral's wire as `{"type":"json_object"}` and never sends
+- **Schema-dropped structured output.** The preset sets
+  `JSONObjectOnly: true`, mapping `provider.ResponseFormat{Type: "json"}`
+  to Mistral's wire as `{"type":"json_object"}` and never sending
   `rf.Schema`:
 
   > Mistral has no json_schema mode: for `ResponseFormat.Type == "json"` it
@@ -46,22 +47,23 @@ request (`providers/mistral/language_model.go`, `embedding.go`).
   schema client-side), but Mistral's own API never sees or enforces the
   schema — unlike Cohere, whose `response_format` does carry a `schema`
   field alongside `json_object` (`providers/cohere/wire.go`).
+
 - **`tool_choice: "any"` means required.** Mistral's wire word for "force a
-  tool call" is `"any"`, not OpenAI's `"required"` — mapped in
-  `convertToolChoice` (`providers/mistral/wire.go`).
+  tool call" is `"any"`, not OpenAI's `"required"` — set via the preset's
+  `RequiredToolChoice: "any"` knob (`providers/mistral/mistral.go`).
 - **Tools are omitted, not just `tool_choice`, for `ToolChoiceNone`.**
   Mistral rejects a `tool_choice` field when `tools` is empty/absent, so
-  `buildChatRequest` drops the entire `Tools` array (not just
-  `tool_choice`) when `Call.ToolChoice.Mode == provider.ToolChoiceNone`.
+  the preset's `OmitToolsOnNone: true` drops the entire `Tools` array (not
+  just `tool_choice`) when `Call.ToolChoice.Mode == provider.ToolChoiceNone`.
 - **No error slot on tool-result messages.** `trp.IsError` is not encoded
   on `RoleTool` messages — Mistral's `tool` message wire format has no
   dedicated error field, so failed and successful tool results are sent
-  identically as plain JSON content (`convertMessages` in
-  `providers/mistral/wire.go`).
+  identically as plain JSON content (message conversion in
+  `internal/openaicompat/openaicompat.go`).
 - **Reasoning content is dropped, not replayed.** `provider.ReasoningPart`
   in an assistant message is silently skipped when building request
   messages — Mistral has no wire representation for thinking/reasoning
-  blocks (`providers/mistral/wire.go`, `providers/mistral/mistral_test.go`
+  blocks (`internal/openaicompat/openaicompat.go`; `providers/mistral/mistral_test.go`
   asserts this: "request body contains reasoning text, want dropped").
 
 ## ProviderOptions
@@ -89,7 +91,6 @@ result, err := ai.GenerateText(context.Background(), ai.GenerateTextOpts{
 ## Source of truth
 
 - [`providers/mistral/mistral.go`](../../providers/mistral/mistral.go)
-- [`providers/mistral/language_model.go`](../../providers/mistral/language_model.go)
-- [`providers/mistral/wire.go`](../../providers/mistral/wire.go)
-- [`providers/mistral/embedding.go`](../../providers/mistral/embedding.go)
+- [`internal/openaicompat/openaicompat.go`](../../internal/openaicompat/openaicompat.go)
+  (mistral is an openaicompat preset since v0.4.1)
 - [`providers/mistral/provideroptions_test.go`](../../providers/mistral/provideroptions_test.go)

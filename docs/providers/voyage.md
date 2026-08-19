@@ -41,14 +41,14 @@ request.
 - **Embeddings are indexed by the response's `index` field**, not appended
   in response order — protects against a provider returning embeddings out
   of order. `EmbedCall`'s wire request is `{"model","input":[...],
-  "input_type"?}`; `input_type` is omitted unless set via
+"input_type"?}`; `input_type` is omitted unless set via
   `ProviderOptions["voyage"]`.
 - **Embeddings usage is token-based** — `Usage.TotalTokens` comes from the
   response's `usage.total_tokens` field, unlike some rerank-only providers
   that report no usage at all (see Mixedbread's page for the contrast).
 - **Rerank request uses `"documents"`**, matching `RerankCall.Documents`
   directly (a bare `[]string]`) — this is the field name Cohere also uses,
-  and the one Mixedbread's rerank API does *not* use (Mixedbread's rerank
+  and the one Mixedbread's rerank API does _not_ use (Mixedbread's rerank
   request has an `"input"` field instead; see [Mixedbread](mixedbread.md)).
 - **`top_k`, not `top_n`, on the wire** — `RerankCall.TopN` maps to Voyage's
   `top_k` field, a `*int` omitted from the wire request entirely when

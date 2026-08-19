@@ -52,9 +52,9 @@ exact bytes sent on the wire. (`providers/bedrock/language_model.go:45-65`.)
 - **Tool calling** — same `Model(id)`, via Converse's `toolConfig`.
 - **Structured output** — no native JSON mode:
   `Capabilities().NativeJSON` is `false`
-  (`providers/bedrock/language_model.go:28-32`, doc comment: *"Bedrock's
+  (`providers/bedrock/language_model.go:28-32`, doc comment: _"Bedrock's
   Converse API has no schema-constrained JSON response mode; the ai core
-  falls back to tool-mode object generation"*) — same tool-mode fallback as
+  falls back to tool-mode object generation"_) — same tool-mode fallback as
   Anthropic, via `ai.GenerateObject`'s forced-tool-choice path.
 - **Reasoning (`reasoningContent`)** — Converse's signed/redacted reasoning
   blocks map to `provider.ReasoningPart` the same way Anthropic's thinking
@@ -81,22 +81,23 @@ exact bytes sent on the wire. (`providers/bedrock/language_model.go:45-65`.)
   media types, which fall back to `png` for anything unrecognized). A
   `FilePart` with a `MediaType` outside this list returns an error:
 
-  | `MediaType` | Converse format code |
-  |---|---|
-  | `application/pdf` | `pdf` |
-  | `text/csv` | `csv` |
-  | `text/html` | `html` |
-  | `text/plain` | `txt` |
-  | `text/markdown` | `md` |
-  | `application/msword` | `doc` |
-  | `application/vnd.openxmlformats-officedocument.wordprocessingml.document` | `docx` |
-  | `application/vnd.ms-excel` | `xls` |
-  | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` | `xlsx` |
+  | `MediaType`                                                               | Converse format code |
+  | ------------------------------------------------------------------------- | -------------------- |
+  | `application/pdf`                                                         | `pdf`                |
+  | `text/csv`                                                                | `csv`                |
+  | `text/html`                                                               | `html`               |
+  | `text/plain`                                                              | `txt`                |
+  | `text/markdown`                                                           | `md`                 |
+  | `application/msword`                                                      | `doc`                |
+  | `application/vnd.openxmlformats-officedocument.wordprocessingml.document` | `docx`               |
+  | `application/vnd.ms-excel`                                                | `xls`                |
+  | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`       | `xlsx`               |
 
   (`providers/bedrock/wire.go:482-499`, `documentFormat`.)
+
 - **Image and document parts require inline `Data`** — a `URL`-only
-  `ImagePart` (no bytes) is rejected outright: *"image parts require inline
-  Data (URL images are not supported)"*. Bedrock's Converse API has no
+  `ImagePart` (no bytes) is rejected outright: _"image parts require inline
+  Data (URL images are not supported)"_. Bedrock's Converse API has no
   fetch-by-URL image ingestion. (`providers/bedrock/wire.go:438-441`.)
 - **Reasoning blocks lead the assistant turn on replay**, mirroring
   Anthropic: `assistantBlocks` partitions `reasoningContent` blocks out and
@@ -110,8 +111,8 @@ exact bytes sent on the wire. (`providers/bedrock/language_model.go:45-65`.)
   `ToolResultPart.IsError` is true. (`providers/bedrock/wire.go:368-374`.)
 - **`ToolChoiceNone` omits `toolConfig` entirely**; a tool-choice with zero
   tools is rejected fast, client-side, with a descriptive error rather than
-  being sent to the API to bounce: *"bedrock: tool choice requires at least
-  one tool"*. (`providers/bedrock/wire.go:276-298`.)
+  being sent to the API to bounce: _"bedrock: tool choice requires at least
+  one tool"_. (`providers/bedrock/wire.go:276-298`.)
 - **Streaming distinguishes transport errors from modeled exceptions.** An
   event-stream message with `:message-type: exception` is an
   application-level error (JSON payload with a `message` field); one with

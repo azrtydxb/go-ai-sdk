@@ -35,7 +35,7 @@ request (`providers/cohere/language_model.go`, `embedding.go`).
 - **`p`, not `top_p`.** `chatRequest.P` is Cohere's wire name for
   `Call.TopP` (`providers/cohere/wire.go`: `P *float64 \`json:"p,omitempty"\`
   // Cohere's name for top_p`). This is also the raw key to use under
-  `ProviderOptions["cohere"]`.
+`ProviderOptions["cohere"]`.
 - **Text-only chat.** `onlyText` in `providers/cohere/wire.go` rejects any
   non-`TextPart` content in system/user messages with an error — "Cohere
   v2 chat is text-only in this integration" — rather than silently

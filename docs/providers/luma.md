@@ -50,8 +50,8 @@ hook so fixtures can poll fast; production callers generally don't need it.
 
 - **Aspect ratio only, no size, and single-image only.** A non-empty
   `ImageCall.Size` returns `"luma: size is not supported; use
-  AspectRatio"`; `ImageCall.N > 1` returns `"luma: multiple images per call
-  are not supported"` (`providers/luma/image.go`) — Luma's Dream Machine
+AspectRatio"`; `ImageCall.N > 1` returns `"luma: multiple images per call
+are not supported"` (`providers/luma/image.go`) — Luma's Dream Machine
   image endpoint produces exactly one image per generation.
 - **`Seed` is silently ignored.** Luma's Dream Machine API has no seed
   parameter; `ImageCall.Seed` is accepted for interface symmetry but never

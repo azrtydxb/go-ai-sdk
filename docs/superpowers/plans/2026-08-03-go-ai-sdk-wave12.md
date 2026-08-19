@@ -24,12 +24,14 @@
 ### Task 1: provider.VideoModel + ai.GenerateVideo + Luma/Fal/Replicate video
 
 **Files:**
+
 - Create: `provider/video.go`, `ai/generate_video.go`, `ai/generate_video_test.go`, `providers/luma/video.go` (+test), `providers/fal/video.go` (+test), `providers/replicate/video.go` (+test)
 - Modify: `ai/registry.go` (+VideoModelProvider + Registry.VideoModel, mirroring the six existing lookups), `ai/aitest/mock.go` (+MockVideoModel, same shape as MockImageModel)
 
 **Interfaces (Produces):**
 
 `provider/video.go`:
+
 ```go
 type VideoCall struct {
 	Prompt          string
@@ -58,6 +60,7 @@ type VideoModel interface {
 ```
 
 `ai/generate_video.go` — mirror `ai/generate_image.go`'s skeleton exactly (validate ErrModelRequired/ErrPromptRequired → retry.Do → ExhaustedError→RetryError → zero-result guard):
+
 ```go
 type GenerateVideoOpts struct {
 	Model           provider.VideoModel
@@ -76,6 +79,7 @@ func GenerateVideo(ctx context.Context, opts GenerateVideoOpts) (*GenerateVideoR
 ```
 
 **Providers** (each: `(p *Provider) VideoModel(id string) provider.VideoModel`; reuse each package's existing auth/error helpers; ProviderOptions merge per package convention — replicate's nests under `input`):
+
 - **Luma** (`providers/luma/video.go`): POST `{base}/dream-machine/v1/generations` `{"prompt", "model": id, "aspect_ratio"(omit ""), "resolution"(omit ""), "duration": "5s"-style string from DurationSec (omit 0)}` → `{"id","state"}`; poll GET `{base}/dream-machine/v1/generations/{id}` (reuse the package's existing poll/sleep discipline and WithPollInterval) until `state=="completed"` (→ `assets.video` URL) or `"failed"` (→ error w/ failure_reason); GET the asset URL for bytes (MediaType from response Content-Type, default `video/mp4`).
 - **Fal** (`providers/fal/video.go`): sync POST `{base}/{modelID}` (same as image path pattern) `{"prompt", ...aspect_ratio/resolution/duration mapped as provider options keys — send only Prompt first-class; AspectRatio→"aspect_ratio" when set}` → response `{"video":{"url":...}}` (also accept `{"videos":[{"url"}]}`); fetch URL for bytes.
 - **Replicate** (`providers/replicate/video.go`): POST predictions with `Prefer: wait` (same as image), input `{"prompt", "aspect_ratio"(omit)}` + options into `input`; output = string URL or []string URLs → fetch each.
@@ -90,9 +94,11 @@ func GenerateVideo(ctx context.Context, opts GenerateVideoOpts) (*GenerateVideoR
 ### Task 2: internal/websocket — RFC 6455 client
 
 **Files:**
+
 - Create: `internal/websocket/websocket.go`, `internal/websocket/frame.go`, `internal/websocket/websocket_test.go`, `internal/websocket/frame_test.go`
 
 **Interfaces (Produces):**
+
 ```go
 package websocket
 
@@ -143,7 +149,9 @@ const (
 	CloseAbnormal      = 1006 // never sent on the wire; synthesized on abrupt EOF
 )
 ```
+
 **Protocol requirements (binding):**
+
 - Handshake: HTTP/1.1 GET with `Upgrade: websocket`, `Connection: Upgrade`, `Sec-WebSocket-Version: 13`, `Sec-WebSocket-Key` = base64 of 16 random bytes (crypto/rand); verify status 101 and `Sec-WebSocket-Accept` == base64(SHA1(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")); no extensions or subprotocols offered; non-101 → error including status and (bounded) body.
 - Frames: client→server always masked with fresh crypto/rand mask per frame; server→client MUST be unmasked (masked server frame → protocol error close 1002). Support 7-bit/16-bit/64-bit payload lengths; reject control frames >125 bytes or fragmented; reassemble fragmented data messages (opcode 0 continuation); reject new data opcode mid-fragmentation and continuation with nothing to continue (1002). Interleaved control frames during fragmentation handled.
 - MaxMessageBytes enforced across reassembled size → close 1009 + error.
@@ -161,12 +169,14 @@ const (
 ### Task 3: Streaming transcription — provider interface + ai.StreamTranscribe + Deepgram live + OpenAI realtime transcription
 
 **Files:**
+
 - Create: `provider/transcription_stream.go`, `ai/stream_transcribe.go`, `ai/stream_transcribe_test.go`, `providers/deepgram/live.go` (+test), `providers/openai/realtime_transcription.go` (+test)
 - Modify: `ai/aitest/mock.go` (+MockStreamingTranscriptionModel with scripted event sequences)
 
 **Interfaces (Produces):**
 
 `provider/transcription_stream.go`:
+
 ```go
 type StreamTranscriptionCall struct {
 	MediaType       string  // e.g. "audio/pcm;rate=16000" — provider maps/validates
@@ -204,6 +214,7 @@ type StreamingTranscriptionModel interface {
 ```
 
 `ai/stream_transcribe.go` — validation + passthrough (NO retry — live connection):
+
 ```go
 type StreamTranscribeOpts struct {
 	Model           provider.StreamingTranscriptionModel
@@ -228,12 +239,14 @@ func StreamTranscribe(ctx context.Context, opts StreamTranscribeOpts) (provider.
 ### Task 4: ai.Translate (OpenAI audio translation) + minimal OpenAI realtime voice session
 
 **Files:**
+
 - Create: `provider/translation.go`, `ai/translate.go`, `ai/translate_test.go`, `internal/openaicompat/translation.go` (+test), `providers/openai/realtime.go`, `providers/openai/realtime_test.go`
 - Modify: `providers/openai/openai.go` (+TranslationModel method), `ai/registry.go` (NO new lookup — translation and realtime are niche; skip registry this wave, note in docs), `ai/aitest/mock.go` (+MockTranslationModel)
 
 **Interfaces (Produces):**
 
 `provider/translation.go` (mirrors transcription.go):
+
 ```go
 type TranslationCall struct {
 	Audio           []byte
@@ -253,10 +266,12 @@ type TranslationModel interface {
 	ProviderName() string
 }
 ```
+
 `ai/translate.go`: `TranslateOpts{Model, Audio, MediaType, Prompt, MaxRetries, ProviderOptions}` → `TranslateResult{Text, Language string, DurationSec float64}` — same retry skeleton as ai.Transcribe (guards ErrModelRequired/ErrAudioRequired).
 `internal/openaicompat/translation.go`: `NewTranslationModel(cfg Config, id string)` — multipart POST `{base}/audio/translations` (file part named per ExtForMediaType — reuse internal/transcribeutil.ExtForMediaType; fields model, prompt(omit ""), response_format=verbose_json) → `{"text","language","duration"}`. ProviderOptions["openai"] (cfg.Name) merged as extra multipart fields (stringified scalars). `providers/openai`: `(p *Provider) TranslationModel(id string) provider.TranslationModel`.
 
 **Realtime voice session** (`providers/openai/realtime.go`) — OpenAI-specific, no generic provider interface this wave (documented):
+
 ```go
 type RealtimeConfig struct {
 	Model             string // e.g. "gpt-4o-realtime-preview"
@@ -286,6 +301,7 @@ type RealtimeEvent struct {
 	Raw        json.RawMessage // always the full event
 }
 ```
+
 Dial `wss://<host>/v1/realtime?model=<cfg.Model>` (scheme-swap baseURL), headers Bearer + `OpenAI-Beta: realtime=v1`; on open send `session.update` from cfg (omit empties); every server event surfaces as RealtimeEvent with Raw always set and AudioDelta/TextDelta populated for the known delta types (accept BOTH the old `response.audio.delta`/`response.audio_transcript.delta` and new `response.output_audio.delta`/`response.output_text.delta` names); `error` type events → recorded, iteration continues (session-level errors only end iteration when the socket dies). Server close → clean end.
 
 **Tests:** translation: multipart shape (file/model/prompt fields, options merge), verbose_json parse, 401/429, ctx. realtime: fixture WS server asserting session.update first message w/ config mapping + options merge; SendAudio base64 wire shape; SendText item shape; event surfacing (audio delta decode, text delta, unknown type → Raw-only); error event recorded; server close → clean end; Close idempotent; ctx cancel. -race.
@@ -298,12 +314,14 @@ Dial `wss://<host>/v1/realtime?model=<cfg.Model>` (scheme-swap baseURL), headers
 ### Task 5: Files & skills — FilePart references, provider.FileStore, OpenAI/Anthropic files, Anthropic skills
 
 **Files:**
+
 - Create: `provider/files.go`, `ai/upload_file.go`, `ai/upload_file_test.go`, `providers/openai/files.go` (+test), `providers/anthropic/files.go` (+test), `providers/anthropic/skills.go` (+test)
 - Modify: `provider/message.go` (FilePart +2 fields + doc), `internal/openaicompat/wire.go`, `providers/anthropic/wire.go`, `internal/geminicompat/wire.go` (converter branches), `ai/aitest/mock.go` (+MockFileStore)
 
 **Interfaces (Produces):**
 
 `provider/message.go` — FilePart gains (ADDITIVE):
+
 ```go
 	// FileID references a previously-uploaded provider file (see
 	// provider.FileStore). URL references an externally-hosted file.
@@ -317,9 +335,11 @@ Dial `wss://<host>/v1/realtime?model=<cfg.Model>` (scheme-swap baseURL), headers
 	FileID string
 	URL    string
 ```
+
 Converter branches (each family's existing FilePart case extended; Data path unchanged): openaicompat FileID → `{"type":"file","file":{"file_id":...}}` (URL unsupported → error); anthropic FileID → document source `{"type":"file","file_id":...}`, URL → document source `{"type":"url","url":...}`; geminicompat URL → `{"fileData":{"fileUri":..., "mimeType": MediaType(omit "")}}` (FileID unsupported → error); bedrock: both unsupported → error (comment).
 
 `provider/files.go`:
+
 ```go
 type FileUploadCall struct {
 	Data            []byte
@@ -341,17 +361,20 @@ type FileStore interface {
 	ProviderName() string
 }
 ```
+
 `ai/upload_file.go`: `UploadFileOpts{Store provider.FileStore, Data, Filename, MediaType, Purpose, MaxRetries, ProviderOptions}` → `*provider.FileInfo` with the standard retry skeleton (guards ErrStoreRequired [new sentinel], ErrDataRequired [new or reuse], Filename required). `DeleteFile(ctx, DeleteFileOpts{Store, ID, MaxRetries})`.
 
 **OpenAI files** (`providers/openai/files.go`): `(p *Provider) Files() provider.FileStore` — multipart POST `{base}/files` (fields file, purpose default "user_data") → `{"id","filename","bytes"}`; DELETE `{base}/files/{id}`. **Anthropic files** (`providers/anthropic/files.go`): `(p *Provider) Files() provider.FileStore` — multipart POST `{base}/v1/files` with headers x-api-key + anthropic-version + `anthropic-beta: files-api-2025-04-14` → `{"id","filename","size_bytes","mime_type"}`; DELETE `{base}/v1/files/{id}` (same beta header). Beta header at the files call sites only, never on the shared language-model path.
 
 **Anthropic skills** (`providers/anthropic/skills.go`) — provider-specific, no generic interface (documented):
+
 ```go
 type SkillInfo struct { ID, DisplayName, Version string; Raw json.RawMessage }
 func (p *Provider) UploadSkill(ctx context.Context, call UploadSkillCall) (*SkillInfo, error)
 type UploadSkillCall struct { Zip []byte; DisplayName string; ProviderOptions map[string]any }
 func (p *Provider) DeleteSkill(ctx context.Context, id string) error
 ```
+
 Multipart POST `{base}/v1/skills` (file part named "files[]" as skill.zip, display_name field) with `anthropic-beta: skills-2025-10-02`; DELETE `{base}/v1/skills/{id}`. All response fields into Raw; ID/DisplayName/Version parsed.
 
 **Tests:** wire converters per family per new variant incl. rejection errors; round-trip through GenerateText transcripts (FilePart FileID in a user message reaches the wire); files clients: multipart shapes, beta headers asserted (anthropic), delete paths, 401/429, ctx; skills: multipart + beta header + parse; ai.UploadFile/DeleteFile validation + retry; MockFileStore.
@@ -364,6 +387,7 @@ Multipart POST `{base}/v1/skills` (file part named "files[]" as skill.zip, displ
 ### Task 6: Wave-12 docs + CHANGELOG
 
 **Files:**
+
 - Modify: `docs/core/media.md` (video section w/ matrix; translation section; streaming transcription section; realtime session section), `docs/getting-started.md` (no new env vars — verify), `docs/providers/{luma,fal,replicate}.md` (video), `docs/providers/deepgram.md` (live), `docs/providers/openai.md` (realtime transcription, realtime session, translation, files), `docs/providers/anthropic.md` (files, skills, beta headers), `docs/providers/README.md` (+video/streaming-STT/translation matrix columns or rows), `docs/core/tools.md` or `docs/core/generating-text.md` (FilePart reference variants — wherever FilePart is documented today: grep), `README.md` (features), `docs/migrating-from-vercel-ai-sdk.md` (video/streaming STT/realtime/files/skills → Shipped; StreamTranslate → shipped-as-ai.Translate REST with the ruling; WebRTC row unchanged), `CHANGELOG.md` (Wave 12 entries), `docs/README.md` (verify — likely no new pages; media.md covers all), `docs/architecture.md` (internal/websocket one-liner if the page lists internals — verify).
 - Verification discipline as prior waves (compile-verified snippets, grep-true claims, matrices, links). Live-testing notes on every touched provider page for the new endpoints (esp. realtime/live WS — impossible to fixture-verify against real servers).
 

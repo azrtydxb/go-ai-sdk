@@ -19,8 +19,11 @@ searchTool := ai.NewTool("search", "Search the knowledge base",
 	})
 ```
 
-`NewTool[Args](name, description string, fn func(context.Context, Args) (any, error)) Tool`
-derives `Args`'s schema at construction time and **panics** on a schema
+```go
+func NewTool[Args any](name, description string, fn func(context.Context, Args) (any, error)) Tool
+```
+
+`NewTool` derives `Args`'s schema at construction time and **panics** on a schema
 error (unsupported field kind, cycle, etc.) — like `regexp.MustCompile`,
 this treats a bad `Args` type as a programmer error, not a runtime one.
 
@@ -37,14 +40,14 @@ written `\\,` in Go source. Struct tags are Go string literals, so the
 compiler's own tag-value unquoting consumes one backslash first, turning
 `\\,` into a literal `\,` in the parsed tag string — which is what
 `go-ai-sdk`'s own comma-splitting then treats as an escaped, literal comma.
-Writing a single `\,` in source produces an *invalid* Go escape sequence,
+Writing a single `\,` in source produces an _invalid_ Go escape sequence,
 which `reflect.StructTag.Get` silently treats as an empty tag.
 
 ## Schema derivation rules
 
 - **Required vs optional:** a field is required unless it's a pointer type
   or its `json` tag has `omitempty`/`omitzero`. A non-pointer field with
-  `omitempty` is *not* required, even though it isn't a pointer.
+  `omitempty` is _not_ required, even though it isn't a pointer.
 - **Pointers:** always optional, regardless of `omitempty`.
 - **Embedded structs:** an anonymous struct field with no explicit `json`
   tag name has its fields promoted to the parent's schema, mirroring
@@ -68,17 +71,17 @@ This produces `required: ["city", "lat", "lng"]` — `notes` and `nickname`
 are present as properties but not required.
 
 - **`[]byte` fields** are schema'd as `{"type": "string", "description":
-  "base64-encoded bytes (as produced by encoding/json for []byte)"}` — this
+"base64-encoded bytes (as produced by encoding/json for []byte)"}` — this
   matches the actual wire encoding, since `encoding/json` marshals a
   `[]byte` as a base64 string, not as a JSON array of numbers. A model that
   reads the schema (or a user-provided `description` merged alongside it,
   via the `jsonschema` tag) sees the true expected shape instead of a
   misleading `"type": "array"`.
 - **`time.Time` fields** are schema'd as `{"type": "string", "format":
-  "date-time"}`, matching `time.Time`'s RFC 3339 `MarshalJSON` output. Any
+"date-time"}`, matching `time.Time`'s RFC 3339 `MarshalJSON` output. Any
   other type implementing `json.Marshaler` besides `time.Time` is still
   expanded structurally (its underlying fields reflected as usual), since
-  there's no general way to infer a type's marshaled JSON *shape* from an
+  there's no general way to infer a type's marshaled JSON _shape_ from an
   arbitrary `MarshalJSON` method.
 
 This applies to any derived JSON Schema in the SDK — both `ai.NewTool`'s
@@ -112,7 +115,7 @@ searchTool := ai.NewTool("search", "Search the knowledge base",
   strict function calling). Ignored (not sent, no error) by anthropic,
   geminicompat, bedrock, cohere, and mistral — those wire formats have no
   equivalent knob.
-- **`WithToolInputExamples[Args](examples ...Args)`** marshals each
+- **`WithToolInputExamples[Args]`** (variadic `examples ...Args`) marshals each
   example to JSON **at construction time** (panicking on marshal failure,
   the same programmer-error convention as schema derivation) and sets
   `Tool.InputExamples()`. Supported natively only by anthropic, which
@@ -287,7 +290,7 @@ retry or adapt. Only an unresolved `*NoSuchToolError` aborts the batch.
 
 ## ActiveTools
 
-`ActiveTools`, when non-nil, restricts which of `Tools` are *offered* to the
+`ActiveTools`, when non-nil, restricts which of `Tools` are _offered_ to the
 model **and** which are treated as known during execution — a tool present
 in `Tools` but outside `ActiveTools` is treated as unknown
 (`*NoSuchToolError`) if the model somehow still calls it. A `nil`
@@ -307,7 +310,7 @@ result, err := ai.GenerateText(context.Background(), ai.GenerateTextOpts{
 ## RepairToolCall
 
 `RepairToolCall`, when set, is offered a chance to fix a failing call
-*once* per original call — an unknown tool name, or an
+_once_ per original call — an unknown tool name, or an
 `*InvalidToolArgumentsError` from `Execute`:
 
 ```go
@@ -328,18 +331,18 @@ RepairToolCall: func(ctx context.Context, call ai.ToolCallRecord, toolErr error)
 **The single-shot rule:** whatever `RepairToolCall` returns is re-validated
 (and, for bad-args repairs, re-executed) exactly once. If the repaired call
 fails again — still an unknown tool, or `Execute` fails again —
-`RepairToolCall` is *not* invoked a second time for that original call; the
+`RepairToolCall` is _not_ invoked a second time for that original call; the
 second failure's normal semantics apply (`*NoSuchToolError` aborts the
 batch, `*InvalidToolArgumentsError` is recorded on the result).
 
 **Repair × approval ordering.** A bad-args repair is re-checked against
-`ApprovalRequirer` using the *repaired* call's tool and args, before it
-executes — never against whatever decision (if any) let the *original* call
+`ApprovalRequirer` using the _repaired_ call's tool and args, before it
+executes — never against whatever decision (if any) let the _original_ call
 reach execution. Two ways this matters:
 
-- Repair renames the call to a *different* tool that requires approval,
+- Repair renames the call to a _different_ tool that requires approval,
   while the original tool needed no decision at all.
-- Repair changes the *args* of an already-approved approval-requiring call —
+- Repair changes the _args_ of an already-approved approval-requiring call —
   the approval that was granted covered the original args, not the repaired
   ones.
 
@@ -377,11 +380,11 @@ other JSON-marshalable value) — `ToolResultContent` is opt-in.
 **Provider support for the `Images` half is uneven**, since not every wire
 format has an image slot in a tool result:
 
-| Provider | Support |
-|---|---|
-| anthropic | Native: the `tool_result` content block's `"content"` becomes an array — one `{"type":"text"}` block (only when `Text` is non-empty) followed by one `{"type":"image","source":{...}}` block per entry in `Images`. |
-| bedrock (Converse) | Native, same shape: the `toolResult` block's `"content"` array gets a `{"text":...}` entry (only when `Text` is non-empty) followed by one `{"image":{...}}` entry per entry in `Images`. |
-| openaicompat-based providers, geminicompat, cohere, mistral | Text-projection only: `ToolResultContent` is projected down to its `Text` field — `Images` is silently dropped. |
+| Provider                                                    | Support                                                                                                                                                                                                             |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| anthropic                                                   | Native: the `tool_result` content block's `"content"` becomes an array — one `{"type":"text"}` block (only when `Text` is non-empty) followed by one `{"type":"image","source":{...}}` block per entry in `Images`. |
+| bedrock (Converse)                                          | Native, same shape: the `toolResult` block's `"content"` array gets a `{"text":...}` entry (only when `Text` is non-empty) followed by one `{"image":{...}}` entry per entry in `Images`.                           |
+| openaicompat-based providers, geminicompat, cohere, mistral | Text-projection only: `ToolResultContent` is projected down to its `Text` field — `Images` is silently dropped.                                                                                                     |
 
 If a script must run identically across a text-projection provider and an
 image-capable one, prefer text-describable results, or attach the image via
@@ -404,7 +407,7 @@ deleteTool := ai.NewTool("delete_record", "Delete a record by ID",
 guardedDelete := ai.RequireApproval(deleteTool)
 ```
 
-`RequireApproval`'s optional second argument narrows *which* calls need
+`RequireApproval`'s optional second argument narrows _which_ calls need
 approval, based on the call's own arguments:
 
 ```go
