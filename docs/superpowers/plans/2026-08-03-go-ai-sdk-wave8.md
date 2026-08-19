@@ -23,6 +23,7 @@
 ### Task 1: `internal/fetchimage` + Fal + Replicate (image)
 
 **Files:**
+
 - Create: `internal/fetchimage/fetchimage.go` (+test), `providers/fal/fal.go` (+test), `providers/replicate/replicate.go` (+test)
 
 **Interfaces:**
@@ -44,6 +45,7 @@ func (p *Provider) ImageModel(id string) provider.ImageModel // e.g. "black-fore
 ```
 
 Wire mappings:
+
 - **Fal**: `POST {base}/{modelID}` header `Authorization: Key <key>`; body `{"prompt":..., "num_images":N(omit 0), "image_size":Size(omit ""), "seed":*Seed(omit nil)}` + AspectRatio set → error `"fal: aspect ratio is not supported; use Size"`. ProviderOptions["fal"] merged top-level. Response `{"images":[{"url":..., "content_type":...}]}` → Fetch each URL (MediaType: content_type if set, else Fetch's); also accept `data:` URLs inline (base64 decode, no HTTP). Empty images → error.
 - **Replicate**: `POST {base}/v1/models/{modelID}/predictions` headers `Authorization: Bearer <key>`, `Prefer: wait` (sync mode); body `{"input":{"prompt":..., "num_outputs":N(omit 0), "aspect_ratio":AspectRatio(omit ""), "seed":*Seed(omit nil)}}` + Size set → error `"replicate: size is not supported; use AspectRatio"`. ProviderOptions["replicate"] merged into the INPUT object (document divergence: replicate options are model inputs). Response `{"status":..., "output":...}` where output is a string URL or array of string URLs; status != "succeeded" → error including status + error field when present. Fetch URLs.
 
@@ -56,6 +58,7 @@ Tests per provider: request-shape (auth header, body incl. omissions + provider-
 ### Task 2: Luma (image, polling)
 
 **Files:**
+
 - Create: `providers/luma/luma.go` (+test)
 
 **Interfaces:**
@@ -77,6 +80,7 @@ Tests: create+poll happy path (fixture: 2 pending polls then completed), failed 
 ### Task 3: Deepgram (transcription)
 
 **Files:**
+
 - Create: `providers/deepgram/deepgram.go` (+test)
 
 **Interfaces:**
@@ -98,6 +102,7 @@ Tests: request shape (query params incl. language + provider-options params, aut
 ### Task 4: LMNT + Hume (speech)
 
 **Files:**
+
 - Create: `providers/lmnt/lmnt.go` (+test), `providers/hume/hume.go` (+test)
 
 **Interfaces:**
@@ -113,6 +118,7 @@ func (p *Provider) SpeechModel(id string) provider.SpeechModel // model id curre
 ```
 
 Wire mappings:
+
 - **LMNT**: `POST {base}/v1/ai/speech/bytes` header `X-API-Key: <key>`; JSON body `{"voice":Voice(default "leah"), "text":Text, "model":modelID, "format":OutputFormat(default "mp3"), "language":Language(omit "")}` + Speed non-nil → `"speed":*Speed`. ProviderOptions["lmnt"] top-level merge. Response = raw audio bytes; MediaType from format: mp3→audio/mpeg, wav→audio/wav, else application/octet-stream.
 - **Hume**: `POST {base}/v0/tts` header `X-Hume-Api-Key: <key>`; body `{"utterances":[{"text":Text} (+"voice":{"name":Voice} when Voice != "")], "format":{"type":OutputFormat(default "mp3")}}`. Speed non-nil → utterance `"speed":*Speed`. Language unsupported → ignored (comment). ProviderOptions["hume"] top-level merge. Response `{"generations":[{"audio":"<base64>"}]}` → decode; empty generations/audio → error. MediaType per format (mp3/wav/pcm → audio/mpeg, audio/wav, audio/pcm).
 
@@ -125,6 +131,7 @@ Tests per provider: request shapes (headers, defaults, Speed/Language handling, 
 ### Task 5: Docs + matrices + v0.1.0 finalization
 
 **Files:**
+
 - Create: `docs/providers/{fal,replicate,luma,deepgram,lmnt,hume}.md`
 - Modify: `docs/providers/README.md` (matrix + links, 22 providers), `README.md` (matrices + "not yet implemented" list now empty or reduced — Vercel's remaining exotic providers, if any, stay listed honestly), `docs/core/media.md` (matrices), `docs/getting-started.md` (env table +6), `docs/README.md` (tree), `CHANGELOG.md` (add wave-8 entries under Unreleased; do NOT date/tag — that happens post-merge), `docs/troubleshooting.md` (auth bullet additions), spec waves table.
 

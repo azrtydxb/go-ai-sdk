@@ -189,7 +189,17 @@ result, err := parent.Generate(ctx, agent.RunOpts{
 The returned tool's schema always takes a single required string field:
 
 ```json
-{"type":"object","properties":{"task":{"type":"string","description":"The task for the research agent."}},"required":["task"],"additionalProperties":false}
+{
+  "type": "object",
+  "properties": {
+    "task": {
+      "type": "string",
+      "description": "The task for the research agent."
+    }
+  },
+  "required": ["task"],
+  "additionalProperties": false
+}
 ```
 
 (with `<name>` — the `name` argument passed to `AsTool` — interpolated into
@@ -252,7 +262,7 @@ resending `Messages` (ending in the unanswered tool-call batch) with
 `Approvals` set — but the parent's tool loop only sees the sub-agent tool's
 single `Execute` call and its returned `(any, error)`; it has no way to
 receive the sub-agent's `PendingApprovals`/`Messages` out through that
-return value, stash them, and later feed `Approvals` back into a *second*
+return value, stash them, and later feed `Approvals` back into a _second_
 call to the same sub-agent run. By the time `Execute` returns, that
 suspended conversation state is gone.
 
@@ -261,7 +271,7 @@ boundary:** set `Agent.ApproveToolCall` on the sub-agent so every
 approval-needing call it makes is resolved synchronously (see
 [Approval passthrough](#approval-passthrough) above and
 [Tools § Inline flow](tools.md#inline-flow-approvetoolcall-decides-synchronously)).
-A sub-agent run purely through `AsTool` should never be *expected* to
+A sub-agent run purely through `AsTool` should never be _expected_ to
 suspend — if one of its tools needs a human-in-the-loop decision, wire that
 decision through `ApproveToolCall`, or don't delegate that tool through a
 sub-agent at all.

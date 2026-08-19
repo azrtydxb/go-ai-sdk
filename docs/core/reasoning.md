@@ -57,13 +57,13 @@ Reasoning: &provider.ReasoningConfig{
 
 ### Per-provider mapping
 
-| Provider | Wire mechanism | Notes |
-|---|---|---|
-| openaicompat-based (OpenAI, Azure, Groq, xAI, DeepSeek, Cerebras, Together, Fireworks, Perplexity) | `reasoning_effort` | Sends `Effort` verbatim; `BudgetTokens` has no wire equivalent here and is ignored. |
-| Anthropic | `thinking: {"type": "enabled", "budget_tokens": N}` | `N` is `BudgetTokens` if set, else resolved from `Effort` via `EffortBudgetTokens` (below). Omits `thinking` entirely if neither resolves. |
-| Google / Vertex AI (geminicompat) | `generationConfig.thinkingConfig: {"thinkingBudget": N, "includeThoughts": true}` | Same budget resolution as Anthropic; `includeThoughts` is always `true` whenever a budget resolves (not independently configurable via `ReasoningConfig`). |
-| Amazon Bedrock | `additionalModelRequestFields.thinking: {"type": "enabled", "budget_tokens": N}` | Same budget resolution and wire shape as Anthropic, nested under Bedrock's Converse-specific `additionalModelRequestFields`. Merged per sub-key with any `additionalModelRequestFields` set via `ProviderOptions` — see the precedence note below. |
-| Cohere, Mistral | — (no-op) | Neither has a reasoning/thinking knob; `Reasoning` is silently ignored, no wire field is sent. |
+| Provider                                                                                           | Wire mechanism                                                                    | Notes                                                                                                                                                                                                                                              |
+| -------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| openaicompat-based (OpenAI, Azure, Groq, xAI, DeepSeek, Cerebras, Together, Fireworks, Perplexity) | `reasoning_effort`                                                                | Sends `Effort` verbatim; `BudgetTokens` has no wire equivalent here and is ignored.                                                                                                                                                                |
+| Anthropic                                                                                          | `thinking: {"type": "enabled", "budget_tokens": N}`                               | `N` is `BudgetTokens` if set, else resolved from `Effort` via `EffortBudgetTokens` (below). Omits `thinking` entirely if neither resolves.                                                                                                         |
+| Google / Vertex AI (geminicompat)                                                                  | `generationConfig.thinkingConfig: {"thinkingBudget": N, "includeThoughts": true}` | Same budget resolution as Anthropic; `includeThoughts` is always `true` whenever a budget resolves (not independently configurable via `ReasoningConfig`).                                                                                         |
+| Amazon Bedrock                                                                                     | `additionalModelRequestFields.thinking: {"type": "enabled", "budget_tokens": N}`  | Same budget resolution and wire shape as Anthropic, nested under Bedrock's Converse-specific `additionalModelRequestFields`. Merged per sub-key with any `additionalModelRequestFields` set via `ProviderOptions` — see the precedence note below. |
+| Cohere, Mistral                                                                                    | — (no-op)                                                                         | Neither has a reasoning/thinking knob; `Reasoning` is silently ignored, no wire field is sent.                                                                                                                                                     |
 
 ### EffortBudgetTokens: the effort → token-budget table
 
@@ -76,12 +76,12 @@ three wire packages call it instead of each keeping its own private copy.
 The resolution logic and per-provider mapping below are unchanged by that
 consolidation.
 
-| `Effort` | Budget tokens |
-|---|---|
-| `"minimal"` | 1024 |
-| `"low"` | 4096 |
-| `"medium"` | 8192 |
-| `"high"` | 16384 |
+| `Effort`             | Budget tokens                                 |
+| -------------------- | --------------------------------------------- |
+| `"minimal"`          | 1024                                          |
+| `"low"`              | 4096                                          |
+| `"medium"`           | 8192                                          |
+| `"high"`             | 16384                                         |
 | `""` or unrecognized | not resolved (`ok == false`) — no budget sent |
 
 ```go

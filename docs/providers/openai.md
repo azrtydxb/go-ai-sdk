@@ -27,7 +27,7 @@ defaults (`NativeJSON: true`, 2048-item embedding batch cap).
 - **Tool calling** — same `Model(id)`; tools are wired through the shared
   `openaicompat` chat-completions request/response layer.
 - **Structured output** — `Model(id)` with `Capabilities().NativeJSON ==
-  true`, so `ResponseFormat` requests use `json_schema`, not just
+true`, so `ResponseFormat` requests use `json_schema`, not just
   `json_object`.
 - **Embeddings** — `p.EmbeddingModel(id)`, e.g.
   `p.EmbeddingModel("text-embedding-3-small")`; batches up to 2048 inputs

@@ -50,7 +50,7 @@ conformance but otherwise unused — pass `""`.
 - **The create response's `result_url` is unused by design.** Gladia's
   `/v2/pre-recorded` create call returns both a job `id` and a
   `result_url`; this provider polls by `id` (`GET
-  /v2/pre-recorded/{id}`) rather than fetching `result_url` directly — the
+/v2/pre-recorded/{id}`) rather than fetching `result_url` directly — the
   field is decoded but never read.
 - **Segments come from `utterances`, duration from `metadata`.** The
   response's `result.transcription.full_transcript` becomes `Text`, each

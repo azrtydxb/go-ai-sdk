@@ -73,13 +73,13 @@ pass it via `WithTokenSource`.
 - **The `"global"` location has no regional URL prefix.** Vertex normally
   requires a region like `us-central1`, producing
   `https://{location}-aiplatform.googleapis.com/v1`; but `location ==
-  "global"` is special-cased to `https://aiplatform.googleapis.com/v1`
+"global"` is special-cased to `https://aiplatform.googleapis.com/v1`
   directly — the source comment is explicit that
   `global-aiplatform.googleapis.com` **does not exist**:
   > "The `\"global\"` location has no regional prefix: it is served from
   > `aiplatform.googleapis.com` directly, not
   > `global-aiplatform.googleapis.com` (which does not exist)."
-  (`providers/vertex/vertex.go:108-119`, `resolvedBaseURL`.)
+  > (`providers/vertex/vertex.go:108-119`, `resolvedBaseURL`.)
 - **Project ID is required at request time, not construction time.**
   `New()` never validates `project`; an empty project ID only surfaces as a
   malformed endpoint URL (`/projects//locations/.../models/...`) once a

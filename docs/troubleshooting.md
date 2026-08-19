@@ -112,7 +112,7 @@ for the full per-provider `NativeJSON` table.
   forwarding the real payload. The SDK's truncation rule handles this: if
   a finish-reason-bearing chunk was seen before the connection closed, the
   stream is still treated as well-formed and yields its single
-  `FinishPart`; only a connection that closes *before* any finish-reason
+  `FinishPart`; only a connection that closes _before_ any finish-reason
   chunk arrives is treated as truly truncated (zero `FinishPart`s, `Err()`
   set). If you're behind a buffering reverse proxy and see truncated
   output with no error, that's the signal to check the proxy's SSE/timeout
@@ -129,7 +129,7 @@ for the full per-provider `NativeJSON` table.
   `Tools` is active.
 - **A failing tool call keeps failing the same way** — `RepairToolCall`,
   when set, gets exactly one chance to fix a failing call; whatever it
-  returns is re-validated once, but `RepairToolCall` is *not* invoked a
+  returns is re-validated once, but `RepairToolCall` is _not_ invoked a
   second time for that original call. If the repaired call also fails,
   normal failure semantics apply (`*NoSuchToolError` aborts the batch;
   other errors are recorded and the loop continues).

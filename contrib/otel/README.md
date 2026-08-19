@@ -62,18 +62,18 @@ OTel span:
 
 ### Start attributes
 
-| Attribute | Value |
-|---|---|
-| `gen_ai.operation.name` | `"chat"` |
-| `gen_ai.system` | `SpanInfo.ProviderName` |
-| `gen_ai.request.model` | `SpanInfo.ModelID` |
+| Attribute               | Value                   |
+| ----------------------- | ----------------------- |
+| `gen_ai.operation.name` | `"chat"`                |
+| `gen_ai.system`         | `SpanInfo.ProviderName` |
+| `gen_ai.request.model`  | `SpanInfo.ModelID`      |
 
 ### End attributes / status
 
-| Attribute | Value |
-|---|---|
-| `gen_ai.usage.input_tokens` | `SpanInfo.Usage.InputTokens` |
-| `gen_ai.usage.output_tokens` | `SpanInfo.Usage.OutputTokens` |
+| Attribute                        | Value                                                                                |
+| -------------------------------- | ------------------------------------------------------------------------------------ |
+| `gen_ai.usage.input_tokens`      | `SpanInfo.Usage.InputTokens`                                                         |
+| `gen_ai.usage.output_tokens`     | `SpanInfo.Usage.OutputTokens`                                                        |
 | `gen_ai.response.finish_reasons` | `[]string{string(SpanInfo.FinishReason)}`, set only when `FinishReason` is non-empty |
 
 If `SpanInfo.Err != nil`, the bridge calls `span.RecordError(err)` and sets

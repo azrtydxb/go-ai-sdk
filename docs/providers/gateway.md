@@ -49,14 +49,14 @@ Not wired for this preset: no image, speech, or transcription support.
   number that could silently overflow some upstream's limit.
 - **Registry routing slugs with slashes round-trip correctly.**
   `ai.Registry`'s `splitID` (`ai/registry.go`) cuts a `"provider:model"`
-  string on the *first* colon only, so `"gateway:openai/gpt-4o"` resolves
+  string on the _first_ colon only, so `"gateway:openai/gpt-4o"` resolves
   to provider name `"gateway"` and model `"openai/gpt-4o"` — the slug's
   internal slash is never mistaken for the registry separator.
 - **OIDC is out of scope.** Vercel also supports an OIDC token flow
   (`VERCEL_OIDC_TOKEN`, used implicitly inside Vercel deployments) as an
   alternative to a static API key; this package does not read
   `VERCEL_OIDC_TOKEN` — only the `AI_GATEWAY_API_KEY` → `Authorization:
-  Bearer` flow is supported. A future extension would need a new
+Bearer` flow is supported. A future extension would need a new
   `Config`/header path in `openaicompat` or a Gateway-specific
   `http.RoundTripper`, since `openaicompat` currently assumes a single
   static API key.

@@ -20,13 +20,16 @@
 **Files:** `mcp/jsonrpc.go`, `mcp/http.go`, `mcp/transport.go` (+ tests).
 
 **Problems:**
+
 - `Client.call` holds `sendMu` for the entire `transport.Send`, which for the HTTP transport spans the POST plus (with WithHTTPRetry) up to maxRetries backoff sleeps (≤10s each) — head-of-line-blocking every other concurrent call and every server-request reply on the same Client (T9 M-9, kept+documented).
 - The saturated-dispatch "server busy" reply (`respondServerError` from recvLoop) acquires `sendMu` unboundedly; if a stalled stdio write holds `sendMu`, recvLoop blocks on the acquire despite the 200ms send-timeout that only bounds the write itself (final-review #1).
 
 **Why sendMu exists:** it serializes writes. The **stdio** framed transport NEEDS this (interleaved writes corrupt newline framing). The **HTTP** transport does NOT — each Send is an independent POST and httpTransport is already internally synchronized (its own mu/recvCh); concurrent POSTs are fine (responses correlate by JSON-RPC id in recvLoop).
 
 **Fix:**
+
 1. Add an optional transport capability so the Client knows whether it must serialize Sends:
+
 ```go
 // In transport.go: a transport that serializes its own concurrent Sends
 // (so the Client need not hold sendMu across Send) implements this.
@@ -37,9 +40,8 @@ type selfSerializingTransport interface {
 	SelfSerializes() bool
 }
 ```
-   httpTransport implements `SelfSerializes() bool { return true }`. framedTransport does not (or returns false).
-2. In `Client.call` (and any other Send site — notify, respondServer*): if the transport self-serializes, do NOT hold `sendMu` across `transport.Send`; if it doesn't, keep holding it as today. Concretely: gate the `sendMu.Lock()/Unlock()` around Send on `!selfSerializes`. Determine self-serialization once at NewClient (store a bool on Client) to avoid a type-assert per call.
-3. Busy-reply bound: `respondServerError`/`sendServerResponse` on the saturated-dispatch path must not let a stuck `sendMu` wedge recvLoop. Since after fix (2) the HTTP transport won't hold sendMu at all, the wedge only remains for stdio — and a stuck stdio write already means the client is dead. Still, make the busy-reply's `sendMu` acquisition bounded: try to acquire with a short timeout (a `sendMu` that's a `chan struct{}{}`-based trylock, or select on a timer); if it can't acquire in ~200ms, drop the busy-reply (the server times out its own request). Document.
+
+httpTransport implements `SelfSerializes() bool { return true }`. framedTransport does not (or returns false). 2. In `Client.call` (and any other Send site — notify, respondServer*): if the transport self-serializes, do NOT hold `sendMu` across `transport.Send`; if it doesn't, keep holding it as today. Concretely: gate the `sendMu.Lock()/Unlock()` around Send on `!selfSerializes`. Determine self-serialization once at NewClient (store a bool on Client) to avoid a type-assert per call. 3. Busy-reply bound: `respondServerError`/`sendServerResponse` on the saturated-dispatch path must not let a stuck `sendMu` wedge recvLoop. Since after fix (2) the HTTP transport won't hold sendMu at all, the wedge only remains for stdio — and a stuck stdio write already means the client is dead. Still, make the busy-reply's `sendMu` acquisition bounded: try to acquire with a short timeout (a `sendMu` that's a `chan struct{}{}`-based trylock, or select on a timer); if it can't acquire in ~200ms, drop the busy-reply (the server times out its own request). Document.
 
 **Tests:** with a mock/http transport, N concurrent calls where one is slow-retrying (429s with a Retry-After) do NOT serialize behind it (assert concurrency — the others complete while the slow one backs off); stdio still serializes (framing intact — the existing stdio tests must stay green); a saturated-dispatch busy-reply doesn't block recvLoop when sendMu is held (bounded). -race -count=5 on mcp.
 
@@ -52,10 +54,12 @@ type selfSerializingTransport interface {
 **Files:** `internal/fetchmedia/fetchmedia.go` (+ test).
 
 **Problems:**
+
 - Every `Fetch` calls `PinnedTransport(client.Transport)` → `http.Transport.Clone()`, so no connection reuse across media fetches; each clone's idle conns linger to IdleConnTimeout → socket churn under burst image/video generation (final-review #2).
 - The pinned DialContext dials only the FIRST vetted IP; a host whose first resolved record is dead now fails where v0.2.0 would try the next (final-review #3).
 
 **Fix:**
+
 1. Cache the pinned transport keyed by the underlying base RoundTripper, so repeated Fetch calls with the same caller `*http.Client` reuse ONE pinned transport (and thus its connection pool). Use a `sync.Map` (or a small mutex+map) keyed by the base `http.RoundTripper` (the caller's `client.Transport`, or a sentinel for nil→DefaultTransport). Return the cached wrapped transport. This is transparent — same behavior, connection reuse restored. (Cache is process-lifetime; entries are few — one per distinct provider client — so no eviction needed; document.)
 2. Multi-IP failover in the pinned DialContext: vet ALL resolved IPs (reject if ANY is blocked — keep that), then try dialing them in resolved order, returning the first successful connection; only fail if all vetted IPs fail. Every dialed IP is still a vetted literal (rebind-safe). Preserve the existing "reject if any resolved IP is blocked" semantics (do NOT dial a partially-safe set — if any IP is blocked the host is rejected, matching current behavior).
 
@@ -86,6 +90,7 @@ type selfSerializingTransport interface {
 **Problem:** the three WS stream implementations duplicate ~150 lines of dial/scheme-swap, struct fields (conn/events/err/closed/closeCh/readLoopDone/writeMu), Close/isClosed/Err/setErr/Events, and the readLoop skeleton (incl. the `defer conn.Close` teardown and the closeCh-in-events-send select). This duplication already PRODUCED a real bug (the missing conn-close defer in RealtimeSession, fixed in the hardening). Extract it so the teardown/leak-safety lives in ONE place.
 
 **Design:** a generic (Go 1.26 generics) `internal/wsstream`:
+
 ```go
 package wsstream
 
@@ -107,6 +112,7 @@ func (s *Stream[E]) Err() error
 func (s *Stream[E]) Send(ctx context.Context, mt int, data []byte) error // writeMu-serialized
 func (s *Stream[E]) Close() error            // idempotent; closeCh + conn close
 ```
+
 The readLoop MUST carry the `defer conn.Close(...)` teardown and the closeCh-in-the-events-send select (the leak-safety the hardening added). Each provider supplies its own Decode + its provider-specific Send framing (base64 append for realtime, binary for deepgram, CloseStream/commit control messages) and keeps its provider-specific surface (TranscriptionStream/RealtimeSession method sets) as a thin wrapper over the generic Stream. Providers keep their dial + scheme-swap OR move a shared scheme-swap helper into wsstream (a `DialURL(baseURL, path)` deriving ws(s):// — dedupe that too if clean).
 
 **Preserve EXACTLY:** all three providers' external behavior (method sets, event shapes, Err semantics, closeSendSent guards, the conn-close-on-readLoop-exit, control-frame framing). The existing regression tests (conn-close in all 3, leak tests, event-sequence tests, -race) are the safety net — they must ALL stay green unchanged. This is a refactor with zero behavior change.
@@ -136,6 +142,7 @@ The readLoop MUST carry the `defer conn.Close(...)` teardown and the closeCh-in-
 ### Task 6: Docs + CHANGELOG + release v0.2.2
 
 **Files:** `CHANGELOG.md` (new `## [0.2.2]` under [Unreleased] — Security/Fixed/Changed/Performance for Tasks 1-5), `docs/mcp.md` (sendMu-no-longer-HOL for HTTP; the WithHTTPRetry note updated), `docs/core/media.md`/`docs/providers/README.md` (fetchmedia connection reuse + failover — brief), `docs/architecture.md` (mention internal/wsstream if internals are listed), any doc referencing the WS providers' internals. Verify snippets/claims/links.
+
 - Do NOT re-tag contrib/otel (unchanged; root v0.2.2 is backward-compatible for it).
 
 - [ ] **Step 1: docs + CHANGELOG; verify. Full check suite. Commit** — `docs: follow-ups — CHANGELOG v0.2.2, MCP/media/wsstream notes`

@@ -41,7 +41,7 @@ baked into the package, not configurable via an `Option`).
 
 - **`max_tokens` defaults to 4096.** `Call.MaxTokens` is a `*int`; when the
   caller leaves it `nil`, `buildMessagesRequest` substitutes `defaultMaxTokens
-  = 4096` rather than omitting the field — the Messages API requires
+= 4096` rather than omitting the field — the Messages API requires
   `max_tokens` on every request, so there's no "let the API default it"
   option the way there is for temperature or top_p.
   (`providers/anthropic/anthropic.go:34`, `providers/anthropic/wire.go:210-213`.)
@@ -69,7 +69,7 @@ baked into the package, not configurable via an `Option`).
   package skips sending `Tools`/`ToolChoice` altogether when the caller asks
   for no tools. (`providers/anthropic/wire.go:225-235`.)
 - **`cache_creation_input_tokens`** (prompt-cache write count, distinct from
-  `Usage.CachedInputTokens`, which is cache *reads*) surfaces under
+  `Usage.CachedInputTokens`, which is cache _reads_) surfaces under
   `Response.ProviderMetadata["anthropic"]["cache_creation_input_tokens"]`
   when non-zero, both for `Generate` (`convertResponse`,
   `providers/anthropic/wire.go:478-484`) and for streaming (`cacheCreationMetadata`,

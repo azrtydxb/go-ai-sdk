@@ -22,6 +22,7 @@
 ### Task 1: First-class call settings — TopK, PresencePenalty, FrequencyPenalty, Seed, Headers
 
 **Files:**
+
 - Modify: `provider/call.go` (+`TopK *int`, `PresencePenalty *float64`, `FrequencyPenalty *float64`, `Seed *int64`, `Headers map[string]string`), `ai/options.go` (same fields on GenerateTextOpts; threaded in buildCall), `ai/generate_object.go` (Seed? — no: keep GenerateObjectOpts unchanged this wave)
 - Modify request builders: `internal/openaicompat/wire.go` (`top_k`? OpenAI has no top_k — omit; `presence_penalty`, `frequency_penalty`, `seed`), `internal/geminicompat/wire.go` (generationConfig `topK`, `presencePenalty`, `frequencyPenalty`, `seed`), `providers/anthropic/wire.go` (`top_k`; penalties/seed unsupported → ignored with comment), `providers/cohere/wire.go` (`k` for top_k? Cohere v2 uses `k`: verify — use `k`; `presence_penalty`, `frequency_penalty`, `seed`), `providers/mistral/wire.go` (`random_seed` for Seed; `presence_penalty`, `frequency_penalty`; top_k unsupported → comment), `providers/bedrock/wire.go` (inferenceConfig has no topK/penalties/seed for Converse base — route TopK to `additionalModelRequestFields.top_k`? NO: unsupported → ignored with comment; keep it honest)
 - `Headers`: per-call extra HTTP headers, applied by every provider's request path AFTER auth headers (caller-set headers win except the auth header itself — document); implement in openaicompat/geminicompat/anthropic/cohere/mistral/bedrock (bedrock: headers participate in SigV4 signing ONLY if x-amz-*; plain extra headers are unsigned — document) + media providers' language/embedding paths where trivially shared (language-model paths are required; media paths optional this wave — document which).
@@ -36,6 +37,7 @@
 ### Task 2: Stop helpers, OnAbort, multi-modal tool results, two middlewares
 
 **Files:**
+
 - Modify: `ai/options.go` (+`OnAbort func()` — fires when StreamText iteration is abandoned or ctx canceled mid-stream, once, before Close; document exact semantics), `ai/stream_text.go`
 - Create: helpers in `ai/options.go`: `HasToolCall(names ...string) func([]Step) bool` (stops when the last step called any named tool; empty names = any tool call) and `LoopFinished() func([]Step) bool` (stops when the last step made NO tool calls — parity with isLoopFinished; note StopWhen is only consulted on tool-call steps today, so LoopFinished needs the loop to consult StopWhen on EVERY step — change the consultation rule: StopWhen now runs after every step; document; existing StepCountIs semantics unaffected)
 - Multi-modal tool results: `ai.ToolResultContent{Text string; Images []provider.GeneratedImage}` — when a Tool's Execute returns a `ToolResultContent` (or `*ToolResultContent`), providers that support image tool results (anthropic: tool_result content blocks with image; geminicompat: functionResponse parts limitation — text-only, document; openaicompat: text-only, document) serialize the images; others stringify the text portion. Wire: anthropic tool_result content array [{type:text},{type:image,source:...}]. Tests: anthropic wire shape; fallback stringification elsewhere.
@@ -49,6 +51,7 @@
 ### Task 3: AssemblyAI transcription provider
 
 **Files:**
+
 - Create: `providers/assemblyai/{assemblyai.go,transcription.go}` (+tests)
 
 Wire (async): `New` (WithAPIKey env `ASSEMBLYAI_API_KEY`, WithBaseURL default `https://api.assemblyai.com`, WithHTTPClient, WithPollInterval default 500ms). `TranscriptionModel(id)` (model id → `speech_model` field, e.g. "universal"; empty id → field omitted). Flow: (1) `POST /v2/upload` with raw audio bytes, header `authorization: <key>` → `{"upload_url":...}`; (2) `POST /v2/transcript` `{"audio_url":..., "speech_model":..., "language_code":Language(omit "")}` + ProviderOptions["assemblyai"] top-level merge → `{"id","status"}`; (3) poll `GET /v2/transcript/{id}` until status "completed" (→ `{"text","words":[{"text","start","end"}],"language_code","audio_duration"}` — start/end are MILLISECONDS → divide by 1000) or "error" (→ error incl. `"error"` field). Segments from words; DurationSec from audio_duration (seconds). Prompt unsupported → ignored w/ comment.
@@ -61,6 +64,7 @@ Tests: 3-endpoint fixture, request shapes, ms→sec conversion, error status, op
 ### Task 4: Gladia + Rev.ai transcription providers
 
 **Files:**
+
 - Create: `providers/gladia/{gladia.go,transcription.go}`, `providers/revai/{revai.go,transcription.go}` (+tests)
 
 **Gladia** (async): env `GLADIA_API_KEY`, base `https://api.gladia.io`, header `x-gladia-key`. Flow: (1) `POST /v2/upload` multipart field `audio` (filename per MediaType ext) → `{"audio_url":...}`; (2) `POST /v2/pre-recorded` `{"audio_url":...}` (+`{"language":Language}` when set... Gladia uses `language` inside `{"language_config":{"languages":[..]}}` — SIMPLIFY per docs: send `{"audio_url", "custom_metadata"?}` + ProviderOptions top-level; Language when set → `"language_config":{"languages":[Language]}`) → `{"id","result_url"}`; (3) poll `GET /v2/pre-recorded/{id}` until `status` "done" (→ `result.transcription.full_transcript`, `result.transcription.utterances[]{text,start,end}` seconds → segments; `result.metadata.audio_duration`) or "error". PollInterval option.
@@ -74,6 +78,7 @@ Tests per provider: full fixture flows, request shapes, options merge, error sta
 ### Task 5: Docs re-scope + wave-9 docs
 
 **Files:**
+
 - Modify: `README.md` (parity claim → "full parity with the AI SDK 5 core; AI SDK 6 parity in progress — tracked in the migration guide"; transcription matrix +3; not-yet list updated), `docs/migrating-from-vercel-ai-sdk.md` (re-baseline: add an "AI SDK 6 delta" section listing the v6 features and their status: shipped in this wave / planned wave 10-14 per the roadmap / out of scope, referencing docs/superpowers/plans/2026-08-03-v6-parity-roadmap.md), `docs/core/generating-text.md` (new settings + helpers + OnAbort), `docs/core/tools.md` (multi-modal results), `docs/core/middleware-and-registry.md` (ExtractJSON, WrapImageModel), `docs/getting-started.md` (env rows +3), `docs/providers/README.md` (+3 pages, matrices, live-testing note), NEW `docs/providers/{assemblyai,gladia,revai}.md`, `docs/core/media.md` matrices, `CHANGELOG.md` (Unreleased entries), `docs/troubleshooting.md` (auth bullets).
 - Same verification discipline as wave 7 (snippets compile-verified, claims grepped, cell counts, links).
 

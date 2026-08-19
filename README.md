@@ -248,47 +248,47 @@ All 39 supported providers, by capability (✅ = supported · — = not exposed
 by this package · ⚠ = supported with a caveat, see that provider's page in
 [`docs/providers/`](docs/providers/)):
 
-| Provider | Chat & streaming | Tool calling | Structured output | Embeddings | Reranking | Images | Video | Speech (TTS) | Transcription (STT) |
-|---|---|---|---|---|---|---|---|---|---|
-| [OpenAI](docs/providers/openai.md) | ✅ | ✅ | ✅ native | ✅ | — | ✅ | — | ✅ | ✅ ⚠ live |
-| [Azure OpenAI](docs/providers/azure.md) | ✅ | ✅ | ✅ native | ✅ | — | — | — | — | — |
-| [Groq](docs/providers/groq.md) | ✅ | ✅ | ✅ native | — | — | — | — | — | ✅ |
-| [xAI](docs/providers/xai.md) | ✅ | ✅ | ✅ native | — | — | ✅ ⚠ | — | — | — |
-| [DeepSeek](docs/providers/deepseek.md) | ✅ | ✅ | ⚠ `json_object`-only | — | — | — | — | — | — |
-| [Cerebras](docs/providers/cerebras.md) | ✅ | ✅ | ✅ native | — | — | — | — | — | — |
-| [Together](docs/providers/together.md) | ✅ | ✅ | ✅ native | ✅ | — | — | — | — | — |
-| [Fireworks](docs/providers/fireworks.md) | ✅ | ✅ | ✅ native | ✅ | — | — | — | — | — |
-| [Perplexity](docs/providers/perplexity.md) | ✅ | ⚠ no live tools | ✅ native | — | — | — | — | — | — |
-| [Moonshot](docs/providers/moonshot.md) | ✅ | ✅ | ✅ native | — | — | — | — | — | — |
-| [Qwen](docs/providers/qwen.md) | ✅ | ✅ | ✅ native | ✅ | — | — | — | — | — |
-| [MiniMax](docs/providers/minimax.md) | ✅ | ✅ | ✅ native | — | — | — | — | — | — |
-| [DeepInfra](docs/providers/deepinfra.md) | ✅ | ✅ | ✅ native | ✅ | — | — | — | — | — |
-| [Hugging Face](docs/providers/huggingface.md) | ✅ | ✅ | ⚠ tool-mode | — | — | — | — | — | — |
-| [Baseten](docs/providers/baseten.md) | ✅ | ✅ | ✅ native | ✅ | — | — | — | — | — |
-| [LM Studio](docs/providers/lmstudio.md) | ✅ | ✅ | ✅ native | ✅ | — | — | — | — | — |
-| [NVIDIA NIM](docs/providers/nvidia.md) | ✅ | ✅ | ✅ native | ✅ | — | — | — | — | — |
-| [Vercel AI Gateway](docs/providers/gateway.md) | ✅ | ✅ | ⚠ tool-mode | ✅ | — | — | — | — | — |
-| [Mistral](docs/providers/mistral.md) | ✅ | ✅ | ⚠ schema dropped | ✅ | — | — | — | — | — |
-| [Cohere](docs/providers/cohere.md) | ✅ | ✅ | ✅ native | ✅ | ✅ | — | — | — | — |
-| [Voyage](docs/providers/voyage.md) | — | — | — | ✅ | ✅ | — | — | — | — |
-| [Mixedbread](docs/providers/mixedbread.md) | — | — | — | — | ✅ | — | — | — | — |
-| [ElevenLabs](docs/providers/elevenlabs.md) | — | — | — | — | — | — | — | ✅ | ✅ |
-| [Anthropic](docs/providers/anthropic.md) | ✅ | ✅ | ⚠ tool-mode | — | — | — | — | — | — |
-| [Google](docs/providers/google.md) | ✅ | ✅ | ✅ native | ✅ | — | ✅ | — | — | — |
-| [Vertex AI](docs/providers/vertex.md) | ✅ | ✅ | ✅ native | ✅ | — | ✅ | — | — | — |
-| [Amazon Bedrock](docs/providers/bedrock.md) | ✅ | ✅ | ⚠ tool-mode | ✅ | — | — | — | — | — |
-| [fal](docs/providers/fal.md) | — | — | — | — | — | ✅ | ✅ | — | — |
-| [Replicate](docs/providers/replicate.md) | — | — | — | — | — | ✅ | ✅ | — | — |
-| [Luma](docs/providers/luma.md) | — | — | — | — | — | ✅ | ✅ | — | — |
-| [Deepgram](docs/providers/deepgram.md) | — | — | — | — | — | — | — | — | ✅ ⚠ live |
-| [LMNT](docs/providers/lmnt.md) | — | — | — | — | — | — | — | ✅ | — |
-| [Hume](docs/providers/hume.md) | — | — | — | — | — | — | — | ✅ | — |
-| [AssemblyAI](docs/providers/assemblyai.md) | — | — | — | — | — | — | — | — | ✅ |
-| [Gladia](docs/providers/gladia.md) | — | — | — | — | — | — | — | — | ✅ |
-| [Rev.ai](docs/providers/revai.md) | — | — | — | — | — | — | — | — | ✅ |
-| [Cartesia](docs/providers/cartesia.md) | — | — | — | — | — | — | — | ✅ | — |
-| [Prodia](docs/providers/prodia.md) | — | — | — | — | — | ✅ | — | — | — |
-| [Black Forest Labs](docs/providers/bfl.md) | — | — | — | — | — | ✅ | — | — | — |
+| Provider                                       | Chat & streaming | Tool calling    | Structured output    | Embeddings | Reranking | Images | Video | Speech (TTS) | Transcription (STT) |
+| ---------------------------------------------- | ---------------- | --------------- | -------------------- | ---------- | --------- | ------ | ----- | ------------ | ------------------- |
+| [OpenAI](docs/providers/openai.md)             | ✅               | ✅              | ✅ native            | ✅         | —         | ✅     | —     | ✅           | ✅ ⚠ live           |
+| [Azure OpenAI](docs/providers/azure.md)        | ✅               | ✅              | ✅ native            | ✅         | —         | —      | —     | —            | —                   |
+| [Groq](docs/providers/groq.md)                 | ✅               | ✅              | ✅ native            | —          | —         | —      | —     | —            | ✅                  |
+| [xAI](docs/providers/xai.md)                   | ✅               | ✅              | ✅ native            | —          | —         | ✅ ⚠   | —     | —            | —                   |
+| [DeepSeek](docs/providers/deepseek.md)         | ✅               | ✅              | ⚠ `json_object`-only | —          | —         | —      | —     | —            | —                   |
+| [Cerebras](docs/providers/cerebras.md)         | ✅               | ✅              | ✅ native            | —          | —         | —      | —     | —            | —                   |
+| [Together](docs/providers/together.md)         | ✅               | ✅              | ✅ native            | ✅         | —         | —      | —     | —            | —                   |
+| [Fireworks](docs/providers/fireworks.md)       | ✅               | ✅              | ✅ native            | ✅         | —         | —      | —     | —            | —                   |
+| [Perplexity](docs/providers/perplexity.md)     | ✅               | ⚠ no live tools | ✅ native            | —          | —         | —      | —     | —            | —                   |
+| [Moonshot](docs/providers/moonshot.md)         | ✅               | ✅              | ✅ native            | —          | —         | —      | —     | —            | —                   |
+| [Qwen](docs/providers/qwen.md)                 | ✅               | ✅              | ✅ native            | ✅         | —         | —      | —     | —            | —                   |
+| [MiniMax](docs/providers/minimax.md)           | ✅               | ✅              | ✅ native            | —          | —         | —      | —     | —            | —                   |
+| [DeepInfra](docs/providers/deepinfra.md)       | ✅               | ✅              | ✅ native            | ✅         | —         | —      | —     | —            | —                   |
+| [Hugging Face](docs/providers/huggingface.md)  | ✅               | ✅              | ⚠ tool-mode          | —          | —         | —      | —     | —            | —                   |
+| [Baseten](docs/providers/baseten.md)           | ✅               | ✅              | ✅ native            | ✅         | —         | —      | —     | —            | —                   |
+| [LM Studio](docs/providers/lmstudio.md)        | ✅               | ✅              | ✅ native            | ✅         | —         | —      | —     | —            | —                   |
+| [NVIDIA NIM](docs/providers/nvidia.md)         | ✅               | ✅              | ✅ native            | ✅         | —         | —      | —     | —            | —                   |
+| [Vercel AI Gateway](docs/providers/gateway.md) | ✅               | ✅              | ⚠ tool-mode          | ✅         | —         | —      | —     | —            | —                   |
+| [Mistral](docs/providers/mistral.md)           | ✅               | ✅              | ⚠ schema dropped     | ✅         | —         | —      | —     | —            | —                   |
+| [Cohere](docs/providers/cohere.md)             | ✅               | ✅              | ✅ native            | ✅         | ✅        | —      | —     | —            | —                   |
+| [Voyage](docs/providers/voyage.md)             | —                | —               | —                    | ✅         | ✅        | —      | —     | —            | —                   |
+| [Mixedbread](docs/providers/mixedbread.md)     | —                | —               | —                    | —          | ✅        | —      | —     | —            | —                   |
+| [ElevenLabs](docs/providers/elevenlabs.md)     | —                | —               | —                    | —          | —         | —      | —     | ✅           | ✅                  |
+| [Anthropic](docs/providers/anthropic.md)       | ✅               | ✅              | ⚠ tool-mode          | —          | —         | —      | —     | —            | —                   |
+| [Google](docs/providers/google.md)             | ✅               | ✅              | ✅ native            | ✅         | —         | ✅     | —     | —            | —                   |
+| [Vertex AI](docs/providers/vertex.md)          | ✅               | ✅              | ✅ native            | ✅         | —         | ✅     | —     | —            | —                   |
+| [Amazon Bedrock](docs/providers/bedrock.md)    | ✅               | ✅              | ⚠ tool-mode          | ✅         | —         | —      | —     | —            | —                   |
+| [fal](docs/providers/fal.md)                   | —                | —               | —                    | —          | —         | ✅     | ✅    | —            | —                   |
+| [Replicate](docs/providers/replicate.md)       | —                | —               | —                    | —          | —         | ✅     | ✅    | —            | —                   |
+| [Luma](docs/providers/luma.md)                 | —                | —               | —                    | —          | —         | ✅     | ✅    | —            | —                   |
+| [Deepgram](docs/providers/deepgram.md)         | —                | —               | —                    | —          | —         | —      | —     | —            | ✅ ⚠ live           |
+| [LMNT](docs/providers/lmnt.md)                 | —                | —               | —                    | —          | —         | —      | —     | ✅           | —                   |
+| [Hume](docs/providers/hume.md)                 | —                | —               | —                    | —          | —         | —      | —     | ✅           | —                   |
+| [AssemblyAI](docs/providers/assemblyai.md)     | —                | —               | —                    | —          | —         | —      | —     | —            | ✅                  |
+| [Gladia](docs/providers/gladia.md)             | —                | —               | —                    | —          | —         | —      | —     | —            | ✅                  |
+| [Rev.ai](docs/providers/revai.md)              | —                | —               | —                    | —          | —         | —      | —     | —            | ✅                  |
+| [Cartesia](docs/providers/cartesia.md)         | —                | —               | —                    | —          | —         | —      | —     | ✅           | —                   |
+| [Prodia](docs/providers/prodia.md)             | —                | —               | —                    | —          | —         | ✅     | —     | —            | —                   |
+| [Black Forest Labs](docs/providers/bfl.md)     | —                | —               | —                    | —          | —         | ✅     | —     | —            | —                   |
 
 "Native" structured output means schema-constrained JSON directly via
 native JSON mode; "tool-mode" (Anthropic, Bedrock, Hugging Face, Vercel AI
@@ -308,13 +308,13 @@ each provider's own page for the full detail.
 
 ### Provider coverage
 
-| Providers | Notes |
-|---|---|
-| OpenAI, Anthropic, Google (Gemini) | Three distinct wire formats prove the abstraction |
-| Groq, xAI, DeepSeek, Together, Fireworks, Cerebras, Perplexity, Moonshot, Qwen, MiniMax, DeepInfra, Hugging Face, Baseten, LM Studio, NVIDIA NIM, Vercel AI Gateway | Thin presets over the OpenAI-compatible base |
-| Mistral, Cohere, Voyage, Mixedbread | Own APIs, full provider implementations (Voyage: embeddings + reranking; Mixedbread: reranking only) |
-| Azure OpenAI, Vertex AI, Amazon Bedrock | Platform auth: Azure (API-key preset over the OpenAI-compatible base), Vertex AI (Google service-account/ADC auth), Bedrock (AWS SigV4 request signing) |
-| ElevenLabs, fal, Replicate, Luma, Deepgram, LMNT, Hume, AssemblyAI, Gladia, Rev.ai, Cartesia, Prodia, Black Forest Labs; image/speech/transcription for OpenAI, Google/Vertex, xAI, Groq | Media-only or media-layered providers, all behind the same `ImageModel`/`SpeechModel`/`TranscriptionModel` interfaces |
+| Providers                                                                                                                                                                                | Notes                                                                                                                                                   |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OpenAI, Anthropic, Google (Gemini)                                                                                                                                                       | Three distinct wire formats prove the abstraction                                                                                                       |
+| Groq, xAI, DeepSeek, Together, Fireworks, Cerebras, Perplexity, Moonshot, Qwen, MiniMax, DeepInfra, Hugging Face, Baseten, LM Studio, NVIDIA NIM, Vercel AI Gateway                      | Thin presets over the OpenAI-compatible base                                                                                                            |
+| Mistral, Cohere, Voyage, Mixedbread                                                                                                                                                      | Own APIs, full provider implementations (Voyage: embeddings + reranking; Mixedbread: reranking only)                                                    |
+| Azure OpenAI, Vertex AI, Amazon Bedrock                                                                                                                                                  | Platform auth: Azure (API-key preset over the OpenAI-compatible base), Vertex AI (Google service-account/ADC auth), Bedrock (AWS SigV4 request signing) |
+| ElevenLabs, fal, Replicate, Luma, Deepgram, LMNT, Hume, AssemblyAI, Gladia, Rev.ai, Cartesia, Prodia, Black Forest Labs; image/speech/transcription for OpenAI, Google/Vertex, xAI, Groq | Media-only or media-layered providers, all behind the same `ImageModel`/`SpeechModel`/`TranscriptionModel` interfaces                                   |
 
 A handful of AI SDK 6 providers remain unimplemented — planned per the
 [v6 parity roadmap](docs/superpowers/plans/2026-08-03-v6-parity-roadmap.md).

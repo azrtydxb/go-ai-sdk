@@ -3,6 +3,7 @@
 Target: full feature parity with Vercel AI SDK 6 (ai-sdk.dev, snapshot 2026-08-03), excluding the permanently-out-of-scope UI layer (useChat/useCompletion/useObject/RSC/UI transports/MCP Apps rendering) per the approved design spec.
 
 Standing scope rulings:
+
 - **WebRTC realtime**: skipped; WebSocket API variants implemented instead via a stdlib RFC-6455 client (`internal/websocket`).
 - **OTel**: native bridge ships as a nested Go module (`contrib/otel/` with its own go.mod) so the root module stays zero-dependency.
 - **DevTools / Terminal UI**: out-of-scope tooling; documented as such.

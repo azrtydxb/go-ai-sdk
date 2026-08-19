@@ -74,7 +74,7 @@ No public API removed.
   `ai.EmbedManyOpts`, `ai.GenerateImageOpts`, `ai.GenerateSpeechOpts`,
   `ai.GenerateVideoOpts`, `ai.TranscribeOpts`, `ai.TranslateOpts`,
   `ai.RerankOpts`, and `ai.UploadFileOpts` each gain a `Headers
-  map[string]string` field, threaded through to the corresponding
+map[string]string` field, threaded through to the corresponding
   `provider.*Call.Headers` field and applied to the outgoing request after
   the provider's own auth header (a `Headers` entry that
   case-insensitively matches the auth header name is skipped, so it can
@@ -366,14 +366,14 @@ out under Changed.
   `Content-Disposition`), applied across every multipart-uploading call
   site: openai/anthropic files and skills, and the revai/gladia/elevenlabs/
   openaicompat transcription and translation uploads. Prompt/body field
-  *values* (not header-reaching strings) are correctly left unguarded.
+  _values_ (not header-reaching strings) are correctly left unguarded.
 - **gauth signing uses `crypto/rand`.** Google service-account JWT signing
   (`rsa.SignPKCS1v15`) now passes `rand.Reader` (PKCS#1 v1.5 blinding)
   instead of `nil`, closing a timing-side-channel exposure in the Vertex AI
   auth path.
 - **MCP HTTP retry is now conservative (no more double-execution risk).**
   `WithHTTPRetry` only retries HTTP 429/503 responses and a narrow
-  allowlist of *pre-delivery* connection errors (connection-refused, DNS
+  allowlist of _pre-delivery_ connection errors (connection-refused, DNS
   failure, dial-phase errors) — cases that prove the request never reached
   the server. A generic post-dial `client.Do` error (e.g. connection reset
   while reading the response) is no longer retried, since the server may
@@ -431,7 +431,7 @@ out under Changed.
   mismatched number of returned embeddings is now a clear error instead of
   a silent misalignment between input and output.
 - **Code Mode (`codemode.Tool`) output-budget and empty-code fixes.**
-  `MaxOutputBytes` now applies to the *combined* `Output` + `Logs`, so log
+  `MaxOutputBytes` now applies to the _combined_ `Output` + `Logs`, so log
   volume can't blow past the configured budget on its own; empty or
   whitespace-only generated code is now rejected with
   `*ai.InvalidToolArgumentsError` before the sandbox is ever invoked.
@@ -526,7 +526,7 @@ for the closing record.
 
 - `contrib/otel`: a real OpenTelemetry bridge — `github.com/azrtydxb/go-ai-sdk/contrib/otel`,
   a **separate Go module** (its own `go.mod`/`go.sum`, `replace
-  github.com/azrtydxb/go-ai-sdk => ../..` for local development only) so
+github.com/azrtydxb/go-ai-sdk => ../..` for local development only) so
   the root module stays zero-dependency. `otelbridge.New(...Option)`
   returns a `*Bridge` implementing `ai.Telemetry`: starts a
   `trace.SpanKindClient` span per call (`"chat " + ModelID`, both
@@ -563,7 +563,7 @@ for the closing record.
   and [§ AddToolInputExamplesMiddleware](docs/core/tools.md#addtoolinputexamplesmiddleware).
 - Per-tool input-streaming lifecycle hooks:
   `ai.WithToolInputCallbacks(ai.ToolInputCallbacks{OnInputStart,
-  OnInputDelta, OnInputAvailable})`, mirroring the Vercel AI SDK v6's
+OnInputDelta, OnInputAvailable})`, mirroring the Vercel AI SDK v6's
   `onInputStart`/`onInputDelta`/`onInputAvailable`. `StreamText` fires
   `OnInputStart` once per `toolCallID` on its first argument delta,
   `OnInputDelta` on every delta thereafter (raw args-JSON text fragment),
@@ -1056,7 +1056,7 @@ smoke-tested against live APIs yet (see the
   interfaces.
 - OpenAI (image, speech, transcription), Google/Vertex AI (Imagen image
   generation), xAI (image), Groq (transcription), and ElevenLabs (speech
-  + transcription) implementations.
+  - transcription) implementations.
 - Wave 8 — fal and Replicate (synchronous image generation), Luma
   (asynchronous, poll-until-terminal image generation via
   `WithPollInterval`), Deepgram (transcription, raw-audio request body),

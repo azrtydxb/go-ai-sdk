@@ -24,12 +24,14 @@
 ### Task 1: provider.RerankingModel + ai.Rerank + Cohere rerank + registry
 
 **Files:**
+
 - Create: `provider/rerank.go`, `ai/rerank.go`, `ai/rerank_test.go`, `providers/cohere/rerank.go`, `providers/cohere/rerank_test.go`
 - Modify: `ai/registry.go` (RerankingModelProvider + Registry.RerankingModel, mirroring the five existing lookups at ai/registry.go:89-172), `providers/cohere/cohere.go` (constructor)
 
 **Interfaces (Produces):**
 
 `provider/rerank.go`:
+
 ```go
 // RerankCall is a request to rank Documents by relevance to Query.
 type RerankCall struct {
@@ -60,6 +62,7 @@ type RerankingModel interface {
 ```
 
 `ai/rerank.go`:
+
 ```go
 type RerankOpts struct {
 	Model           provider.RerankingModel // required
@@ -86,9 +89,11 @@ type RankedDocument struct {
 
 func Rerank(ctx context.Context, opts RerankOpts) (*RerankResult, error)
 ```
+
 Validation errors (Model nil, Query empty, Documents empty) → `NewInvalidArgumentError` (same constructor Embed uses). Retries via the same retry helper `Embed` uses (read `ai/embed.go:35-64` and copy its retry/backoff discipline exactly). `OnRerankStart` fires once before the first attempt; `OnRerankEnd` fires once after the final attempt (success or exhausted error). Out-of-range `Index` from a provider → skip that entry (defensive; do not panic on `Documents[i]`).
 
 `ai/registry.go` additions (mirror EmbeddingModel lookup verbatim in structure):
+
 ```go
 type RerankingModelProvider interface {
 	RerankingModel(id string) provider.RerankingModel
@@ -97,9 +102,11 @@ func (r *Registry) RerankingModel(id string) (provider.RerankingModel, error)
 ```
 
 `providers/cohere`:
+
 ```go
 func (p *Provider) RerankingModel(id string) provider.RerankingModel // e.g. "rerank-v3.5"
 ```
+
 Wire (POST `{baseURL}/rerank`, auth `Authorization: Bearer` — reuse `apiError` from language_model.go and the Call.Headers-can't-clobber-auth discipline is N/A here since RerankCall has no Headers): request `{"model": id, "query": ..., "documents": [...], "top_n": N (omit when 0)}` + ProviderOptions["cohere"] top-level shallow merge last; response `{"results":[{"index":0,"relevance_score":0.9}],"meta":{"billed_units":{"search_units":1}}}` → Results in response order, `Usage{TotalTokens: 0}` (search units are not tokens — leave Usage zero and store the raw body in Raw; document in provider page later).
 
 - [ ] **Step 1: Failing tests** — ai: validation errors; happy path with a mock RerankingModel (results resolved to RankedDocument with Document text, out-of-range index skipped); retry-on-429-then-success; OnRerankStart/End fire once each incl. on final error. cohere: httptest fixture asserting method/path/auth/request shape (top_n omitted when 0, ProviderOptions merge wins), response parsing order preserved, 401/429 → APICallError with correct retryable flag, ctx cancel.
@@ -111,6 +118,7 @@ Wire (POST `{baseURL}/rerank`, auth `Authorization: Bearer` — reuse `apiError`
 ### Task 2: Unified Reasoning option with per-provider mapping
 
 **Files:**
+
 - Modify: `provider/call.go` (+field + type), `ai/options.go` (+field on GenerateTextOpts, threaded in buildCall at ai/options.go:235-283), `ai/middleware.go` (DefaultSettingsMiddleware fills Reasoning when unset — follow the TopK/Seed pattern added in wave 9)
 - Modify request builders: `internal/openaicompat/wire.go`, `providers/anthropic/wire.go`, `internal/geminicompat/wire.go`, `providers/bedrock/wire.go` (+ language_model.go files where the body is assembled)
 - Unsupported providers get an ignore comment: `providers/cohere/wire.go`, `providers/mistral/wire.go`
@@ -118,6 +126,7 @@ Wire (POST `{baseURL}/rerank`, auth `Authorization: Bearer` — reuse `apiError`
 **Interfaces (Produces):**
 
 `provider/call.go`:
+
 ```go
 // ReasoningConfig is the unified reasoning/thinking request option.
 // Providers map it to their native knob; see each provider's request
@@ -130,12 +139,14 @@ type ReasoningConfig struct {
 	BudgetTokens *int   // explicit thinking-token budget
 }
 ```
+
 `Call` gains `Reasoning *ReasoningConfig` (place after `Seed`, before `Headers`).
 
 **Effort→budget table** (for providers whose only knob is a token budget; exported as `provider.EffortBudgetTokens(effort string) (int, bool)` in call.go so all providers share one table; unknown effort → false → field omitted):
 `minimal→1024, low→4096, medium→8192, high→16384`.
 
 Per-provider mapping (each applied only when `call.Reasoning != nil`):
+
 - **openaicompat** (`internal/openaicompat/wire.go` request struct): `"reasoning_effort": Effort` when Effort ≠ "". BudgetTokens has no OpenAI-wire equivalent → ignored with comment.
 - **anthropic** (`providers/anthropic/wire.go`): `"thinking": {"type":"enabled","budget_tokens":N}` where N = `*BudgetTokens` if set, else `EffortBudgetTokens(Effort)`; if neither resolves, omit entirely. Note in the field doc: Anthropic requires `max_tokens > budget_tokens` and temperature restrictions — the SDK passes values through without validating (provider errors surface as APICallError).
 - **geminicompat** (`internal/geminicompat/wire.go` generationConfig): `"thinkingConfig": {"thinkingBudget": N, "includeThoughts": true}` with the same N resolution as anthropic; omit when unresolvable.
@@ -152,12 +163,14 @@ Per-provider mapping (each applied only when `call.Reasoning != nil`):
 ### Task 3: Output modes on GenerateText (text/object/array/choice/json + OutputAs[T])
 
 **Files:**
+
 - Create: `ai/output.go`, `ai/output_test.go`
 - Modify: `ai/generate_text.go` (decode after loop; result field), `ai/options.go` (Output field; buildCall integration), `ai/generate_object.go` (export-internally/reuse: `stripFences` and the ResponseFormat/tool-mode branch — extract shared helpers, do NOT duplicate)
 
 **Interfaces (Produces):**
 
 `ai/output.go`:
+
 ```go
 // Output selects a structured-output mode for GenerateText. Construct one
 // with OutputObject, OutputArray, OutputChoice, or OutputJSON; the zero
@@ -177,7 +190,9 @@ func OutputJSON() Output            // no schema; ResponseFormat json without sc
 // OutputAs extracts the decoded output as T.
 func OutputAs[T any](r *GenerateTextResult) (T, error)
 ```
+
 Implementation notes:
+
 - `schema.For[T]` (internal/schema/schema.go:18) is the derivation entry point; `OutputArray`/`OutputChoice` wrap per the shapes above. Read what `schema.For` emits before wrapping (reuse its raw object output as `items`).
 - `GenerateTextOpts` gains `Output Output`. In `buildCall`: when Output non-nil and mode has a schema and `Model.Capabilities().NativeJSON` → `call.ResponseFormat = &provider.ResponseFormat{Type: "json", Schema: sch, Name: name}` (same as buildObjectCall, ai/generate_object.go:81). `OutputJSON` (schemaless) → `ResponseFormat{Type:"json"}` regardless of NativeJSON (providers that can't honor it just return text — decode still applies stripFences).
 - When Output has a schema, `!NativeJSON`, and `len(opts.Tools) == 0` → tool-mode fallback exactly as buildObjectCall (single injected ToolDef + forced ToolChoice); the loop then treats that forced tool call's Args as the raw text (no Execute — it is not a real tool; short-circuit before runToolCalls, finish the loop with the args as final text). When `!NativeJSON` AND user tools are present → return `NewInvalidArgumentError("output: model has no native JSON mode and tools are in use; structured output modes require one or the other")` from GenerateText up front.
@@ -194,12 +209,14 @@ Implementation notes:
 ### Task 4: Lifecycle callbacks (model-call + tool-execution + embed events)
 
 **Files:**
+
 - Modify: `ai/options.go` (+4 fields), `ai/generate_text.go` (fire in generate loop + runToolCalls), `ai/stream_text.go` (fire in stream loop), `ai/embed.go` (+2 fields each on EmbedOpts/EmbedManyOpts, fire around embedCall)
 - Test: `ai/lifecycle_test.go` (new)
 
 **Interfaces (Produces):**
 
 `ai/options.go` additions to GenerateTextOpts:
+
 ```go
 // OnModelCallStart fires immediately before each underlying model request
 // (once per step, both loops), with the step index (0-based) and the exact
@@ -218,6 +235,7 @@ OnModelCallEnd func(end ModelCallEnd)
 OnToolExecutionStart func(stepIndex int, call ToolCallRecord)
 OnToolExecutionEnd   func(stepIndex int, result ToolResultRecord, err error)
 ```
+
 ```go
 type ModelCallEnd struct {
 	StepIndex    int
@@ -227,12 +245,16 @@ type ModelCallEnd struct {
 	Err          error
 }
 ```
+
 `EmbedOpts` and `EmbedManyOpts` each gain:
+
 ```go
 OnEmbedStart func(values []string)                        // per underlying provider call (per batch in EmbedMany)
 OnEmbedEnd   func(resp *provider.EmbeddingResponse, err error) // ditto; resp nil on error
 ```
+
 Firing rules:
+
 - Callbacks are optional (nil-checked), fired synchronously on the calling goroutine, and must be invoked exactly once per boundary regardless of retries: Start before the FIRST attempt, End after the FINAL attempt (matching where the retry helper wraps the call — fire outside the retry closure).
 - StreamText: `OnModelCallStart` before `startStream` per step; `OnModelCallEnd` when the step's FinishPart is observed (Usage/FinishReason from it) or when the stream terminates with an error (Err set, zero Usage). Abandon/ctx-cancel (the OnAbort path): fire OnModelCallEnd with `Err: context.Canceled`? No — keep it simple and truthful: on the abort path OnModelCallEnd does NOT fire (OnAbort already covers it); document this in the field comment.
 - runToolCalls: Start/End wrap each `t.Execute` including the RepairToolCall retry path (one Start/End pair per execution attempt is WRONG — one pair per tool call record, around the whole execute-and-maybe-repair sequence).
@@ -246,6 +268,7 @@ Firing rules:
 ### Task 5: Wave-10 docs + CHANGELOG
 
 **Files:**
+
 - Modify: `docs/core/generating-text.md` (Output modes section w/ compile-verified snippets incl. OutputAs; lifecycle callbacks), `docs/core/structured-output.md` (cross-link: GenerateObject vs Output modes — when to use which), `docs/core/reasoning.md` (unified Reasoning option, per-provider mapping table incl. the effort→budget table, ProviderOptions-win precedence), `docs/core/embeddings.md` (embed events + NEW Reranking section: ai.Rerank, RerankOpts, registry), `docs/core/middleware-and-registry.md` (RerankingModel registry row; DefaultSettings fills Reasoning), `docs/core/provider-options.md` (Reasoning precedence note), `docs/providers/cohere.md` (rerank endpoint, model ids, usage note re search_units, live-testing note), `docs/providers/README.md` (rerank column/matrix row), `README.md` (feature list + matrix), `docs/migrating-from-vercel-ai-sdk.md` (move Output modes/rerank/reasoning/lifecycle from "Planned" to "Shipped"; note StreamText partial-output streaming still planned), `CHANGELOG.md` (Unreleased entries), `docs/README.md` (only if a new page were added — none is; verify links).
 - Same verification discipline as prior waves: every snippet compile-verified in a scratch main, claims grepped against code, matrix cell counts checked, links resolved.
 

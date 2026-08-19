@@ -23,10 +23,13 @@
 ### Task 1: Wave-10 carryovers (mechanical)
 
 **Files:**
+
 - Modify: `provider/call.go` (+`ResolveBudgetTokens`), `providers/anthropic/wire.go`, `internal/geminicompat/wire.go`, `providers/bedrock/wire.go` (each: delete the private `resolveBudgetTokens`, call the shared one), `ai/options.go` (+`SchemaDescription` field + PrepareStep doc sentence), `ai/generate_text.go` (use SchemaDescription; multi-call doc note), `docs/core/generating-text.md` (SchemaDescription + the two doc notes)
 
 **Exact changes:**
+
 1. `provider/call.go`: add
+
 ```go
 // ResolveBudgetTokens resolves a ReasoningConfig to a concrete thinking-token
 // budget: BudgetTokens when set, else the EffortBudgetTokens mapping of
@@ -41,11 +44,8 @@ func ResolveBudgetTokens(cfg *ReasoningConfig) (n int, ok bool) {
 	return EffortBudgetTokens(cfg.Effort)
 }
 ```
-Replace the three identical private helpers (`providers/anthropic/wire.go:762-767`, `internal/geminicompat/wire.go:295-300`, `providers/bedrock/wire.go:1042-1047`) with calls to it. Existing wire tests must pass unchanged.
-2. `ai/options.go`: add `SchemaDescription string` to `GenerateTextOpts` (doc: describes the expected output schema; used as the injected output tool's Description in the tool-mode fallback and passed as ResponseFormat description where providers support one — check `provider.ResponseFormat` for a Description field; if none exists, tool-mode Description only). Thread it in `ai/generate_text.go`'s fallback ToolDef.
-3. `PrepareStep` doc: add the sentence "A model swapped in via PrepareStep is not re-checked against Output's NativeJSON capability requirement — the output strategy is fixed from opts.Model at entry; swapping to a model without native JSON mid-loop leaves the schema unenforced on that provider."
-4. `Output` field doc + docs: note that in the tool-mode fallback, if the model emits the output tool more than once in one response, only the first matching call is decoded and answered.
-5. Test: SchemaDescription reaches the injected ToolDef (extend the existing tool-mode fallback test); `ResolveBudgetTokens` unit test in provider.
+
+Replace the three identical private helpers (`providers/anthropic/wire.go:762-767`, `internal/geminicompat/wire.go:295-300`, `providers/bedrock/wire.go:1042-1047`) with calls to it. Existing wire tests must pass unchanged. 2. `ai/options.go`: add `SchemaDescription string` to `GenerateTextOpts` (doc: describes the expected output schema; used as the injected output tool's Description in the tool-mode fallback and passed as ResponseFormat description where providers support one — check `provider.ResponseFormat` for a Description field; if none exists, tool-mode Description only). Thread it in `ai/generate_text.go`'s fallback ToolDef. 3. `PrepareStep` doc: add the sentence "A model swapped in via PrepareStep is not re-checked against Output's NativeJSON capability requirement — the output strategy is fixed from opts.Model at entry; swapping to a model without native JSON mid-loop leaves the schema unenforced on that provider." 4. `Output` field doc + docs: note that in the tool-mode fallback, if the model emits the output tool more than once in one response, only the first matching call is decoded and answered. 5. Test: SchemaDescription reaches the injected ToolDef (extend the existing tool-mode fallback test); `ResolveBudgetTokens` unit test in provider.
 
 - [ ] **Step 1: Implement + tests green. Full check suite. Commit** — `refactor: wave-10 carryovers — shared ResolveBudgetTokens, SchemaDescription, doc notes`
 
@@ -54,12 +54,14 @@ Replace the three identical private helpers (`providers/anthropic/wire.go:762-76
 ### Task 2: RuntimeContext + tool approvals with resumable flow
 
 **Files:**
+
 - Create: `ai/approval.go`, `ai/approval_test.go`, `ai/runtime_context.go`, `ai/runtime_context_test.go`
 - Modify: `ai/options.go`, `ai/generate_text.go`, `ai/stream_text.go`, `ai/errors.go`
 
 **Interfaces (Produces):**
 
 `ai/runtime_context.go`:
+
 ```go
 // RuntimeContext is an arbitrary bag of application values made available
 // to tools during execution via RuntimeContextFrom.
@@ -69,9 +71,11 @@ type RuntimeContext map[string]any
 // loop, or nil when none was configured.
 func RuntimeContextFrom(ctx context.Context) RuntimeContext
 ```
+
 `GenerateTextOpts` gains `RuntimeContext RuntimeContext`; both loops install it on the ctx passed to `Tool.Execute` (unexported context key; installed once, before the loop). `Embed`/`Rerank` are NOT touched (tools only).
 
 `ai/approval.go`:
+
 ```go
 // ApprovalRequirer is implemented by Tools whose calls need approval
 // before execution. RequireApproval wraps any Tool to add it.
@@ -94,7 +98,9 @@ type ApprovalDecision struct {
 	Reason     string // included in the denial tool result sent to the model
 }
 ```
+
 `GenerateTextOpts` gains:
+
 ```go
 // ApproveToolCall decides approval-needing calls inline. Return
 // (decision, true) to decide; (zero, false) to leave the call pending,
@@ -105,8 +111,10 @@ ApproveToolCall func(ctx context.Context, req ApprovalRequest) (ApprovalDecision
 // of Messages.
 Approvals []ApprovalDecision
 ```
+
 `GenerateTextResult` gains `PendingApprovals []ApprovalRequest`.
 `ai/errors.go` gains:
+
 ```go
 type ToolApprovalDeniedError struct {
 	ToolName string
@@ -116,6 +124,7 @@ func (e *ToolApprovalDeniedError) Error() string // "ai: tool "name" execution d
 ```
 
 **Semantics (exact rules):**
+
 1. Decision resolution for each call whose tool needs approval (`ApprovalRequirer` check, args passed): first match in `opts.Approvals` by ToolCallID; else `ApproveToolCall` if set and it returns ok=true; else PENDING.
 2. Batch atomicity: if ANY call in the step's batch is PENDING, NO tool in that batch executes. The loop stops: result has `PendingApprovals` (one entry per approval-needing call without a decision, in call order), `FinishReason` = the step's real finish reason (`tool-calls`), `Messages` ending with the assistant tool-call message (round-trippable), Steps includes the final (tool-result-less) step. Not an error. `OnFinish` fires normally. OnToolExecutionStart/End do NOT fire for the unexecuted batch.
 3. Denied calls execute nothing: `ToolResultRecord{Err: &ToolApprovalDeniedError{...}}`, serialized to the model like any tool error (`IsError: true`, text = the error string). OnToolExecutionStart/End DO fire for denied calls (End with the denial error) — they are part of the executed batch.
@@ -133,9 +142,11 @@ func (e *ToolApprovalDeniedError) Error() string // "ai: tool "name" execution d
 ### Task 3: agent package
 
 **Files:**
+
 - Create: `agent/agent.go`, `agent/agent_test.go`, `agent/tool.go`, `agent/tool_test.go`
 
 **Interfaces (Produces):**
+
 ```go
 package agent
 
@@ -166,15 +177,18 @@ type RunOpts struct {
 func (a *Agent) Generate(ctx context.Context, run RunOpts) (*ai.GenerateTextResult, error)
 func (a *Agent) Stream(ctx context.Context, run RunOpts) (<same type ai.StreamText returns>, error)
 ```
+
 Both assemble a `GenerateTextOpts` (Model, System=Instructions, Tools, MaxSteps default, StopWhen, Output, RuntimeContext, ApproveToolCall, Prompt/Messages/Approvals from run), apply `PrepareOpts`, and delegate to `ai.GenerateText`/`ai.StreamText`. Zero loop logic of its own. Validation (nil Model, both/neither Prompt+Messages) delegates to ai's existing errors — do not duplicate.
 
 `agent/tool.go`:
+
 ```go
 // AsTool exposes an Agent as an ai.Tool so a parent agent can delegate to
 // it. The tool takes {"task": string} and returns the sub-agent's final
 // text (or its decoded Output when the agent has one).
 func AsTool(a *Agent, name, description string) ai.Tool
 ```
+
 Schema: hand-written `{"type":"object","properties":{"task":{"type":"string","description":"The task for the <name> agent."}},"required":["task"],"additionalProperties":false}`. Execute: `a.Generate(ctx, RunOpts{Prompt: task})`; error propagates (loop wraps it in ToolExecutionError); returns `result.Output` when non-nil else `result.Text`. Parent RuntimeContext flows via ctx automatically ONLY if the sub-agent doesn't overwrite it — sub-agent installs its own RuntimeContext; document that the sub-agent's own RuntimeContext (possibly nil) governs its tools.
 
 **Tests:** Generate assembles opts correctly (assert via MockModel's recorded Call: system message, tools present, max steps honored by scripting a long loop); default MaxSteps applied; PrepareOpts runs last and can override; Stream smoke (mock stream); AsTool executes a scripted sub-agent loop and returns final text; AsTool with Output returns decoded value; sub-agent error propagates; approval passthrough (agent-level ApproveToolCall denies → denial visible in transcript); RunOpts validation (both prompt+messages → error from ai layer).
@@ -186,9 +200,11 @@ Schema: hand-written `{"type":"object","properties":{"task":{"type":"string","de
 ### Task 4: codemode package (Sandbox + Code Mode)
 
 **Files:**
+
 - Create: `codemode/codemode.go`, `codemode/codemode_test.go`, `codemode/apidoc.go`, `codemode/apidoc_test.go`
 
 **Interfaces (Produces):**
+
 ```go
 package codemode
 
@@ -225,18 +241,22 @@ type Options struct {
 // invoking them one call at a time.
 func Tool(sandbox Sandbox, tools []ai.Tool, opts *Options) ai.Tool
 ```
+
 Behavior of the returned Tool:
+
 - Name `run_code`; Description = fixed preamble ("Execute <language> code in a sandbox. The following functions are available to your code:") + the generated API docs (below) + usage rules (call functions with a single object argument matching the schema; return or print your final answer).
 - Schema: `{"type":"object","properties":{"code":{"type":"string","description":"The <language> code to execute."}},"required":["code"],"additionalProperties":false}`.
 - Execute: decode `{"code": string}`, build `Env{CallTool: dispatcher}` where the dispatcher resolves by exact tool name (unknown name → error return to the sandbox, NOT a Go panic; the error text lists available tool names), invokes `sandbox.Execute(ctx, code, env)`, truncates `Result.Output` to MaxOutputBytes with a `"\n[truncated]"` suffix when exceeded, appends Logs as `"\nlog: <line>"` lines, returns the string. Sandbox error → plain error (loop wraps as ToolExecutionError). ctx passthrough everywhere; RuntimeContextFrom works inside dispatched tools because ctx flows through CallTool.
 
 `codemode/apidoc.go`:
+
 ```go
 // APIDoc renders tool signatures as language-flavored API documentation
 // for the run_code tool description: one entry per tool with name,
 // description, and its JSON schema rendered as a parameter listing.
 func APIDoc(language string, tools []ai.Tool) string
 ```
+
 Rendering: per tool, `functionName(args: {field: type, ...}) — description`, fields read from the schema JSON (`properties`, `required` — optional fields suffixed `?`; nested objects rendered inline one level deep, deeper as `object`). MCP tools' opaque schemas: render whatever properties exist; a schema without `properties` renders as `(args: object)`. Deterministic output (sorted only where the schema itself has no order — Go maps: sort property names alphabetically).
 
 **Tests:** APIDoc golden output for two tools incl. optional/nested/array fields and a properties-less schema; Tool description contains the API doc + language; dispatcher routes to the right tool and returns its result; unknown tool name → error listing available names; sandbox receives the exact code + working CallTool (fake Sandbox that calls back into a recording tool); output truncation at MaxOutputBytes; Logs appended; sandbox error surfaces as Tool error; end-to-end through ai.GenerateText with a MockModel scripting a run_code call (assert the tool result text the model would see); RuntimeContext visible inside a dispatched tool.
@@ -248,6 +268,7 @@ Rendering: per tool, `functionName(args: {field: type, ...}) — description`, f
 ### Task 5: Wave-11 docs + CHANGELOG
 
 **Files:**
+
 - Create: `docs/core/agents.md` (Agent, RunOpts, AsTool, defaults, approval passthrough, when-to-use vs raw GenerateText), `docs/core/code-mode.md` (Sandbox contract — what the caller must implement, security responsibilities live with the sandbox implementer; Env/CallTool; APIDoc; full worked example with a fake sandbox)
 - Modify: `docs/core/tools.md` (approvals section: RequireApproval, ApprovalRequirer, inline vs resumable flow with a full resume example; RuntimeContext section; ToolApprovalDeniedError in the error taxonomy), `docs/core/generating-text.md` (Approvals/PendingApprovals/resume on the opts/result reference; SchemaDescription), `docs/core/streaming.md` (suspension behavior in streams), `docs/core/errors-and-retries.md` (ToolApprovalDeniedError row), `docs/README.md` (+2 pages), `README.md` (feature list), `docs/migrating-from-vercel-ai-sdk.md` (agents/approvals/Code Mode rows → Shipped; add RuntimeContext row as Shipped; note ToolLoopAgent naming), `CHANGELOG.md` (Unreleased wave-11 entries), `docs/core/reasoning.md` (only if ResolveBudgetTokens is worth a mention — mapping unchanged, likely no edit; verify)
 - Verification discipline as prior waves: snippets compile-verified, claims grepped, links resolve, matrices consistent.

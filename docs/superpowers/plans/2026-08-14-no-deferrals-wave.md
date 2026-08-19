@@ -34,10 +34,12 @@
 ### Task 1: internal/httpheader helper + Headers on all provider call structs
 
 **Files:**
+
 - Create: `internal/httpheader/httpheader.go`, `internal/httpheader/httpheader_test.go`
 - Modify: `provider/model.go`, `provider/image.go`, `provider/speech.go`, `provider/transcription.go`, `provider/transcription_stream.go`, `provider/translation.go`, `provider/video.go`, `provider/rerank.go`, `provider/files.go`, `provider/call.go` (gap doc), and the five duplicated language-path loops (openaicompat, geminicompat, anthropic, cohere, mistral) refactored to call the helper. Bedrock's split variant stays in place (add a doc cross-reference only).
 
 **Interfaces:**
+
 - Produces: `func Apply(req *http.Request, headers map[string]string, authHeaderName string)` in package `httpheader` — sets each k,v via `req.Header.Set` EXCEPT keys case-insensitively equal to authHeaderName (skipped; auth wins). Empty authHeaderName means no skip. Also `Headers map[string]string` field added to all nine call structs, doc comment on each: "Extra HTTP headers applied to the request(s) this call makes, after auth; a key matching the provider's auth header is ignored. Same contract as Call.Headers."
 - Consumes: nothing from other tasks.
 
@@ -52,10 +54,12 @@
 ### Task 2: ai-layer Headers plumbing
 
 **Files:**
+
 - Modify: `ai/embed.go`, `ai/generate_image.go`, `ai/generate_speech.go`, `ai/generate_video.go`, `ai/transcribe.go`, `ai/translate.go`, `ai/rerank.go`, `ai/upload_file.go`, `docs/core/generating-text.md:69`
 - Test: each file's existing `_test.go`
 
 **Interfaces:**
+
 - Consumes: Task 1's call-struct Headers fields.
 - Produces: `Headers map[string]string` on EmbedOpts, EmbedManyOpts, GenerateImageOpts, GenerateSpeechOpts, GenerateVideoOpts, TranscribeOpts, TranslateOpts, RerankOpts, UploadFileOpts — doc comment mirroring GenerateTextOpts.Headers (`ai/options.go:105-109`), copied into the call next to ProviderOptions at each copy site listed in the survey. Embed special case: widen `embedCall`'s dispatch gate to `len(providerOptions) > 0 || len(headers) > 0` and pass Headers in EmbeddingCall — a model without EmbedCall support silently ignores them (document exactly that, matching ProviderOptions' existing "silently ignored" wording).
 
@@ -68,10 +72,12 @@
 ### Task 3: Headers application — compat internals + bedrock/vertex (shared-family sites)
 
 **Files:**
+
 - Modify: `internal/openaicompat/embedding.go, image.go, speech.go, transcription.go, translation.go`; `internal/geminicompat/embedding.go, image.go`; `providers/bedrock/embedding.go` (pass call.Headers instead of nil; delete the "not implemented this wave" comment); `providers/vertex/embedding.go`
 - Test: each package's tests (they use httptest fake servers — assert the header arrives on the wire).
 
 **Interfaces:**
+
 - Consumes: Task 1's httpheader.Apply and call-struct fields.
 - Produces: every listed site calls `httpheader.Apply(req, call.Headers, <authHeaderName>)` after auth is set. openaicompat uses `cfg.authHeaderName()`; geminicompat mirrors what its language path skips; vertex/bedrock: bedrock routes through its existing doRequest header partitioning (signed/unsigned split now fed call.Headers); vertex applies after its gauth token header with that header name as the skip.
 
@@ -83,6 +89,7 @@
 ### Task 4: Headers application — all remaining provider sites (+ cohere/mistral/bedrock EmbedCall, WS handshakes)
 
 **Files:**
+
 - Modify: every remaining media/embed/rerank request site from the survey: voyage (embedding.go:46, rerank.go:43), cohere (embedding.go — ALSO add `EmbedCall` implementing EmbeddingModelWithOptions, delegating to the shared request builder with ProviderOptions+Headers; rerank.go:43), mistral (embedding.go:30 + add EmbedCall), mixedbread (rerank.go:68), elevenlabs (speech.go:88, transcription.go:83), deepgram (transcription.go:105), fal (video.go:72, image.go:104), luma (video.go:77+poll :137, image.go:76+poll :137), bfl (image.go both sites), gladia (transcription.go:159,207,250), assemblyai (transcription.go:104,157,200), revai (transcription.go:166,226,276), replicate (video.go both sites), plus any other media/embed/rerank site surfaced by `grep -rn "http.NewRequest" providers/ | grep -v _test` not already covered (prodia, hume, lmnt, minimax, deepinfra, gladia…: check each grep hit; language-model, file-store, gauth, fetchmedia sites are out of scope). WebSocket: `providers/deepgram/live.go:47` and `providers/openai/realtime_transcription.go:43` pass StreamTranscriptionCall.Headers into the WS handshake headers (find how internal/websocket accepts handshake headers; auth-skip contract applies).
 - Test: per provider, extend an existing httptest-based test to assert one header arrives (one test per provider is enough; polls covered in luma/gladia/assemblyai/revai/replicate tests where a poll already happens in-test).
 
@@ -97,10 +104,12 @@
 ### Task 5: Panic recovery for every Tool implementation (+ ApprovalRequired hooks)
 
 **Files:**
+
 - Modify: `ai/generate_text.go` (`executeToolCall` ~:561/585; ApprovalRequired call sites ~:587,652), `ai/tool.go` (keep the existing NewTool recover; adjust comment to note the loop-level guard now also covers non-NewTool Tools), `CHANGELOG.md` (v0.4.0 entry may now claim all Tool implementations + approval hooks)
 - Test: `ai/generate_text_test.go` (or tool_test.go)
 
 **Interfaces:**
+
 - Produces: an unexported helper `func recoverToolPanic(toolName string, fn func() (any, error)) (res any, err error)` (name flexible) that runs fn and converts a panic to `*ToolExecutionError{ToolName, Cause: fmt.Errorf("tool panicked: %w|%v", …), Stack: debug.Stack()}` — same shape as Task-1-of-v0.3.0's recover. `executeToolCall` wraps `t.Execute` in it; the ApprovalRequired invocations are wrapped likewise (a panicking approval hook fails THAT tool call with a ToolExecutionError, batch semantics otherwise unchanged — the error routes exactly as an Execute error does at that site).
 
 - [ ] **Step 1:** Failing tests: (a) a caller-implemented `ai.Tool` (hand-rolled struct, not NewTool) whose Execute panics → GenerateText returns/records `*ToolExecutionError` with Stack, process doesn't crash; (b) an ApprovalRequirer whose ApprovalRequired panics → same conversion, other calls in the batch unaffected (assert via ToolResultRecord/err surface — mirror how an Execute error is asserted in existing tests); (c) existing NewTool panic tests still green.
@@ -112,15 +121,18 @@
 ### Task 6: Partial-output unification, ID-keyed tap, fence-tolerant partials, StreamObject perf
 
 **Files:**
+
 - Create: `ai/partial_tracker.go` (unexported)
 - Modify: `ai/stream_object.go` (use tracker), `ai/stream_text.go` (use tracker; key tool-mode tap to the FIRST output-named tool call's ID — later same-named calls don't feed the tap), `ai/output.go` (move arrayOutput.decodePartial after decode; add prefix-fence stripping so partials fire for fence-wrapping models in ALL schema modes; drop the ineffective full-stripFences from jsonOutput.decodePartial in favor of the same prefix stripper)
 - Test: `ai/stream_object_test.go`, `ai/stream_text_output_test.go`
 
 **Interfaces:**
+
 - Produces: unexported `type partialTracker struct` with `func (t *partialTracker) feed(delta []byte, decode func(string) (any, bool)) (any, bool)`: appends to an internal `strings.Builder`; short-circuits when the partialjson.Repair output equals the previous repaired string (skip decode + DeepEqual entirely); otherwise decodes and DeepEqual-dedupes, returning (value, true) only for a NEW distinct partial. Also unexported `stripPartialFences(s string) string`: if the accumulated text starts with a ``` fence line, drop that line; drop a trailing fence if present — safe on incomplete streams (prefix-only, no requirement of a closing fence).
 - Consumes: `internal/partialjson.Repair` (unchanged).
 
 **Behavior spec:**
+
 1. stream_object and stream_text both route partial parsing through partialTracker — one implementation, two users; existing observable behavior (which partials fire) unchanged except where 2-4 below improve it.
 2. Repaired-string short-circuit: a delta that doesn't change the repaired JSON (e.g. trailing whitespace) costs no unmarshal and no DeepEqual. This closes the deferred "P8/P10" item to the extent possible without an incremental parser; document the residual O(n) scan per delta as inherent (design note in partial_tracker.go's package comment).
 3. Tool-mode tap keying: on the first ToolCallDelta whose call is (or ends up) the output tool, record that call ID; only deltas for that ID feed the tracker. A second same-named call's deltas are ignored by the tap (Output() already decodes first-match) — restoring the documented "last partial equals final output" guarantee.
@@ -135,10 +147,12 @@
 ### Task 7: EmbedMany concurrency
 
 **Files:**
+
 - Modify: `ai/embed.go`
 - Test: `ai/embed_test.go`
 
 **Interfaces:**
+
 - Produces: `EmbedManyOpts.Concurrency int` — max batches in flight; 0 or 1 = sequential (existing behavior, default unchanged). >1 fans batches out over a worker pool (sync.WaitGroup + buffered-channel semaphore, stdlib only); results reassembled index-aligned; Usage summed; first error wins (context for remaining batches cancelled via context.WithCancel; in-flight batches drain). Callback contract documented: with Concurrency > 1, OnEmbedStart/OnEmbedEnd fire per batch from worker goroutines — order is completion order, not batch order, and callbacks must be goroutine-safe; sequential mode keeps the existing in-order guarantee verbatim.
 
 - [ ] **Step 1:** Failing tests: (a) Concurrency=4 over 8 batches returns index-aligned embeddings identical to sequential run (mock model records per-call values; use a batch-size-1 model); (b) error in batch 3 → EmbedMany returns that error (translated), remaining batches cancelled (assert ≤ expected call count via atomic counter); (c) Concurrency unset → call order strictly sequential (existing tests keep passing); (d) callbacks fire once per batch under concurrency (atomic count == batch count).
@@ -149,6 +163,7 @@
 ### Task 8: MCP + test + doc minors batch
 
 **Files:**
+
 - Modify: `mcp/elicitation.go` + `mcp/roots.go` (single-lock roots/list: one mu acquisition covering the gate check and the roots read — e.g. dispatch reads both under one lock and passes the snapshot to the handler), `mcp/sampling.go` + `mcp/elicitation.go` (extract the duplicated wire-message copy loop into one unexported helper used by both), `mcp/client_test.go` (rename `TestCallToolConcatenatesTextAndIgnoresOtherTypes` → `TestCallToolConcatenatesTextIntoTextField`), `internal/schema/schema_test.go` (add concurrent-convergence test: N goroutines race `ForType` on a fresh type, all get identical backing bytes — run with `-race`), `docs/mcp.md` (add a `## Notifications` section describing NotificationHandler, best-effort bounded delivery, install-before-Initialize), `CHANGELOG.md` (point the v0.3.0 NotificationHandler entry at the new `#notifications` anchor)
 - Test: as listed.
 
@@ -162,6 +177,7 @@
 ### Task 9: CHANGELOG v0.4.0, docs, full verification
 
 **Files:**
+
 - Modify: `CHANGELOG.md` (new `## v0.4.0 (unreleased)` section: Headers everywhere, universal panic recovery, EmbedMany concurrency, partial-tracker perf + ID-keyed tap + fence tolerance, MCP/test minors; a Notes entry stating the ONLY remaining known cost: repair-based partial parsing scans the buffer per delta, inherent to the approach), `docs/core/embeddings-and-rerank*.md` or equivalent (Concurrency + Headers), `docs/core/media.md` (Headers), `docs/mcp.md` if touched rows remain, `README.md` if it mentions the headers gap.
 - [ ] **Step 1:** Write CHANGELOG + doc updates; sweep `grep -rn "not implemented\|this wave\|silently ignored" docs/ provider/ ai/ | grep -i header` for stragglers.
 - [ ] **Step 2:** `go build ./... && go vet ./... && go test ./...` ALL green.

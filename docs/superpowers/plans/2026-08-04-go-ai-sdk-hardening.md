@@ -47,6 +47,7 @@
 **Vulnerabilities:** BFL sends the `x-key` API key to a server-chosen absolute `polling_url` (High credential-leak/SSRF); all media fetches fetch server-chosen URLs with no scheme/host validation, follow redirects into private/link-local ranges incl. cloud metadata `169.254.169.254` (Medium SSRF); those paths `io.ReadAll` unbounded (Medium memory-DoS).
 
 **Produces:**
+
 ```go
 package fetchmedia
 const MaxBytes = 256 << 20 // default body ceiling
@@ -58,6 +59,7 @@ func Fetch(ctx context.Context, client *http.Client, url, errPrefix string, maxB
 // SameOrigin reports scheme+host equality; gates credential attachment.
 func SameOrigin(base, candidate string) bool
 ```
+
 Notes: scheme allowlist http/https; resolve host via `net.DefaultResolver.LookupIPAddr(ctx, host)`, reject if ANY IP is link-local/metadata (do NOT block generic private ranges — self-hosted CDNs are legit; link-local is the crown-jewel with near-zero false positives); build a per-call `*http.Client` copy sharing the caller's Transport with `CheckRedirect` enforcing the scheme+link-local re-check and a 10-hop cap (never mutate the caller's client); size cap via `io.ReadAll(io.LimitReader(body, maxBytes+1))`. Callers must NOT re-wrap with their own "fetch video:" prefix (removes the `luma: fetch video: luma: fetch …` double-prefix). BFL: gate the credentialed poll on `SameOrigin(baseURL, pollingURL)` — mismatch → error, never attach `x-key`; also apply link-local check + a size cap to the poll body. fetchimage: call fetchmedia.Fetch then apply its existing sniff fallback (keep luma-image + bfl-sample behavior).
 
 **Tests:** fetchmedia — happy; non-http rejected; literal 169.254.169.254 rejected pre-request; 302→link-local rejected; body over cap rejected; SameOrigin cases. BFL — foreign-origin polling_url → error + no x-key reaches the foreign host (fixture records header); same-origin poll works. luma/fal/replicate — existing fixtures pass unchanged; error messages single-prefixed.
@@ -179,6 +181,7 @@ Notes: scheme allowlist http/https; resolve host via `net.DefaultResolver.Lookup
 ### Task 12: DRY cleanup + docs + CHANGELOG
 
 **Files:** `providers/luma/image.go`, `providers/bfl/image.go`, `providers/replicate/video.go` (dedupe local `sleep(ctx,d)` → call `internal/transcribeutil.Sleep`, the canonical impl). Docs: `docs/core/media.md` (SSRF hardening: link-local/metadata result-URL hosts rejected, body cap), `docs/mcp.md` (protocol-version negotiation, dispatch bounding, HTTP-retry idempotency caveat, tool-results-are-untrusted-model-input note), `docs/core/errors-and-retries.md` (ctx-deadline recommendation — http.DefaultClient has no timeout so callers should set ctx deadlines; streams+polls are ctx-bounded), `docs/core/tools.md` (no-arg tools now supported; empty-args normalization). `CHANGELOG.md`: new `## [Unreleased]` with `### Security` (SSRF guards, read caps, CRLF guard) + `### Fixed` (no-arg tools, gemini thought, bedrock signing, cohere count, WS conn-close, stdio write, MCP shutdown leaks + retry idempotency + version negotiation, mocks lock, retry/gauth/schema, codemode) entries for Tasks 1-11.
+
 - Verification: snippets compile-verified; claims grepped; links resolve.
 
 - [ ] **Step 1: Dedupe + docs + CHANGELOG; verify. Full check suite. Commit** — `chore: dedupe sleep helper, document hardening, CHANGELOG`

@@ -83,7 +83,7 @@ Strips markdown code fences from a model's text output — a common way
 models wrap JSON they were asked to produce "raw" (e.g.
 ` ```json\n{...}\n``` `).
 
-```go
+````go
 model := ai.ExtractJSONMiddleware(openai.New().Model("gpt-4o"))
 
 result, err := ai.GenerateText(ctx, ai.GenerateTextOpts{
@@ -91,7 +91,7 @@ result, err := ai.GenerateText(ctx, ai.GenerateTextOpts{
 	Prompt: "Return the user's profile as raw JSON, no commentary.",
 })
 // result.Text has any ```json fence markers already stripped.
-```
+````
 
 `Generate` reuses `GenerateObject`'s non-native-JSON decoding rule exactly
 (`stripFences`): the response text is trimmed, and a leading ` ``` ` (or
@@ -122,7 +122,7 @@ it, until resolved) is ever buffered; a fence marker split across two
 deltas (e.g. two backticks then "`json\n") is still recognized correctly,
 since the relevant undecided prefix carries over between feeds.
 
-**Divergence from `Generate`'s rule:** `Generate` requires *both* a leading
+**Divergence from `Generate`'s rule:** `Generate` requires _both_ a leading
 and a trailing fence before stripping either — a leading fence alone is
 left untouched, since the text might not actually be fenced. `Stream`
 cannot wait indefinitely to find out whether a closing fence will ever
@@ -132,7 +132,7 @@ fence stripped and nothing left to strip for the (nonexistent) close.
 
 **Fence-scanner caveat:** the scanner only recognizes a fence by its first
 three bytes (` ``` `) at the start of a line. Text that legitimately starts
-a line with three literal backticks for a reason *other than* a markdown
+a line with three literal backticks for a reason _other than_ a markdown
 code fence (rare, but possible in a model's raw text output) will still be
 treated as a fence marker and stripped — there's no semantic check that the
 surrounding content is actually JSON before removing the fence lines.
@@ -192,7 +192,7 @@ model := ai.WrapModel(baseModel, func(m provider.LanguageModel) provider.Languag
 ```
 
 Here `DefaultSettingsMiddleware` is outermost (assigned last), so it fills
-in defaults on the `Call` *before* `ExtractReasoningMiddleware` sees it,
+in defaults on the `Call` _before_ `ExtractReasoningMiddleware` sees it,
 which in turn passes the call straight through to `baseModel` and then
 post-processes `baseModel`'s response/stream to extract reasoning. In
 general: put settings/defaults middleware outermost so it shapes every

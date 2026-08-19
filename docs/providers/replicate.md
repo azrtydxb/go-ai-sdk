@@ -99,6 +99,7 @@ makes the create call itself synchronous.
 first-class Replicate field — pass them via `ProviderOptions["replicate"]`
 under whatever field name the target model expects (see ProviderOptions
 below).
+
 - **Error body shapes.** Replicate's error responses use either
   `{"detail":"..."}` (e.g. auth errors) or an RFC-7807-style problem object
   with `"title"`/`"detail"`; `errorMessage` in

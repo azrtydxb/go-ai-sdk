@@ -31,47 +31,47 @@ hatch used throughout the pages below) are documented once, generically, in
 ✓ = supported · ✗ = not exposed by this package · ⚠ = supported with a
 caveat, see that provider's page
 
-| Provider | Chat & streaming | Tool calling | Structured output | Embeddings | Reranking | Images | Video | Speech (TTS) | Transcription (STT) |
-|---|---|---|---|---|---|---|---|---|---|
-| [OpenAI](openai.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✓ | ✗ | ✓ | ✓ ⚠⁶ live |
-| [Azure OpenAI](azure.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| [Groq](groq.md) | ✓ | ✓ | ✓ native | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
-| [xAI](xai.md) | ✓ | ✓ | ✓ native | ✗ | ✗ | ✓ ⚠¹ | ✗ | ✗ | ✗ |
-| [DeepSeek](deepseek.md) | ✓ | ✓ | ⚠² `json_object`-only | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| [Cerebras](cerebras.md) | ✓ | ✓ | ✓ native | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| [Together](together.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| [Fireworks](fireworks.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| [Perplexity](perplexity.md) | ✓ | ⚠³ no live tools | ✓ native | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| [Moonshot](moonshot.md) | ✓ | ✓ | ✓ native | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| [Qwen](qwen.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| [MiniMax](minimax.md) | ✓ | ✓ | ✓ native | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| [DeepInfra](deepinfra.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| [Hugging Face](huggingface.md) | ✓ | ✓ | ⚠⁵ tool-mode | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| [Baseten](baseten.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| [LM Studio](lmstudio.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| [NVIDIA NIM](nvidia.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| [Vercel AI Gateway](gateway.md) | ✓ | ✓ | ⚠⁵ tool-mode | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| [Mistral](mistral.md) | ✓ | ✓ | ⚠⁴ schema dropped | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| [Cohere](cohere.md) | ✓ | ✓ | ✓ native | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ |
-| [Voyage](voyage.md) | ✗ | ✗ | ✗ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ |
-| [Mixedbread](mixedbread.md) | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ |
-| [ElevenLabs](elevenlabs.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ |
-| [Anthropic](anthropic.md) | ✓ | ✓ | ⚠⁵ tool-mode | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| [Google](google.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ |
-| [Vertex AI](vertex.md) | ✓ | ✓ | ✓ native | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ |
-| [Amazon Bedrock](bedrock.md) | ✓ | ✓ | ⚠⁵ tool-mode | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| [fal](fal.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✗ | ✗ |
-| [Replicate](replicate.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✗ | ✗ |
-| [Luma](luma.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✗ | ✗ |
-| [Deepgram](deepgram.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ ⚠⁶ live |
-| [LMNT](lmnt.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
-| [Hume](hume.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
-| [AssemblyAI](assemblyai.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
-| [Gladia](gladia.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
-| [Rev.ai](revai.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
-| [Cartesia](cartesia.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
-| [Prodia](prodia.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ |
-| [Black Forest Labs](bfl.md) | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ |
+| Provider                        | Chat & streaming | Tool calling     | Structured output     | Embeddings | Reranking | Images | Video | Speech (TTS) | Transcription (STT) |
+| ------------------------------- | ---------------- | ---------------- | --------------------- | ---------- | --------- | ------ | ----- | ------------ | ------------------- |
+| [OpenAI](openai.md)             | ✓                | ✓                | ✓ native              | ✓          | ✗         | ✓      | ✗     | ✓            | ✓ ⚠⁶ live           |
+| [Azure OpenAI](azure.md)        | ✓                | ✓                | ✓ native              | ✓          | ✗         | ✗      | ✗     | ✗            | ✗                   |
+| [Groq](groq.md)                 | ✓                | ✓                | ✓ native              | ✗          | ✗         | ✗      | ✗     | ✗            | ✓                   |
+| [xAI](xai.md)                   | ✓                | ✓                | ✓ native              | ✗          | ✗         | ✓ ⚠¹   | ✗     | ✗            | ✗                   |
+| [DeepSeek](deepseek.md)         | ✓                | ✓                | ⚠² `json_object`-only | ✗          | ✗         | ✗      | ✗     | ✗            | ✗                   |
+| [Cerebras](cerebras.md)         | ✓                | ✓                | ✓ native              | ✗          | ✗         | ✗      | ✗     | ✗            | ✗                   |
+| [Together](together.md)         | ✓                | ✓                | ✓ native              | ✓          | ✗         | ✗      | ✗     | ✗            | ✗                   |
+| [Fireworks](fireworks.md)       | ✓                | ✓                | ✓ native              | ✓          | ✗         | ✗      | ✗     | ✗            | ✗                   |
+| [Perplexity](perplexity.md)     | ✓                | ⚠³ no live tools | ✓ native              | ✗          | ✗         | ✗      | ✗     | ✗            | ✗                   |
+| [Moonshot](moonshot.md)         | ✓                | ✓                | ✓ native              | ✗          | ✗         | ✗      | ✗     | ✗            | ✗                   |
+| [Qwen](qwen.md)                 | ✓                | ✓                | ✓ native              | ✓          | ✗         | ✗      | ✗     | ✗            | ✗                   |
+| [MiniMax](minimax.md)           | ✓                | ✓                | ✓ native              | ✗          | ✗         | ✗      | ✗     | ✗            | ✗                   |
+| [DeepInfra](deepinfra.md)       | ✓                | ✓                | ✓ native              | ✓          | ✗         | ✗      | ✗     | ✗            | ✗                   |
+| [Hugging Face](huggingface.md)  | ✓                | ✓                | ⚠⁵ tool-mode          | ✗          | ✗         | ✗      | ✗     | ✗            | ✗                   |
+| [Baseten](baseten.md)           | ✓                | ✓                | ✓ native              | ✓          | ✗         | ✗      | ✗     | ✗            | ✗                   |
+| [LM Studio](lmstudio.md)        | ✓                | ✓                | ✓ native              | ✓          | ✗         | ✗      | ✗     | ✗            | ✗                   |
+| [NVIDIA NIM](nvidia.md)         | ✓                | ✓                | ✓ native              | ✓          | ✗         | ✗      | ✗     | ✗            | ✗                   |
+| [Vercel AI Gateway](gateway.md) | ✓                | ✓                | ⚠⁵ tool-mode          | ✓          | ✗         | ✗      | ✗     | ✗            | ✗                   |
+| [Mistral](mistral.md)           | ✓                | ✓                | ⚠⁴ schema dropped     | ✓          | ✗         | ✗      | ✗     | ✗            | ✗                   |
+| [Cohere](cohere.md)             | ✓                | ✓                | ✓ native              | ✓          | ✓         | ✗      | ✗     | ✗            | ✗                   |
+| [Voyage](voyage.md)             | ✗                | ✗                | ✗                     | ✓          | ✓         | ✗      | ✗     | ✗            | ✗                   |
+| [Mixedbread](mixedbread.md)     | ✗                | ✗                | ✗                     | ✗          | ✓         | ✗      | ✗     | ✗            | ✗                   |
+| [ElevenLabs](elevenlabs.md)     | ✗                | ✗                | ✗                     | ✗          | ✗         | ✗      | ✗     | ✓            | ✓                   |
+| [Anthropic](anthropic.md)       | ✓                | ✓                | ⚠⁵ tool-mode          | ✗          | ✗         | ✗      | ✗     | ✗            | ✗                   |
+| [Google](google.md)             | ✓                | ✓                | ✓ native              | ✓          | ✗         | ✓      | ✗     | ✗            | ✗                   |
+| [Vertex AI](vertex.md)          | ✓                | ✓                | ✓ native              | ✓          | ✗         | ✓      | ✗     | ✗            | ✗                   |
+| [Amazon Bedrock](bedrock.md)    | ✓                | ✓                | ⚠⁵ tool-mode          | ✓          | ✗         | ✗      | ✗     | ✗            | ✗                   |
+| [fal](fal.md)                   | ✗                | ✗                | ✗                     | ✗          | ✗         | ✓      | ✓     | ✗            | ✗                   |
+| [Replicate](replicate.md)       | ✗                | ✗                | ✗                     | ✗          | ✗         | ✓      | ✓     | ✗            | ✗                   |
+| [Luma](luma.md)                 | ✗                | ✗                | ✗                     | ✗          | ✗         | ✓      | ✓     | ✗            | ✗                   |
+| [Deepgram](deepgram.md)         | ✗                | ✗                | ✗                     | ✗          | ✗         | ✗      | ✗     | ✗            | ✓ ⚠⁶ live           |
+| [LMNT](lmnt.md)                 | ✗                | ✗                | ✗                     | ✗          | ✗         | ✗      | ✗     | ✓            | ✗                   |
+| [Hume](hume.md)                 | ✗                | ✗                | ✗                     | ✗          | ✗         | ✗      | ✗     | ✓            | ✗                   |
+| [AssemblyAI](assemblyai.md)     | ✗                | ✗                | ✗                     | ✗          | ✗         | ✗      | ✗     | ✗            | ✓                   |
+| [Gladia](gladia.md)             | ✗                | ✗                | ✗                     | ✗          | ✗         | ✗      | ✗     | ✗            | ✓                   |
+| [Rev.ai](revai.md)              | ✗                | ✗                | ✗                     | ✗          | ✗         | ✗      | ✗     | ✗            | ✓                   |
+| [Cartesia](cartesia.md)         | ✗                | ✗                | ✗                     | ✗          | ✗         | ✗      | ✗     | ✓            | ✗                   |
+| [Prodia](prodia.md)             | ✗                | ✗                | ✗                     | ✗          | ✗         | ✓      | ✗     | ✗            | ✗                   |
+| [Black Forest Labs](bfl.md)     | ✗                | ✗                | ✗                     | ✗          | ✗         | ✓      | ✗     | ✗            | ✗                   |
 
 Video (`ai.GenerateVideo`, `provider.VideoModel`) is Luma/fal/Replicate
 this wave — see [Media § GenerateVideo](../core/media.md#generatevideo).
@@ -135,47 +135,47 @@ for the full per-provider mapping table.
 
 ## Construction at a glance
 
-| Provider | Env var | Default base URL | Auth |
-|---|---|---|---|
-| [OpenAI](openai.md) | `OPENAI_API_KEY` | `https://api.openai.com/v1` | `Authorization: Bearer` |
-| [Azure OpenAI](azure.md) | `AZURE_API_KEY` (+ `AZURE_RESOURCE_NAME`) | derived from resource name | `api-key` header |
-| [Groq](groq.md) | `GROQ_API_KEY` | `https://api.groq.com/openai/v1` | `Authorization: Bearer` |
-| [xAI](xai.md) | `XAI_API_KEY` | `https://api.x.ai/v1` | `Authorization: Bearer` |
-| [DeepSeek](deepseek.md) | `DEEPSEEK_API_KEY` | `https://api.deepseek.com/v1` | `Authorization: Bearer` |
-| [Cerebras](cerebras.md) | `CEREBRAS_API_KEY` | `https://api.cerebras.ai/v1` | `Authorization: Bearer` |
-| [Together](together.md) | `TOGETHER_AI_API_KEY` | `https://api.together.xyz/v1` | `Authorization: Bearer` |
-| [Fireworks](fireworks.md) | `FIREWORKS_API_KEY` | `https://api.fireworks.ai/inference/v1` | `Authorization: Bearer` |
-| [Perplexity](perplexity.md) | `PERPLEXITY_API_KEY` | `https://api.perplexity.ai` | `Authorization: Bearer` |
-| [Moonshot](moonshot.md) | `MOONSHOT_API_KEY` | `https://api.moonshot.ai/v1` | `Authorization: Bearer` |
-| [Qwen](qwen.md) | `DASHSCOPE_API_KEY` | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | `Authorization: Bearer` |
-| [MiniMax](minimax.md) | `MINIMAX_API_KEY` | `https://api.minimax.io/v1` | `Authorization: Bearer` |
-| [DeepInfra](deepinfra.md) | `DEEPINFRA_API_KEY` | `https://api.deepinfra.com/v1/openai` | `Authorization: Bearer` |
-| [Hugging Face](huggingface.md) | `HF_TOKEN` | `https://router.huggingface.co/v1` | `Authorization: Bearer` |
-| [Baseten](baseten.md) | `BASETEN_API_KEY` | `https://inference.baseten.co/v1` | `Authorization: Bearer` |
-| [LM Studio](lmstudio.md) | `LMSTUDIO_API_KEY` (optional; local server needs none) | `http://localhost:1234/v1` | `Authorization: Bearer` (ignored by LM Studio) |
-| [NVIDIA NIM](nvidia.md) | `NVIDIA_API_KEY` | `https://integrate.api.nvidia.com/v1` | `Authorization: Bearer` |
-| [Vercel AI Gateway](gateway.md) | `AI_GATEWAY_API_KEY` | `https://ai-gateway.vercel.sh/v1` | `Authorization: Bearer` |
-| [Mistral](mistral.md) | `MISTRAL_API_KEY` | `https://api.mistral.ai/v1` | `Authorization: Bearer` |
-| [Cohere](cohere.md) | `COHERE_API_KEY` | `https://api.cohere.com/v2` | `Authorization: Bearer` |
-| [Voyage](voyage.md) | `VOYAGE_API_KEY` | `https://api.voyageai.com/v1` | `Authorization: Bearer` |
-| [Mixedbread](mixedbread.md) | `MXBAI_API_KEY` | `https://api.mixedbread.com/v1` | `Authorization: Bearer` |
-| [ElevenLabs](elevenlabs.md) | `ELEVENLABS_API_KEY` | `https://api.elevenlabs.io` | `xi-api-key` header |
-| [Anthropic](anthropic.md) | `ANTHROPIC_API_KEY` | `https://api.anthropic.com` | `x-api-key` + `anthropic-version` headers |
-| [Google](google.md) | `GOOGLE_GENERATIVE_AI_API_KEY` | `https://generativelanguage.googleapis.com/v1beta` | `x-goog-api-key` header |
-| [Vertex AI](vertex.md) | `GOOGLE_VERTEX_PROJECT` / `GOOGLE_VERTEX_LOCATION` / `GOOGLE_APPLICATION_CREDENTIALS` | derived from project/location | OAuth2 bearer (service account or `WithTokenSource`) |
-| [Amazon Bedrock](bedrock.md) | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` / `AWS_REGION` | derived from region | AWS SigV4 |
-| [fal](fal.md) | `FAL_API_KEY` (falls back to `FAL_KEY`) | `https://fal.run` | `Authorization: Key` header |
-| [Replicate](replicate.md) | `REPLICATE_API_TOKEN` | `https://api.replicate.com` | `Authorization: Bearer` |
-| [Luma](luma.md) | `LUMA_API_KEY` | `https://api.lumalabs.ai` | `Authorization: Bearer` |
-| [Deepgram](deepgram.md) | `DEEPGRAM_API_KEY` | `https://api.deepgram.com` | `Authorization: Token` header |
-| [LMNT](lmnt.md) | `LMNT_API_KEY` | `https://api.lmnt.com` | `X-API-Key` header |
-| [Hume](hume.md) | `HUME_API_KEY` | `https://api.hume.ai` | `X-Hume-Api-Key` header |
-| [AssemblyAI](assemblyai.md) | `ASSEMBLYAI_API_KEY` | `https://api.assemblyai.com` | `authorization` header (no `Bearer` prefix) |
-| [Gladia](gladia.md) | `GLADIA_API_KEY` | `https://api.gladia.io` | `x-gladia-key` header |
-| [Rev.ai](revai.md) | `REVAI_API_KEY` (falls back to `REV_AI_API_KEY`) | `https://api.rev.ai` | `Authorization: Bearer` header |
-| [Cartesia](cartesia.md) | `CARTESIA_API_KEY` | `https://api.cartesia.ai` | `Authorization: Bearer` + `Cartesia-Version` header |
-| [Prodia](prodia.md) | `PRODIA_API_KEY` | `https://inference.prodia.com/v2` | `Authorization: Bearer` |
-| [Black Forest Labs](bfl.md) | `BFL_API_KEY` | `https://api.bfl.ai` | `x-key` header |
+| Provider                        | Env var                                                                               | Default base URL                                         | Auth                                                 |
+| ------------------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------------------- | ---------------------------------------------------- |
+| [OpenAI](openai.md)             | `OPENAI_API_KEY`                                                                      | `https://api.openai.com/v1`                              | `Authorization: Bearer`                              |
+| [Azure OpenAI](azure.md)        | `AZURE_API_KEY` (+ `AZURE_RESOURCE_NAME`)                                             | derived from resource name                               | `api-key` header                                     |
+| [Groq](groq.md)                 | `GROQ_API_KEY`                                                                        | `https://api.groq.com/openai/v1`                         | `Authorization: Bearer`                              |
+| [xAI](xai.md)                   | `XAI_API_KEY`                                                                         | `https://api.x.ai/v1`                                    | `Authorization: Bearer`                              |
+| [DeepSeek](deepseek.md)         | `DEEPSEEK_API_KEY`                                                                    | `https://api.deepseek.com/v1`                            | `Authorization: Bearer`                              |
+| [Cerebras](cerebras.md)         | `CEREBRAS_API_KEY`                                                                    | `https://api.cerebras.ai/v1`                             | `Authorization: Bearer`                              |
+| [Together](together.md)         | `TOGETHER_AI_API_KEY`                                                                 | `https://api.together.xyz/v1`                            | `Authorization: Bearer`                              |
+| [Fireworks](fireworks.md)       | `FIREWORKS_API_KEY`                                                                   | `https://api.fireworks.ai/inference/v1`                  | `Authorization: Bearer`                              |
+| [Perplexity](perplexity.md)     | `PERPLEXITY_API_KEY`                                                                  | `https://api.perplexity.ai`                              | `Authorization: Bearer`                              |
+| [Moonshot](moonshot.md)         | `MOONSHOT_API_KEY`                                                                    | `https://api.moonshot.ai/v1`                             | `Authorization: Bearer`                              |
+| [Qwen](qwen.md)                 | `DASHSCOPE_API_KEY`                                                                   | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | `Authorization: Bearer`                              |
+| [MiniMax](minimax.md)           | `MINIMAX_API_KEY`                                                                     | `https://api.minimax.io/v1`                              | `Authorization: Bearer`                              |
+| [DeepInfra](deepinfra.md)       | `DEEPINFRA_API_KEY`                                                                   | `https://api.deepinfra.com/v1/openai`                    | `Authorization: Bearer`                              |
+| [Hugging Face](huggingface.md)  | `HF_TOKEN`                                                                            | `https://router.huggingface.co/v1`                       | `Authorization: Bearer`                              |
+| [Baseten](baseten.md)           | `BASETEN_API_KEY`                                                                     | `https://inference.baseten.co/v1`                        | `Authorization: Bearer`                              |
+| [LM Studio](lmstudio.md)        | `LMSTUDIO_API_KEY` (optional; local server needs none)                                | `http://localhost:1234/v1`                               | `Authorization: Bearer` (ignored by LM Studio)       |
+| [NVIDIA NIM](nvidia.md)         | `NVIDIA_API_KEY`                                                                      | `https://integrate.api.nvidia.com/v1`                    | `Authorization: Bearer`                              |
+| [Vercel AI Gateway](gateway.md) | `AI_GATEWAY_API_KEY`                                                                  | `https://ai-gateway.vercel.sh/v1`                        | `Authorization: Bearer`                              |
+| [Mistral](mistral.md)           | `MISTRAL_API_KEY`                                                                     | `https://api.mistral.ai/v1`                              | `Authorization: Bearer`                              |
+| [Cohere](cohere.md)             | `COHERE_API_KEY`                                                                      | `https://api.cohere.com/v2`                              | `Authorization: Bearer`                              |
+| [Voyage](voyage.md)             | `VOYAGE_API_KEY`                                                                      | `https://api.voyageai.com/v1`                            | `Authorization: Bearer`                              |
+| [Mixedbread](mixedbread.md)     | `MXBAI_API_KEY`                                                                       | `https://api.mixedbread.com/v1`                          | `Authorization: Bearer`                              |
+| [ElevenLabs](elevenlabs.md)     | `ELEVENLABS_API_KEY`                                                                  | `https://api.elevenlabs.io`                              | `xi-api-key` header                                  |
+| [Anthropic](anthropic.md)       | `ANTHROPIC_API_KEY`                                                                   | `https://api.anthropic.com`                              | `x-api-key` + `anthropic-version` headers            |
+| [Google](google.md)             | `GOOGLE_GENERATIVE_AI_API_KEY`                                                        | `https://generativelanguage.googleapis.com/v1beta`       | `x-goog-api-key` header                              |
+| [Vertex AI](vertex.md)          | `GOOGLE_VERTEX_PROJECT` / `GOOGLE_VERTEX_LOCATION` / `GOOGLE_APPLICATION_CREDENTIALS` | derived from project/location                            | OAuth2 bearer (service account or `WithTokenSource`) |
+| [Amazon Bedrock](bedrock.md)    | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` / `AWS_REGION`    | derived from region                                      | AWS SigV4                                            |
+| [fal](fal.md)                   | `FAL_API_KEY` (falls back to `FAL_KEY`)                                               | `https://fal.run`                                        | `Authorization: Key` header                          |
+| [Replicate](replicate.md)       | `REPLICATE_API_TOKEN`                                                                 | `https://api.replicate.com`                              | `Authorization: Bearer`                              |
+| [Luma](luma.md)                 | `LUMA_API_KEY`                                                                        | `https://api.lumalabs.ai`                                | `Authorization: Bearer`                              |
+| [Deepgram](deepgram.md)         | `DEEPGRAM_API_KEY`                                                                    | `https://api.deepgram.com`                               | `Authorization: Token` header                        |
+| [LMNT](lmnt.md)                 | `LMNT_API_KEY`                                                                        | `https://api.lmnt.com`                                   | `X-API-Key` header                                   |
+| [Hume](hume.md)                 | `HUME_API_KEY`                                                                        | `https://api.hume.ai`                                    | `X-Hume-Api-Key` header                              |
+| [AssemblyAI](assemblyai.md)     | `ASSEMBLYAI_API_KEY`                                                                  | `https://api.assemblyai.com`                             | `authorization` header (no `Bearer` prefix)          |
+| [Gladia](gladia.md)             | `GLADIA_API_KEY`                                                                      | `https://api.gladia.io`                                  | `x-gladia-key` header                                |
+| [Rev.ai](revai.md)              | `REVAI_API_KEY` (falls back to `REV_AI_API_KEY`)                                      | `https://api.rev.ai`                                     | `Authorization: Bearer` header                       |
+| [Cartesia](cartesia.md)         | `CARTESIA_API_KEY`                                                                    | `https://api.cartesia.ai`                                | `Authorization: Bearer` + `Cartesia-Version` header  |
+| [Prodia](prodia.md)             | `PRODIA_API_KEY`                                                                      | `https://inference.prodia.com/v2`                        | `Authorization: Bearer`                              |
+| [Black Forest Labs](bfl.md)     | `BFL_API_KEY`                                                                         | `https://api.bfl.ai`                                     | `x-key` header                                       |
 
 ## Provider pages
 
@@ -244,7 +244,7 @@ Face, Baseten, LM Studio, NVIDIA NIM, Vercel AI Gateway) reuse the
 shared, well-exercised `openaicompat` conformance suite (see
 [`internal/openaicompat/compattest`](../../internal/openaicompat/compattest)),
 which lowers their risk relative to the standalone implementations, but they
-are equally unverified against their *live* endpoints. Live verification
+are equally unverified against their _live_ endpoints. Live verification
 against real API keys should happen before relying on any of these in
 production.
 

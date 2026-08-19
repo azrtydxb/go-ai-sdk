@@ -133,7 +133,14 @@ The returned tool's `Name()` is always `"run_code"`. Its `Schema()` is a
 fixed `{"code": string}` shape:
 
 ```json
-{"type":"object","properties":{"code":{"type":"string","description":"The python code to execute."}},"required":["code"],"additionalProperties":false}
+{
+  "type": "object",
+  "properties": {
+    "code": { "type": "string", "description": "The python code to execute." }
+  },
+  "required": ["code"],
+  "additionalProperties": false
+}
 ```
 
 (`<language>` substituted with `Options.Language`, or the default

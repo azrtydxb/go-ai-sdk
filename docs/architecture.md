@@ -60,7 +60,7 @@ load-bearing property, not an oversight: anyone depending on
 `github.com/azrtydxb/go-ai-sdk` for text generation alone pulls in nothing
 beyond the Go standard library.
 
-`contrib/otel` is where a *real* OpenTelemetry bridge (`Bridge`,
+`contrib/otel` is where a _real_ OpenTelemetry bridge (`Bridge`,
 implementing `ai.Telemetry` with GenAI-semconv spans) lives — and it's
 deliberately **its own Go module**
 (`github.com/azrtydxb/go-ai-sdk/contrib/otel`, its own `go.mod`/`go.sum`),
@@ -189,21 +189,21 @@ without special-casing any vendor.
 Every `provider.LanguageModel` implementation should pass the same
 behavioral matrix, run via `providertest.Run(t, providertest.Config{Model,
 ProviderName})`. The philosophy: correctness for a `LanguageModel` isn't
-"does it call the right HTTP endpoint," it's "does the *shape* of what
+"does it call the right HTTP endpoint," it's "does the _shape_ of what
 comes back through the `provider` interfaces match the contract" —
 `Generate`/`Stream` return the unified `Response`/`StreamPart` types,
 regardless of how different the underlying wire format is. `providertest`
 tests exactly that shape, against a fixture HTTP server each provider's
 own test file stands up, keyed off the last user message's text:
 
-| Scenario key | Fixture must return |
-|---|---|
-| `"simple"` | Text `"Hello from <provider>!"`, non-zero usage, `FinishStop` |
-| `"tool"` | One tool call, name `"get_weather"`, args `{"city":"Ghent"}`, `FinishToolCalls` |
+| Scenario key      | Fixture must return                                                                                              |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `"simple"`        | Text `"Hello from <provider>!"`, non-zero usage, `FinishStop`                                                    |
+| `"tool"`          | One tool call, name `"get_weather"`, args `{"city":"Ghent"}`, `FinishToolCalls`                                  |
 | `"stream simple"` | The text `"Hello!"` streamed in ≥2 `TextDelta` chunks, then a single `FinishPart` (`FinishStop`, non-zero usage) |
-| `"stream tool"` | One complete tool call as streamed deltas + a `ToolCallEnd` |
-| `"fail 429"` | HTTP 429 (any body) → `*ai.APICallError{StatusCode: 429, Retryable: true}` |
-| `"fail 400"` | HTTP 400 (any body) → `*ai.APICallError{StatusCode: 400, Retryable: false}` |
+| `"stream tool"`   | One complete tool call as streamed deltas + a `ToolCallEnd`                                                      |
+| `"fail 429"`      | HTTP 429 (any body) → `*ai.APICallError{StatusCode: 429, Retryable: true}`                                       |
+| `"fail 400"`      | HTTP 400 (any body) → `*ai.APICallError{StatusCode: 400, Retryable: false}`                                      |
 
 Plus two scenario-independent subtests: `Cancel` and `Cancel/Stream`,
 asserting a pre-cancelled `context.Context` surfaces `context.Canceled`
@@ -251,7 +251,7 @@ same rules, whether or not `providertest` checks them directly:
   ever ranged over (so a decided-not-to-consume caller doesn't leak the
   underlying HTTP body), mid-iteration, or after `Parts()` has already
   closed the stream itself on natural/abnormal end (making a
-  caller's `Close()` a no-op). `Close` is *not* safe for concurrent use
+  caller's `Close()` a no-op). `Close` is _not_ safe for concurrent use
   with an in-progress `Parts()` iteration from another goroutine — the
   contract assumes one consumer driving the stream, matching every
   `StreamResponse` implementation in this codebase (see
@@ -266,7 +266,7 @@ in sequence to reconstruct state — each carries a complete value
 (`Call`/`Part`/`Source`, or `Reason`+`Usage`) rather than a fragment that
 depends on prior parts to interpret. The proof this matters in practice:
 `ai.SimulateStreamingMiddleware` turns a plain `Generate` response into a
-*synthetic* stream by directly re-emitting these part types straight from
+_synthetic_ stream by directly re-emitting these part types straight from
 `Response.Content` — a `ReasoningDelta` + `ReasoningEnd{Part: rp}` per
 reasoning part, a `ToolCallEnd{Call: tc}` per tool call, one `FinishPart`
 built from `Response.FinishReason`/`Usage` — with no real streaming
@@ -311,7 +311,7 @@ dependent fragments a consumer accumulates — everything else in
    on the scenario keys in the [conformance suite table](#the-conformance-suite-providerprovidertest)
    above, constructs the provider's model pointed at that server, and
    calls `providertest.Run(t, providertest.Config{Model: model,
-   ProviderName: "yourprovider"})`. This is the fastest way to catch a
+ProviderName: "yourprovider"})`. This is the fastest way to catch a
    `StreamResponse` discipline violation before it ships. Add
    provider-specific tests (request shape, provider options merging,
    reasoning, provider metadata) alongside it.

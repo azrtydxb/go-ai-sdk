@@ -25,12 +25,14 @@
 ### Task 1: Extract `internal/openaicompat` + `compattest` fixture; `providers/openai` becomes preset #1
 
 **Files:**
+
 - Create: `internal/openaicompat/openaicompat.go` (Config + constructors), `internal/openaicompat/language_model.go`, `internal/openaicompat/wire.go`, `internal/openaicompat/embedding.go` (moved from `providers/openai/`, renamed package, config-driven)
 - Create: `internal/openaicompat/compattest/compattest.go` (shared fixture server)
 - Modify: `providers/openai/openai.go` (delegate to openaicompat), delete `providers/openai/{language_model,wire,embedding}.go`
 - Test: existing `providers/openai/*_test.go` stay green (adapt imports/visibility only where the move forces it — the integration test and conformance tests are black-box `package openai_test`/`package openai` and must keep passing unmodified in substance)
 
 **Interfaces:**
+
 - Consumes: current `providers/openai` implementation (the code being moved), `provider` types, `ai.NewAPICallError`, `internal/sse`.
 - Produces (used verbatim by Tasks 2–3):
 
@@ -92,21 +94,23 @@ The compattest fixture is extracted from the fixture server currently inside `pr
 ### Task 2: Presets — groq, xai, deepseek, cerebras (no embeddings)
 
 **Files:**
+
 - Create: `providers/groq/groq.go`, `providers/xai/xai.go`, `providers/deepseek/deepseek.go`, `providers/cerebras/cerebras.go`
 - Test: `providers/groq/groq_test.go`, `providers/xai/xai_test.go`, `providers/deepseek/deepseek_test.go`, `providers/cerebras/cerebras_test.go`
 
 **Interfaces:**
+
 - Consumes: `openaicompat.Config`/`NewLanguageModel` (Task 1), `compattest.NewFixtureServer` (Task 1), `providertest.Run`.
 - Produces: four packages each exporting exactly `Option`, `WithAPIKey`, `WithBaseURL`, `WithHTTPClient`, `New`, `(*Provider).Model` — NO `EmbeddingModel` (none of these four offer embeddings).
 
 Preset values (exact):
 
-| Package | Name | API key env | Default BaseURL | NativeJSON |
-|---|---|---|---|---|
-| groq | groq | `GROQ_API_KEY` | `https://api.groq.com/openai/v1` | true |
-| xai | xai | `XAI_API_KEY` | `https://api.x.ai/v1` | true |
-| deepseek | deepseek | `DEEPSEEK_API_KEY` | `https://api.deepseek.com/v1` | true |
-| cerebras | cerebras | `CEREBRAS_API_KEY` | `https://api.cerebras.ai/v1` | true |
+| Package  | Name     | API key env        | Default BaseURL                  | NativeJSON |
+| -------- | -------- | ------------------ | -------------------------------- | ---------- |
+| groq     | groq     | `GROQ_API_KEY`     | `https://api.groq.com/openai/v1` | true       |
+| xai      | xai      | `XAI_API_KEY`      | `https://api.x.ai/v1`            | true       |
+| deepseek | deepseek | `DEEPSEEK_API_KEY` | `https://api.deepseek.com/v1`    | true       |
+| cerebras | cerebras | `CEREBRAS_API_KEY` | `https://api.cerebras.ai/v1`     | true       |
 
 Full template (groq shown; the other three differ only in package name, env var, base URL, and doc comment):
 
@@ -228,20 +232,22 @@ For the auth-header assertion, `compattest.Server` must record headers too — e
 ### Task 3: Presets — together, fireworks (with embeddings), perplexity
 
 **Files:**
+
 - Create: `providers/together/together.go`, `providers/fireworks/fireworks.go`, `providers/perplexity/perplexity.go`
 - Test: `providers/together/together_test.go`, `providers/fireworks/fireworks_test.go`, `providers/perplexity/perplexity_test.go`
 
 **Interfaces:**
+
 - Consumes: same as Task 2.
 - Produces: three packages; together and fireworks additionally export `(*Provider).EmbeddingModel(id string) provider.EmbeddingModel`.
 
 Preset values (exact):
 
-| Package | Name | API key env | Default BaseURL | NativeJSON | EmbedBatch |
-|---|---|---|---|---|---|
-| together | together | `TOGETHER_AI_API_KEY` | `https://api.together.xyz/v1` | true | 100 |
-| fireworks | fireworks | `FIREWORKS_API_KEY` | `https://api.fireworks.ai/inference/v1` | true | 100 |
-| perplexity | perplexity | `PERPLEXITY_API_KEY` | `https://api.perplexity.ai` | true | — (none) |
+| Package    | Name       | API key env           | Default BaseURL                         | NativeJSON | EmbedBatch |
+| ---------- | ---------- | --------------------- | --------------------------------------- | ---------- | ---------- |
+| together   | together   | `TOGETHER_AI_API_KEY` | `https://api.together.xyz/v1`           | true       | 100        |
+| fireworks  | fireworks  | `FIREWORKS_API_KEY`   | `https://api.fireworks.ai/inference/v1` | true       | 100        |
+| perplexity | perplexity | `PERPLEXITY_API_KEY`  | `https://api.perplexity.ai`             | true       | — (none)   |
 
 Same package template as Task 2. For together/fireworks add:
 
@@ -287,14 +293,17 @@ func TestEmbeddings(t *testing.T) {
 ### Task 4: Mistral provider (full implementation)
 
 **Files:**
+
 - Create: `providers/mistral/mistral.go`, `providers/mistral/language_model.go`, `providers/mistral/wire.go`, `providers/mistral/embedding.go`
 - Test: `providers/mistral/mistral_test.go`, `providers/mistral/embedding_test.go`
 
 **Interfaces:**
+
 - Consumes: `provider` types, `ai.NewAPICallError`, `internal/sse`, `providertest.Run`. Structural template: `providers/anthropic` + `providers/openai` (pre-extraction patterns now in `internal/openaicompat` — read both).
 - Produces: `mistral.New(opts ...Option) *Provider` (same Option trio), `Model(id) provider.LanguageModel` (Name "mistral", `Capabilities{NativeJSON: true}`), `EmbeddingModel(id) provider.EmbeddingModel` (MaxBatchSize 32). Key env `MISTRAL_API_KEY`; base default `https://api.mistral.ai/v1`.
 
 Wire mapping (Mistral is close to OpenAI's chat completions but NOT identical — implement standalone, do not reuse openaicompat):
+
 - Request: `POST {base}/chat/completions`, `Authorization: Bearer <key>`. Fields: `model`, `messages`, `tools:[{type:"function",function:{name,description,parameters}}]`, `tool_choice`: `"auto"` | `"none"` | `"any"` (Mistral's word for required) | `{"type":"function","function":{"name":...}}`, `response_format:{"type":"json_object"}` (Mistral has no json_schema mode: for `ResponseFormat.Type == "json"` send `json_object` and IGNORE the schema — add a comment noting the schema is enforced by the ai core's decode, not the wire), `max_tokens` (NOT max_completion_tokens), `temperature`, `top_p`, `stop`, `stream`.
 - Messages: `system` role supported inline; assistant tool calls `tool_calls:[{id,type:"function",function:{name,arguments:<string>}}]`; tool results as `{role:"tool", tool_call_id, name, content:<string>}` — one message per ToolResultPart (name = ToolResultPart.Name; content = JSON-marshaled result; IsError has no slot → comment, openai convention). Image parts: `{"type":"image_url","image_url":{"url":...}}` content array (data URL for inline bytes).
 - Response: `choices[0].message.{content, tool_calls}`; `finish_reason`: `stop`→stop, `length`/`model_length`→length, `tool_calls`→tool-calls, else other; `usage.{prompt_tokens,completion_tokens,total_tokens}`.
@@ -314,14 +323,17 @@ Tests: fixture server speaking the Mistral wire format for the six providertest 
 ### Task 5: Cohere provider (full implementation, v2 API)
 
 **Files:**
+
 - Create: `providers/cohere/cohere.go`, `providers/cohere/language_model.go`, `providers/cohere/wire.go`, `providers/cohere/embedding.go`
 - Test: `providers/cohere/cohere_test.go`, `providers/cohere/embedding_test.go`
 
 **Interfaces:**
+
 - Consumes: same as Task 4.
 - Produces: `cohere.New(opts ...Option) *Provider` (same Option trio), `Model(id)` (Name "cohere", `Capabilities{NativeJSON: true}`), `EmbeddingModel(id)` (MaxBatchSize 96). Key env `COHERE_API_KEY`; base default `https://api.cohere.com/v2`.
 
 Wire mapping (Cohere v2):
+
 - Request: `POST {base}/chat`, `Authorization: Bearer <key>`. Fields: `model`, `messages:[{role:"system"|"user"|"assistant"|"tool",...}]`, `tools:[{type:"function",function:{name,description,parameters}}]`, `response_format:{"type":"json_object","schema":<schema>}` (schema included when provided — Cohere supports it), `max_tokens`, `temperature`, `p` (Cohere's name for top_p), `stop_sequences`, `stream`.
 - Messages: user/system content as string (text parts concatenated; image parts unsupported → return a descriptive error, Cohere v2 chat is text-only in this integration). Assistant tool calls: `{role:"assistant", tool_calls:[{id,type:"function",function:{name,arguments:<string>}}]}`. Tool results: `{role:"tool", tool_call_id, content:<JSON-marshaled result string>}` — one message per ToolResultPart; IsError has no slot → comment.
 - ToolChoice: Cohere v2 has no tool_choice field for auto (default) — `required`/specific-tool are approximated: `ToolChoiceRequired` → send as-is with tools (documented comment: Cohere decides), `ToolChoiceNone` → omit tools, `ToolChoiceTool` → send only that one tool def (closest expressible semantics; comment each decision).
@@ -342,10 +354,12 @@ Tests: fixture server speaking Cohere v2 wire format for the six providertest sc
 ### Task 6: Docs — README provider table + spec roadmap tick
 
 **Files:**
+
 - Modify: `README.md` (feature table gains the nine new providers; roadmap table marks wave 2 shipped; quickstart unchanged)
 - Modify: `docs/superpowers/specs/2026-08-02-go-ai-sdk-design.md` (Provider waves table: annotate wave 2 rows "(shipped)")
 
 **Interfaces:**
+
 - Consumes: the shipped provider list from Tasks 2–5 (exact package paths and embedding support per the tables in Tasks 2–3 and the Produces blocks of Tasks 4–5).
 
 README feature-table facts to encode: language models for all nine; embeddings ONLY for together, fireworks, mistral, cohere (plus existing openai, google); NativeJSON true for all presets and cohere, `json_object`-only for mistral (footnote), tool-mode for anthropic (existing); perplexity footnote: no tool support on the live API.

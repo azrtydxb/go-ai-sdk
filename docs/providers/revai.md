@@ -54,7 +54,7 @@ otherwise unused — pass `""`.
 - **`ProviderOptions` merges into the nested `options` JSON, not the
   top-level request.** Unlike most providers in this SDK, the job-creation
   request has no other body to merge into — the multipart `options` part
-  *is* the job configuration Rev.ai reads — so
+  _is_ the job configuration Rev.ai reads — so
   `call.ProviderOptions["revai"]` is merged into that nested JSON object
   instead of top-level.
 - **Transcript elements come in three types.** Rev.ai's structured

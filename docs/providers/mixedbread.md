@@ -37,8 +37,8 @@ request.
 - **`return_input` is always sent, and always `false`.** Unlike Voyage's/
   Cohere's optional pointer fields, `return_input` is a plain `bool` with no
   `omitempty` — this SDK reconstructs documents from `RerankCall.Documents`
-  + `RankedDocument.Index` rather than relying on Mixedbread echoing the
-  input back, so it always requests `return_input: false`.
+  - `RankedDocument.Index` rather than relying on Mixedbread echoing the
+    input back, so it always requests `return_input: false`.
 - **`score`, not `relevance_score`, on the wire response.** Mixedbread's
   per-result field is named `score`
   (`providers/mixedbread/rerank.go`: `rerankResultWire.Score`), unlike

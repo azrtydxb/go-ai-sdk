@@ -150,7 +150,7 @@ stream, err := ai.StreamTranscribe(context.Background(), ai.StreamTranscribeOpts
 - **`CloseSend`** sends the text frame `{"type":"CloseStream"}` (Deepgram's
   documented end-of-audio signal); idempotent.
 - **Events.** A `Results` message becomes a `TranscriptEvent{Text, Final:
-  is_final, StartSec: start, EndSec: start+duration}`; a message with an
+is_final, StartSec: start, EndSec: start+duration}`; a message with an
   empty transcript is skipped entirely (no event emitted) — **including
   when it carries `is_final:true`** — since Deepgram sends empty-transcript
   results for silence/non-speech audio. A `Metadata` message (Deepgram's

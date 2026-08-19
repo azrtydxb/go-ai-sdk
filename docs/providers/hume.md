@@ -40,7 +40,7 @@ Auth is sent as the `X-Hume-Api-Key` header on every request.
 - **Text is wrapped in a single-element `utterances` array**, not sent as
   a bare `text` field — `providers/hume/speech.go`'s `speechRequest` shape
   is `{"utterances":[{"text":...,"voice":{"name":...},"speed":...}],
-  "format":{"type":...}}`. `SpeechCall.Voice`, when non-empty, becomes
+"format":{"type":...}}`. `SpeechCall.Voice`, when non-empty, becomes
   `utterances[0].voice.name`; an empty `Voice` omits the `voice` field
   entirely (Hume has no SDK-enforced default voice, unlike LMNT/
   ElevenLabs).
