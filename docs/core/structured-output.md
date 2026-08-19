@@ -54,23 +54,23 @@ unset; `SchemaDescription` is optional. `*GenerateObjectResult[T]` gives you
   forced to that tool (`provider.ToolChoiceTool`). The object is decoded
   from that forced tool call's arguments instead of the response text.
 
-| Provider | `Capabilities().NativeJSON` |
-|---|---|
-| OpenAI | true |
-| Anthropic | false (tool mode) |
-| Google | true |
-| Vertex AI | true |
-| Azure OpenAI | true |
-| Amazon Bedrock | false (tool mode) |
-| Groq | true |
-| xAI | true |
-| DeepSeek | true¹ |
-| Cerebras | true |
-| Together AI | true |
-| Fireworks | true |
-| Perplexity | true |
-| Mistral | true² |
-| Cohere | true |
+| Provider       | `Capabilities().NativeJSON` |
+| -------------- | --------------------------- |
+| OpenAI         | true                        |
+| Anthropic      | false (tool mode)           |
+| Google         | true                        |
+| Vertex AI      | true                        |
+| Azure OpenAI   | true                        |
+| Amazon Bedrock | false (tool mode)           |
+| Groq           | true                        |
+| xAI            | true                        |
+| DeepSeek       | true¹                       |
+| Cerebras       | true                        |
+| Together AI    | true                        |
+| Fireworks      | true                        |
+| Perplexity     | true                        |
+| Mistral        | true²                       |
+| Cohere         | true                        |
 
 ¹ ² footnotes below. (ElevenLabs has no `LanguageModel` — it's a
 speech/transcription-only provider, so it doesn't apply here; see
@@ -108,7 +108,7 @@ produced, which is often useful for debugging prompts.
 is a single-use `iter.Seq[T]`: each yield is a new snapshot of `T`, decoded
 from the accumulated JSON seen so far (repaired via a partial-JSON
 completer, since the accumulated text is usually not yet valid JSON) once
-it successfully unmarshals into `T` *and* differs from the last snapshot
+it successfully unmarshals into `T` _and_ differs from the last snapshot
 yielded.
 
 ```go
@@ -136,9 +136,9 @@ fmt.Println("final:", final.Name)
 ```
 
 - **`Err()`** reflects only a mid-stream provider error; a `*RetryError`
-  from a failure to *start* the stream is returned by `StreamObject`
+  from a failure to _start_ the stream is returned by `StreamObject`
   itself, not surfaced through `Err()`.
-- **`Final()`** returns the last valid decode of the *complete* accumulated
+- **`Final()`** returns the last valid decode of the _complete_ accumulated
   stream text (fences stripped, but not partial-repaired — the finished
   stream is expected to be complete JSON). It's only meaningful after
   `Partials()` has been iterated to completion: calling it before
@@ -160,12 +160,12 @@ decode a model's response into a typed Go value using the native-JSON/
 tool-mode strategy above — they share the same fallback logic and the same
 `*ai.NoObjectGeneratedError` failure mode. Which to reach for:
 
-- **`GenerateObject[T]`/`StreamObject[T]`** — the call's *only* output is a
+- **`GenerateObject[T]`/`StreamObject[T]`** — the call's _only_ output is a
   structured object; no text response, no tool calls of your own, and (with
   `StreamObject`) you want incremental `Partials()` as the object accumulates.
 - **`GenerateTextOpts.Output`** — you're already using `GenerateText`/
   `StreamText` (possibly with your own `Tools` and a multi-step tool loop)
-  and want the *final* step's text decoded into a Go value at the end,
+  and want the _final_ step's text decoded into a Go value at the end,
   without a second call. It adds four shapes `GenerateObject` doesn't have
   on its own (`OutputArray[T]`, `OutputChoice`, `OutputJSON`, and reusing
   whatever tool loop already ran); `StreamText` honors it too, delivering
@@ -187,4 +187,4 @@ model with no other way to constrain JSON output —
 - [`ai/errors.go`](../../ai/errors.go)
 - [`provider/model.go`](../../provider/model.go) (`Capabilities`)
 - [`internal/openaicompat/openaicompat.go`](../../internal/openaicompat/openaicompat.go) (`JSONObjectOnly`)
-- [`providers/deepseek/deepseek.go`](../../providers/deepseek/deepseek.go), [`providers/mistral/wire.go`](../../providers/mistral/wire.go)
+- [`providers/deepseek/deepseek.go`](../../providers/deepseek/deepseek.go), [`providers/mistral/mistral.go`](../../providers/mistral/mistral.go)

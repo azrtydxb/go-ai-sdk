@@ -21,13 +21,13 @@ built `provider.*Call`; `End` fires once, after the final attempt, with
 the SAME error the function itself returns (retry exhaustion already
 translated to `*ai.RetryError`) — the response is `nil` on error.
 
-| Function | `Opts` field | Start | End |
-|---|---|---|---|
-| `GenerateImage` | `GenerateImageOpts` | `OnImageStart(call provider.ImageCall)` | `OnImageEnd(resp *provider.ImageResponse, err error)` |
-| `GenerateVideo` | `GenerateVideoOpts` | `OnVideoStart(call provider.VideoCall)` | `OnVideoEnd(resp *provider.VideoResponse, err error)` |
-| `GenerateSpeech` | `GenerateSpeechOpts` | `OnSpeechStart(call provider.SpeechCall)` | `OnSpeechEnd(resp *provider.SpeechResponse, err error)` |
-| `Transcribe` | `TranscribeOpts` | `OnTranscribeStart(call provider.TranscriptionCall)` | `OnTranscribeEnd(resp *provider.TranscriptionResponse, err error)` |
-| `Translate` | `TranslateOpts` | `OnTranslateStart(call provider.TranslationCall)` | `OnTranslateEnd(resp *provider.TranslationResponse, err error)` |
+| Function         | `Opts` field         | Start                                                | End                                                                |
+| ---------------- | -------------------- | ---------------------------------------------------- | ------------------------------------------------------------------ |
+| `GenerateImage`  | `GenerateImageOpts`  | `OnImageStart(call provider.ImageCall)`              | `OnImageEnd(resp *provider.ImageResponse, err error)`              |
+| `GenerateVideo`  | `GenerateVideoOpts`  | `OnVideoStart(call provider.VideoCall)`              | `OnVideoEnd(resp *provider.VideoResponse, err error)`              |
+| `GenerateSpeech` | `GenerateSpeechOpts` | `OnSpeechStart(call provider.SpeechCall)`            | `OnSpeechEnd(resp *provider.SpeechResponse, err error)`            |
+| `Transcribe`     | `TranscribeOpts`     | `OnTranscribeStart(call provider.TranscriptionCall)` | `OnTranscribeEnd(resp *provider.TranscriptionResponse, err error)` |
+| `Translate`      | `TranslateOpts`      | `OnTranslateStart(call provider.TranslationCall)`    | `OnTranslateEnd(resp *provider.TranslationResponse, err error)`    |
 
 `ai.StreamTranscribe` has no callback pair of its own — it has no retry to
 bracket (see [StreamTranscribe](#streamtranscribe) below).
@@ -77,17 +77,17 @@ Image providers split into two families, and each family accepts only one
 of `Size`/`AspectRatio` — setting the wrong one returns an error rather
 than being silently ignored:
 
-| Provider | Accepts | Rejects |
-|---|---|---|
-| OpenAI | `Size` (e.g. `"1024x1024"`) | `AspectRatio` |
-| xAI | `Size` | `AspectRatio` |
-| Google (Imagen) | `AspectRatio` (e.g. `"16:9"`) | `Size` |
-| Vertex AI (Imagen) | `AspectRatio` | `Size` |
-| fal | `Size` | `AspectRatio` |
-| Replicate | `AspectRatio` | `Size` |
-| Luma | `AspectRatio` | `Size` |
-| Prodia | `Size` | (no `AspectRatio` field; simply unused) |
-| Black Forest Labs | `Size` | (no `AspectRatio` field; simply unused) |
+| Provider           | Accepts                       | Rejects                                 |
+| ------------------ | ----------------------------- | --------------------------------------- |
+| OpenAI             | `Size` (e.g. `"1024x1024"`)   | `AspectRatio`                           |
+| xAI                | `Size`                        | `AspectRatio`                           |
+| Google (Imagen)    | `AspectRatio` (e.g. `"16:9"`) | `Size`                                  |
+| Vertex AI (Imagen) | `AspectRatio`                 | `Size`                                  |
+| fal                | `Size`                        | `AspectRatio`                           |
+| Replicate          | `AspectRatio`                 | `Size`                                  |
+| Luma               | `AspectRatio`                 | `Size`                                  |
+| Prodia             | `Size`                        | (no `AspectRatio` field; simply unused) |
+| Black Forest Labs  | `Size`                        | (no `AspectRatio` field; simply unused) |
 
 OpenAI and xAI both go through the shared `openaicompat` base and its
 `images/generations` wire format, which has no aspect-ratio parameter; a
@@ -153,11 +153,11 @@ past that window).
 
 ### Provider matrix
 
-| Provider | Flow | Notes |
-|---|---|---|
-| [Luma](../providers/luma.md) | Asynchronous: `POST /dream-machine/v1/generations` then poll `GET .../generations/{id}` until `"completed"`/`"failed"` | `DurationSec` maps to Luma's `"5s"`-style duration string; same poll-until-terminal shape as Luma's image endpoint. |
-| [fal](../providers/fal.md) | Synchronous: `POST {base}/{modelID}` | Only `Prompt` and `AspectRatio` (`"aspect_ratio"`) are first-class wire fields — fal's video model catalog has no shared field name for resolution/duration, so those are `ProviderOptions`-only. |
-| [Replicate](../providers/replicate.md) | Synchronous (`Prefer: wait`): `POST /v1/models/{id}/predictions` | `Prompt`/`AspectRatio` nest under `input`, same as Replicate's image endpoint; `ProviderOptions` merges into `input` too. |
+| Provider                               | Flow                                                                                                                   | Notes                                                                                                                                                                                             |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Luma](../providers/luma.md)           | Asynchronous: `POST /dream-machine/v1/generations` then poll `GET .../generations/{id}` until `"completed"`/`"failed"` | `DurationSec` maps to Luma's `"5s"`-style duration string; same poll-until-terminal shape as Luma's image endpoint.                                                                               |
+| [fal](../providers/fal.md)             | Synchronous: `POST {base}/{modelID}`                                                                                   | Only `Prompt` and `AspectRatio` (`"aspect_ratio"`) are first-class wire fields — fal's video model catalog has no shared field name for resolution/duration, so those are `ProviderOptions`-only. |
+| [Replicate](../providers/replicate.md) | Synchronous (`Prefer: wait`): `POST /v1/models/{id}/predictions`                                                       | `Prompt`/`AspectRatio` nest under `input`, same as Replicate's image endpoint; `ProviderOptions` merges into `input` too.                                                                         |
 
 ### Server-returned result-URL fetches (SSRF hardening)
 
@@ -191,7 +191,7 @@ fal/Replicate/Luma) applies:
   hostname resolves to more than one vetted IP, the dialer tries them in
   order and fails over to the next on a dial error, rather than only ever
   attempting the first — while still rejecting the whole resolution
-  up front if *any* resolved IP is blocked.
+  up front if _any_ resolved IP is blocked.
 - **BFL credential scoping**: BFL's API key is attached only to poll URLs
   that share the configured base URL's registrable domain (e.g.
   `api.us1.bfl.ai` and `api.bfl.ai` both under `bfl.ai`) — a poll URL
@@ -236,13 +236,13 @@ fmt.Println(result.MediaType) // "audio/mpeg"
 
 ### Voice and format defaults
 
-| Provider | Default voice | Default `OutputFormat` | Notes |
-|---|---|---|---|
-| OpenAI | `"alloy"` | `"mp3"` (→ `audio/mpeg`) | `response_format` values `mp3`/`wav`/`opus`/`aac`/`flac`/`pcm` map to their matching MIME type; any other value returned by the API falls back to `audio/mpeg`. |
-| ElevenLabs | voice id `21m00Tcm4TlvDq8ikWAM` ("Rachel") | `"mp3"` → `mp3_44100_128` (`audio/mpeg`) | `"pcm"` maps to `pcm_44100` (`audio/pcm`); `"ulaw"` maps to `ulaw_8000` (`audio/basic`); any other value is passed through verbatim as the `output_format` query parameter, with `MediaType` reported as `application/octet-stream`. `Language` is sent as `language_code`, which ElevenLabs only accepts for turbo/flash v2.5 models — other models may reject it server-side. |
-| LMNT | `"leah"` | `"mp3"` (→ `audio/mpeg`); `"wav"` → `audio/wav`; other → `application/octet-stream` | `Language` and `Speed` pass straight through to the wire request with no rewriting. See [LMNT](../providers/lmnt.md). |
-| Hume | none (an empty `Voice` omits the field rather than substituting a default) | `"mp3"` (→ `audio/mpeg`); `"wav"` → `audio/wav`; `"pcm"` → `audio/pcm`; other → `application/octet-stream` | `Language` is silently ignored — Hume's wire format has no equivalent field. Response audio is base64-encoded JSON, not a raw binary body. See [Hume](../providers/hume.md). |
-| Cartesia | none — `Voice` is **required**, a hard error before any HTTP call | `"mp3"` (→ `audio/mpeg`, encoding `mp3`); `"wav"` → `audio/wav` (encoding `pcm_s16le`); other → `application/octet-stream` (encoding `pcm_f32le`), always at a fixed 44100 sample rate | Unlike every other provider on this page, an empty `Voice` is an error (`"cartesia: Voice is required"`), not a substituted default. `Language` passes straight through with no rewriting. See [Cartesia](../providers/cartesia.md). |
+| Provider   | Default voice                                                              | Default `OutputFormat`                                                                                                                                                                 | Notes                                                                                                                                                                                                                                                                                                                                                                           |
+| ---------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OpenAI     | `"alloy"`                                                                  | `"mp3"` (→ `audio/mpeg`)                                                                                                                                                               | `response_format` values `mp3`/`wav`/`opus`/`aac`/`flac`/`pcm` map to their matching MIME type; any other value returned by the API falls back to `audio/mpeg`.                                                                                                                                                                                                                 |
+| ElevenLabs | voice id `21m00Tcm4TlvDq8ikWAM` ("Rachel")                                 | `"mp3"` → `mp3_44100_128` (`audio/mpeg`)                                                                                                                                               | `"pcm"` maps to `pcm_44100` (`audio/pcm`); `"ulaw"` maps to `ulaw_8000` (`audio/basic`); any other value is passed through verbatim as the `output_format` query parameter, with `MediaType` reported as `application/octet-stream`. `Language` is sent as `language_code`, which ElevenLabs only accepts for turbo/flash v2.5 models — other models may reject it server-side. |
+| LMNT       | `"leah"`                                                                   | `"mp3"` (→ `audio/mpeg`); `"wav"` → `audio/wav`; other → `application/octet-stream`                                                                                                    | `Language` and `Speed` pass straight through to the wire request with no rewriting. See [LMNT](../providers/lmnt.md).                                                                                                                                                                                                                                                           |
+| Hume       | none (an empty `Voice` omits the field rather than substituting a default) | `"mp3"` (→ `audio/mpeg`); `"wav"` → `audio/wav`; `"pcm"` → `audio/pcm`; other → `application/octet-stream`                                                                             | `Language` is silently ignored — Hume's wire format has no equivalent field. Response audio is base64-encoded JSON, not a raw binary body. See [Hume](../providers/hume.md).                                                                                                                                                                                                    |
+| Cartesia   | none — `Voice` is **required**, a hard error before any HTTP call          | `"mp3"` (→ `audio/mpeg`, encoding `mp3`); `"wav"` → `audio/wav` (encoding `pcm_s16le`); other → `application/octet-stream` (encoding `pcm_f32le`), always at a fixed 44100 sample rate | Unlike every other provider on this page, an empty `Voice` is an error (`"cartesia: Voice is required"`), not a substituted default. `Language` passes straight through with no rewriting. See [Cartesia](../providers/cartesia.md).                                                                                                                                            |
 
 OpenAI, ElevenLabs, and LMNT require a voice; when `Voice` is left empty,
 the SDK substitutes the default above rather than sending an empty value.
@@ -277,15 +277,15 @@ for _, seg := range result.Segments {
 
 <!-- Canonical capability matrix lives in docs/providers/README.md; README.md and this table summarize it. Update all three together. -->
 
-| Provider | Response shape | Segments | Notes |
-|---|---|---|---|
-| OpenAI | `verbose_json` (whisper-1 and similar), `json` (gpt-4o-\* models) | Only with `verbose_json` | Models whose ID contains `"gpt-4o"` reject `verbose_json`, so those get plain `json` (text only, no `Segments`/`Language`/`DurationSec`); everything else gets `verbose_json`. |
-| Groq | Same `openaicompat` base as OpenAI | Same rule as OpenAI | Groq's transcription models go through the identical wire format and `gpt-4o` substring check. |
-| ElevenLabs | word-level timestamps | Synthesized from `type == "word"` entries | `DurationSec` is derived as the last segment's `EndSec` (ElevenLabs doesn't report a duration field directly); `Language` comes from `language_code`. |
-| Deepgram | `/v1/listen` JSON response, word-level timestamps | From `results.channels[0].alternatives[0].words` | Request body is the raw audio bytes, not multipart or JSON — the only transcription provider in this SDK that doesn't upload a file part. `Text` prefers `punctuated_word` over `word`. See [Deepgram](../providers/deepgram.md). |
-| AssemblyAI | Async: upload → create → poll `GET /v2/transcript/{id}` | From the poll response's `words[]` (ms → sec) | Three-request flow with `WithPollInterval`-controlled, ctx-aware polling. See [AssemblyAI](../providers/assemblyai.md). |
-| Gladia | Async: upload → create → poll `GET /v2/pre-recorded/{id}` | From `result.transcription.utterances[]` (already in seconds) | Same three-request async shape as AssemblyAI; `DurationSec` comes from `result.metadata.audio_duration`. See [Gladia](../providers/gladia.md). |
-| Rev.ai | Async: multipart create → poll → fetch structured transcript | From `monologues[].elements[]` where `type == "text"` | Job options are multipart, not JSON; `"unknown"`-type transcript elements (unintelligible speech) are omitted from both `Text` and `Segments`. See [Rev.ai](../providers/revai.md). |
+| Provider   | Response shape                                                    | Segments                                                      | Notes                                                                                                                                                                                                                             |
+| ---------- | ----------------------------------------------------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OpenAI     | `verbose_json` (whisper-1 and similar), `json` (gpt-4o-\* models) | Only with `verbose_json`                                      | Models whose ID contains `"gpt-4o"` reject `verbose_json`, so those get plain `json` (text only, no `Segments`/`Language`/`DurationSec`); everything else gets `verbose_json`.                                                    |
+| Groq       | Same `openaicompat` base as OpenAI                                | Same rule as OpenAI                                           | Groq's transcription models go through the identical wire format and `gpt-4o` substring check.                                                                                                                                    |
+| ElevenLabs | word-level timestamps                                             | Synthesized from `type == "word"` entries                     | `DurationSec` is derived as the last segment's `EndSec` (ElevenLabs doesn't report a duration field directly); `Language` comes from `language_code`.                                                                             |
+| Deepgram   | `/v1/listen` JSON response, word-level timestamps                 | From `results.channels[0].alternatives[0].words`              | Request body is the raw audio bytes, not multipart or JSON — the only transcription provider in this SDK that doesn't upload a file part. `Text` prefers `punctuated_word` over `word`. See [Deepgram](../providers/deepgram.md). |
+| AssemblyAI | Async: upload → create → poll `GET /v2/transcript/{id}`           | From the poll response's `words[]` (ms → sec)                 | Three-request flow with `WithPollInterval`-controlled, ctx-aware polling. See [AssemblyAI](../providers/assemblyai.md).                                                                                                           |
+| Gladia     | Async: upload → create → poll `GET /v2/pre-recorded/{id}`         | From `result.transcription.utterances[]` (already in seconds) | Same three-request async shape as AssemblyAI; `DurationSec` comes from `result.metadata.audio_duration`. See [Gladia](../providers/gladia.md).                                                                                    |
+| Rev.ai     | Async: multipart create → poll → fetch structured transcript      | From `monologues[].elements[]` where `type == "text"`         | Job options are multipart, not JSON; `"unknown"`-type transcript elements (unintelligible speech) are omitted from both `Text` and `Segments`. See [Rev.ai](../providers/revai.md).                                               |
 
 OpenAI, Groq, ElevenLabs, AssemblyAI, and Rev.ai upload `Audio` as a
 multipart file part (Gladia does too, via a separate upload endpoint before
@@ -347,10 +347,10 @@ channel having a reader.
 
 ### Provider matrix
 
-| Provider | Endpoint | Notes |
-|---|---|---|
-| [Deepgram](../providers/deepgram.md) | `wss://.../v1/listen` (live) | `MediaType`/`SampleRate` map to `encoding`/`sample_rate` query params (same convention as the REST `Transcribe` path); `CloseSend` sends `{"type":"CloseStream"}` (idempotent); a `Results` message with an empty transcript is skipped — including when it carries `is_final:true`. |
-| [OpenAI](../providers/openai.md) | `wss://.../realtime?intent=transcription` | Sends a `transcription_session.update` on open (`input_audio_format`, `input_audio_transcription.model`/`.language`); `Send` base64-encodes audio into `input_audio_buffer.append`; `CloseSend` sends `input_audio_buffer.commit` (idempotent); `...delta`/`...completed` events map to interim/final `TranscriptEvent`s, an `error` event ends the stream via `Err()`. |
+| Provider                             | Endpoint                                  | Notes                                                                                                                                                                                                                                                                                                                                                                   |
+| ------------------------------------ | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Deepgram](../providers/deepgram.md) | `wss://.../v1/listen` (live)              | `MediaType`/`SampleRate` map to `encoding`/`sample_rate` query params (same convention as the REST `Transcribe` path); `CloseSend` sends `{"type":"CloseStream"}` (idempotent); a `Results` message with an empty transcript is skipped — including when it carries `is_final:true`.                                                                                    |
+| [OpenAI](../providers/openai.md)     | `wss://.../realtime?intent=transcription` | Sends a `transcription_session.update` on open (`input_audio_format`, `input_audio_transcription.model`/`.language`); `Send` base64-encodes audio into `input_audio_buffer.append`; `CloseSend` sends `input_audio_buffer.commit` (idempotent); `...delta`/`...completed` events map to interim/final `TranscriptEvent`s, an `error` event ends the stream via `Err()`. |
 
 Both providers derive their `wss://` dial URL from the provider's
 configured `baseURL` by swapping `http(s)://` for `ws(s)://` — never
@@ -401,7 +401,7 @@ always `verbose_json` (the translations endpoint has no
 
 **`StreamTranslate` was not shipped this wave.** None of the providers
 targeted so far expose a live/streaming audio-translation API (as opposed
-to streaming *transcription*, which Deepgram and OpenAI both support — see
+to streaming _transcription_, which Deepgram and OpenAI both support — see
 [StreamTranscribe](#streamtranscribe) above); `ai.Translate` covers the
 REST translation use case instead. See
 [Migrating from the Vercel AI SDK](../migrating-from-vercel-ai-sdk.md#ai-sdk-6-delta)
@@ -450,7 +450,7 @@ session** — they surface as an ordinary `RealtimeEvent{Type: "error"}` and
 iteration continues; only a socket failure, `ctx` cancellation, or
 `Close()` ends `Events()`. This is the one place `RealtimeSession`
 deliberately diverges from `StreamTranscribe`'s streams, where an `error`
-event *is* terminal.
+event _is_ terminal.
 
 `RealtimeSession` is **OpenAI-only**: there is no generic
 `provider.RealtimeModel` interface this wave, and it is not wired into
@@ -465,7 +465,7 @@ for the live-testing note.
 
 ## FilePart attachment matrix
 
-A `provider.FilePart` attaches a file to a *user* message (an assistant
+A `provider.FilePart` attaches a file to a _user_ message (an assistant
 message containing a `FilePart` is rejected by every provider):
 
 ```go
@@ -484,28 +484,28 @@ msg := provider.Message{
 
 Support is provider-specific:
 
-| Provider | Accepted `MediaType` | Wire shape |
-|---|---|---|
-| Anthropic | `application/pdf` only | A `"document"` content block; `Filename`, if set, becomes the block's title. |
-| Google, Vertex AI (`geminicompat`) | any | Sent inline via `inlineData` — Gemini accepts PDFs, audio, and video inline. |
-| OpenAI and other `openaicompat` providers | `application/pdf` only | A `"file"` content part with a `data:` URL. Only OpenAI itself is confirmed to accept this; other OpenAI-compatible servers may reject it — passthrough is the intended behavior, not a guarantee. |
-| Amazon Bedrock | a fixed set, mapped to Converse document format codes (see below) | A Converse `"document"` content block. |
-| Cohere, Mistral, and every other provider | none | Returns an error rather than silently dropping the attachment. |
+| Provider                                  | Accepted `MediaType`                                              | Wire shape                                                                                                                                                                                         |
+| ----------------------------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Anthropic                                 | `application/pdf` only                                            | A `"document"` content block; `Filename`, if set, becomes the block's title.                                                                                                                       |
+| Google, Vertex AI (`geminicompat`)        | any                                                               | Sent inline via `inlineData` — Gemini accepts PDFs, audio, and video inline.                                                                                                                       |
+| OpenAI and other `openaicompat` providers | `application/pdf` only                                            | A `"file"` content part with a `data:` URL. Only OpenAI itself is confirmed to accept this; other OpenAI-compatible servers may reject it — passthrough is the intended behavior, not a guarantee. |
+| Amazon Bedrock                            | a fixed set, mapped to Converse document format codes (see below) | A Converse `"document"` content block.                                                                                                                                                             |
+| Cohere, Mistral, and every other provider | none                                                              | Returns an error rather than silently dropping the attachment.                                                                                                                                     |
 
 Bedrock's fixed `MediaType` → format-code mapping (any other `MediaType`
 returns an error):
 
-| `MediaType` | Converse format code |
-|---|---|
-| `application/pdf` | `pdf` |
-| `text/csv` | `csv` |
-| `text/html` | `html` |
-| `text/plain` | `txt` |
-| `text/markdown` | `md` |
-| `application/msword` | `doc` |
-| `application/vnd.openxmlformats-officedocument.wordprocessingml.document` | `docx` |
-| `application/vnd.ms-excel` | `xls` |
-| `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` | `xlsx` |
+| `MediaType`                                                               | Converse format code |
+| ------------------------------------------------------------------------- | -------------------- |
+| `application/pdf`                                                         | `pdf`                |
+| `text/csv`                                                                | `csv`                |
+| `text/html`                                                               | `html`               |
+| `text/plain`                                                              | `txt`                |
+| `text/markdown`                                                           | `md`                 |
+| `application/msword`                                                      | `doc`                |
+| `application/vnd.openxmlformats-officedocument.wordprocessingml.document` | `docx`               |
+| `application/vnd.ms-excel`                                                | `xls`                |
+| `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`       | `xlsx`               |
 
 ### FileID and URL variants
 
@@ -522,12 +522,12 @@ provider.FilePart{FileID: info.ID} // info from ai.UploadFile, below
 Per-family support (families not listed reject both variants, same as an
 unsupported `Data` `MediaType`):
 
-| Provider | `FileID` | `URL` |
-|---|---|---|
-| OpenAI and other `openaicompat` providers | `{"type":"file","file":{"file_id":...}}` | ✗ (no file-URL wire shape) |
-| Anthropic | A `"document"` block with `source: {"type":"file","file_id":...}` | A `"document"` block with `source: {"type":"url","url":...}` |
-| Google, Vertex AI (`geminicompat`) | ✗ (no wire shape) | A `fileData` part: `{"fileData":{"fileUri":...,"mimeType":...}}` (`mimeType` omitted when `MediaType` is empty; also accepts Gemini Files API URIs) |
-| Amazon Bedrock | ✗ | ✗ (Converse's document block has no file-reference primitive) |
+| Provider                                  | `FileID`                                                          | `URL`                                                                                                                                               |
+| ----------------------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OpenAI and other `openaicompat` providers | `{"type":"file","file":{"file_id":...}}`                          | ✗ (no file-URL wire shape)                                                                                                                          |
+| Anthropic                                 | A `"document"` block with `source: {"type":"file","file_id":...}` | A `"document"` block with `source: {"type":"url","url":...}`                                                                                        |
+| Google, Vertex AI (`geminicompat`)        | ✗ (no wire shape)                                                 | A `fileData` part: `{"fileData":{"fileUri":...,"mimeType":...}}` (`mimeType` omitted when `MediaType` is empty; also accepts Gemini Files API URIs) |
+| Amazon Bedrock                            | ✗                                                                 | ✗ (Converse's document block has no file-reference primitive)                                                                                       |
 
 ## Files & skills
 
@@ -562,10 +562,10 @@ msg := provider.Message{
 (`ai.ErrStoreRequired`/`ai.ErrIDRequired`). Both wrap the call in the
 standard retry logic (`MaxRetries`, default 2).
 
-| Provider | `Files()` endpoint | Beta header | Notes |
-|---|---|---|---|
-| OpenAI | `POST /files` (multipart, field `file` + `purpose`, default `"user_data"`), `DELETE /files/{id}` | none | See [OpenAI § Files](../providers/openai.md#files). |
-| Anthropic | `POST /v1/files` (multipart, field `file`), `DELETE /v1/files/{id}` | `anthropic-beta: files-api-2025-04-14` | See [Anthropic § Files and skills](../providers/anthropic.md#files-and-skills). |
+| Provider  | `Files()` endpoint                                                                               | Beta header                            | Notes                                                                           |
+| --------- | ------------------------------------------------------------------------------------------------ | -------------------------------------- | ------------------------------------------------------------------------------- |
+| OpenAI    | `POST /files` (multipart, field `file` + `purpose`, default `"user_data"`), `DELETE /files/{id}` | none                                   | See [OpenAI § Files](../providers/openai.md#files).                             |
+| Anthropic | `POST /v1/files` (multipart, field `file`), `DELETE /v1/files/{id}`                              | `anthropic-beta: files-api-2025-04-14` | See [Anthropic § Files and skills](../providers/anthropic.md#files-and-skills). |
 
 `FileStore` is **not** wired into `ai.Registry` — call `.Files()` on a
 constructed provider directly, as above.
@@ -617,7 +617,7 @@ requests, never on `/v1/messages`) and the live-testing caveat.
   [`providers/bfl/image.go`](../../providers/bfl/image.go)
 - [`internal/fetchmedia/fetchmedia.go`](../../internal/fetchmedia/fetchmedia.go)
   (`Fetch`, `ValidateURL`, `PinnedTransport`, `SameRegistrableDomain` — the
-  SSRF/size-cap guards described above), [`internal/fetchimage/fetchimage.go`](../../internal/fetchimage/fetchimage.go)
+  SSRF/size-cap guards described above; image fetching folded in since v0.4.1)
 - [`providers/luma/video.go`](../../providers/luma/video.go),
   [`providers/fal/video.go`](../../providers/fal/video.go),
   [`providers/replicate/video.go`](../../providers/replicate/video.go)
