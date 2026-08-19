@@ -1,35 +1,21 @@
 # go-ai-sdk
 
+[![CI](https://github.com/azrtydxb/go-ai-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/azrtydxb/go-ai-sdk/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Go Reference](https://pkg.go.dev/badge/github.com/azrtydxb/go-ai-sdk.svg)](https://pkg.go.dev/github.com/azrtydxb/go-ai-sdk)
+
 An idiomatic Go port of the [Vercel AI SDK](https://sdk.vercel.ai): a single,
 provider-agnostic API for generating text, streaming text, generating
 structured objects, calling tools, computing embeddings, and generating
 images/speech/transcriptions across **39 providers** — OpenAI, Anthropic,
-Google (Gemini), Groq, xAI, DeepSeek, Together, Fireworks, Cerebras,
-Perplexity, Moonshot, Qwen, MiniMax, DeepInfra, Hugging Face, Baseten,
-LM Studio, NVIDIA NIM, Vercel AI Gateway, Mistral, Cohere, Voyage,
-Mixedbread, Azure OpenAI, Vertex AI, Amazon Bedrock, ElevenLabs, fal,
-Replicate, Luma, Deepgram, LMNT, Hume, AssemblyAI, Gladia, Rev.ai, Cartesia,
-Prodia, and Black Forest Labs — with the same concepts and naming as the
-TypeScript original, expressed in native Go (`context.Context`, `iter.Seq`,
-generics, typed errors) rather than mirrored line-for-line.
+Google (Gemini), Mistral, Cohere, Azure OpenAI, Vertex AI, Amazon Bedrock,
+Groq, xAI, DeepSeek, ElevenLabs, Replicate, and the rest of the
+[full roster](docs/providers/README.md) — with the same concepts and naming
+as the TypeScript original, expressed in native Go (`context.Context`,
+`iter.Seq`, generics, typed errors) rather than mirrored line-for-line.
+Zero dependencies in the root module.
 
-**Status: v0.2.** The public API has reached **full parity with the AI SDK
-6 core** (see the migration guide's
-[AI SDK 6 delta](docs/migrating-from-vercel-ai-sdk.md#ai-sdk-6-delta) for
-the feature-by-feature record, and the
-[v6 parity final audit](docs/superpowers/specs/2026-08-03-v6-parity-final-audit.md)
-for the closing have-list). It's implemented and tested end-to-end (unit
-tests plus a shared provider-conformance suite), but it is young: expect
-rough edges, and expect the API to move before a 1.0. Coming from the
-TypeScript SDK? Start with
-[Migrating from the Vercel AI SDK](docs/migrating-from-vercel-ai-sdk.md).
-
-**v0.2.0 breaking change:** `ai.Telemetry.OnSpanStart` gained a leading
-`ctx context.Context` parameter, and `ai.SpanInfo` gained `CorrelationID`
-— a one-line signature update for any hand-rolled `Telemetry`
-implementation. See [`CHANGELOG.md`](CHANGELOG.md#020--2026-08-03).
-
-## Install
+## Quick start
 
 ```sh
 go get github.com/azrtydxb/go-ai-sdk
@@ -42,8 +28,6 @@ you want it:
 ```sh
 go get github.com/azrtydxb/go-ai-sdk/contrib/otel
 ```
-
-## Quickstart
 
 ```go
 package main
@@ -103,6 +87,23 @@ Complete, runnable, env-guarded examples covering text, streaming, tools,
 structured output, embeddings, images, speech, transcription, and MCP —
 including the multi-step tool-calling loop and `ai.GenerateObject[T]` — live
 in [`examples/`](examples/), each compiled by CI.
+
+## Status
+
+**v0.4.** The public API has reached **full parity with the AI SDK 6 core**
+(see the migration guide's
+[AI SDK 6 delta](docs/migrating-from-vercel-ai-sdk.md#ai-sdk-6-delta) for
+the feature-by-feature record, and the
+[v6 parity final audit](docs/superpowers/specs/2026-08-03-v6-parity-final-audit.md)
+for the closing have-list). It's implemented and tested end-to-end (unit
+tests plus a shared provider-conformance suite), but it is young: expect
+rough edges, and expect the API to move before a 1.0. Coming from the
+TypeScript SDK? Start with
+[Migrating from the Vercel AI SDK](docs/migrating-from-vercel-ai-sdk.md).
+Release-by-release history is in [`CHANGELOG.md`](CHANGELOG.md), including
+the one sanctioned pre-1.0 breaking change (v0.2.0: `ai.Telemetry.OnSpanStart`
+gained a leading `ctx context.Context` parameter and `ai.SpanInfo` gained
+`CorrelationID`).
 
 ## Features
 
