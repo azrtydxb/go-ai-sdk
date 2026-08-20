@@ -2,6 +2,10 @@ package provider
 
 import "encoding/json"
 
+// ToolDef declares a tool to the model: its name, what it is for, and the
+// JSON Schema its arguments must match. The SDK never executes anything
+// from this type — it describes the tool on the wire; execution lives with
+// whoever registered it.
 type ToolDef struct {
 	Name        string
 	Description string
@@ -25,8 +29,13 @@ type ToolDef struct {
 	InputExamples []json.RawMessage
 }
 
+// ToolChoiceMode is how strongly the model is steered toward calling a
+// tool.
 type ToolChoiceMode string
 
+// The tool-choice modes: Auto lets the model decide, None forbids tool
+// calls, Required forces some tool call, and Tool forces one named tool
+// (ToolChoice.ToolName).
 const (
 	ToolChoiceAuto     ToolChoiceMode = "auto"
 	ToolChoiceNone     ToolChoiceMode = "none"
@@ -34,17 +43,29 @@ const (
 	ToolChoiceTool     ToolChoiceMode = "tool"
 )
 
+// ToolChoice steers tool use for one call. A nil *ToolChoice on a Call
+// leaves the decision to the provider's own default, which is what most
+// callers want.
 type ToolChoice struct {
 	Mode     ToolChoiceMode
 	ToolName string // set when Mode == ToolChoiceTool
 }
 
+// ResponseFormat requests a shape for the model's output. Type "json" with
+// a Schema asks for schema-constrained JSON; providers reporting
+// Capabilities.NativeJSON enforce it server-side, and the rest fall back to
+// prompting, so a caller should still validate what comes back.
 type ResponseFormat struct {
 	Type   string          // "text" | "json"
 	Schema json.RawMessage // optional, when Type == "json"
 	Name   string          // optional schema name
 }
 
+// Call is one request to a LanguageModel: the conversation, the tools it may
+// use, and the sampling knobs. Every pointer field is optional — nil means
+// "do not send this parameter", which is distinct from sending a zero, and
+// lets the provider's own default stand. Parameters no provider family
+// supports uniformly document their own support matrix on the field.
 type Call struct {
 	Messages       []Message
 	Tools          []ToolDef

@@ -1,14 +1,14 @@
 # procoder handoff
 
 <!-- procoder:facts -->
-generated: 2026-08-20T12:55:03Z
-branch: main — this is the default branch
-head: 1af2305
+generated: 2026-08-20T13:08:03Z
+branch: chore/procoder-audit-followup — 4 ahead, 0 behind main
+head: b1e0710
 dirty files: none (clean tree)
 sprint: none — no backlog yet (`procoder backlog` starts one)
 open tasks: none
-unlearned lessons: none — no ledger at .procoder/github/LESSONS.md
-index: built at 1af2305 (360 files, 6564 symbols) — current
+unlearned lessons: 0
+index: built at b1e0710 (361 files, 6564 symbols) — current
 <!-- /procoder:facts -->
 
 ## Notes

@@ -2,8 +2,13 @@ package provider
 
 import "encoding/json"
 
+// Role is the author of a Message: who the content came from, as every
+// provider's wire format distinguishes them.
 type Role string
 
+// The four message authors this SDK models. Providers that lack a native
+// system role (or a distinct tool role) fold these into their own shape in
+// their wire.go; the SDK always speaks in these four.
 const (
 	RoleSystem    Role = "system"
 	RoleUser      Role = "user"
@@ -11,17 +16,30 @@ const (
 	RoleTool      Role = "tool"
 )
 
+// Message is one turn in a conversation: an author and the ordered content
+// parts that turn carried. A single message may mix parts — text alongside
+// images, or an assistant's reasoning alongside the tool calls it decided
+// on.
 type Message struct {
 	Role    Role
 	Content []ContentPart
 }
 
+// ContentPart is one piece of a Message's content. The interface is closed
+// — only this package can implement it — so a type switch over the parts
+// below is exhaustive, and adding a part is a deliberate, reviewable change
+// rather than something a caller can do from outside.
 type ContentPart interface{ isContentPart() }
 
+// TextPart is plain text, the part every provider supports in every role.
 type TextPart struct{ Text string }
 
 func (TextPart) isContentPart() {}
 
+// ImagePart is an image content part, valid in user messages. Exactly one
+// of Data (inline bytes) or URL (externally hosted) should be set; MediaType
+// describes Data and is required when Data is used, since providers that
+// send inline images need the type on the wire.
 type ImagePart struct {
 	Data      []byte // inline data; exactly one of Data/URL set
 	URL       string
@@ -80,6 +98,10 @@ type FilePart struct {
 
 func (FilePart) isContentPart() {}
 
+// ToolCallPart is a model's request to invoke a tool: which tool, with what
+// arguments, under an ID the matching ToolResultPart quotes back. Args is
+// raw JSON rather than a decoded map because the SDK never needs to look
+// inside it — the tool's own schema decides what it means.
 type ToolCallPart struct {
 	ID   string
 	Name string
@@ -88,6 +110,11 @@ type ToolCallPart struct {
 
 func (ToolCallPart) isContentPart() {}
 
+// ToolResultPart is the outcome of a tool invocation, returned to the model
+// in a message so it can continue. ToolCallID must match the ToolCallPart
+// that asked for it. IsError reports a failed invocation: the result is
+// still sent (models recover from tool errors when they can see them),
+// flagged so the provider can mark it as such on the wire.
 type ToolResultPart struct {
 	ToolCallID string
 	Name       string
@@ -125,7 +152,8 @@ type SourcePart struct {
 
 func (SourcePart) isContentPart() {}
 
-// Helper functions
+// UserText builds a single-part user message from a string — the common
+// case, without the ContentPart ceremony.
 func UserText(text string) Message {
 	return Message{
 		Role:    RoleUser,
@@ -133,6 +161,7 @@ func UserText(text string) Message {
 	}
 }
 
+// SystemText builds a single-part system message from a string.
 func SystemText(text string) Message {
 	return Message{
 		Role:    RoleSystem,
@@ -140,6 +169,8 @@ func SystemText(text string) Message {
 	}
 }
 
+// AssistantText builds a single-part assistant message from a string,
+// for seeding a conversation with prior model turns.
 func AssistantText(text string) Message {
 	return Message{
 		Role:    RoleAssistant,

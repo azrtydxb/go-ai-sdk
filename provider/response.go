@@ -5,8 +5,14 @@ import (
 	"strings"
 )
 
+// FinishReason is why the model stopped generating, normalized across
+// providers.
 type FinishReason string
 
+// The normalized finish reasons. Every provider's native reason maps onto
+// one of these in its wire.go; FinishOther is the honest answer for a
+// reason this SDK does not model, and is never used to paper over a
+// reason it does.
 const (
 	FinishStop          FinishReason = "stop"
 	FinishLength        FinishReason = "length"
@@ -16,6 +22,10 @@ const (
 	FinishOther         FinishReason = "other"
 )
 
+// Usage is the token accounting for one request. InputTokens and
+// OutputTokens are reported by every provider; the fields below them are
+// populated only where the provider breaks them out, and a zero there means
+// "not reported", not "none".
 type Usage struct {
 	InputTokens  int
 	OutputTokens int
@@ -33,6 +43,10 @@ type Usage struct {
 	ReasoningTokens int
 }
 
+// Response is a completed, non-streaming model response. Content holds the
+// assembled parts in order — text, reasoning, tool calls, sources — and the
+// accessors below pull out one kind at a time. Raw keeps the provider's
+// original body so a caller can reach anything this SDK did not model.
 type Response struct {
 	Content      []ContentPart
 	FinishReason FinishReason
@@ -48,7 +62,7 @@ type Response struct {
 	ProviderMetadata map[string]any
 }
 
-// Text concatenates all TextParts in the response
+// Text concatenates all TextParts in the response.
 func (r *Response) Text() string {
 	var sb strings.Builder
 	for _, part := range r.Content {
@@ -75,7 +89,7 @@ func (r *Response) ReasoningText() string {
 	return sb.String()
 }
 
-// ToolCalls returns all ToolCallParts in the response
+// ToolCalls returns all ToolCallParts in the response.
 func (r *Response) ToolCalls() []ToolCallPart {
 	var calls []ToolCallPart
 	for _, part := range r.Content {
