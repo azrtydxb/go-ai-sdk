@@ -65,7 +65,7 @@ Reasoning: &provider.ReasoningConfig{
 | Amazon Bedrock                                                                                     | `additionalModelRequestFields.thinking: {"type": "enabled", "budget_tokens": N}`  | Same budget resolution and wire shape as Anthropic, nested under Bedrock's Converse-specific `additionalModelRequestFields`. Merged per sub-key with any `additionalModelRequestFields` set via `ProviderOptions` — see the precedence note below. |
 | Cohere, Mistral                                                                                    | — (no-op)                                                                         | Neither has a reasoning/thinking knob; `Reasoning` is silently ignored, no wire field is sent.                                                                                                                                                     |
 
-### EffortBudgetTokens: the effort → token-budget table
+### EffortBudgetTokens: the effort to token-budget table
 
 For the three token-budget providers (Anthropic, geminicompat, Bedrock),
 `Effort` is resolved to an explicit budget via the exported
@@ -140,7 +140,7 @@ the opaque payload in `Text`; a regular `thinking` block sets `Signature`.
 Streaming surfaces the thinking text as `provider.ReasoningDelta` and the
 finished block (including any signature) as `provider.ReasoningEnd`.
 
-### DeepSeek: `reasoning_content`
+### DeepSeek reasoning content
 
 DeepSeek-R1-style models (routed through the shared `openaicompat` base)
 report reasoning via a `reasoning_content` field alongside the normal

@@ -134,7 +134,7 @@ result, err := ai.GenerateText(context.Background(), ai.GenerateTextOpts{
 the shared `/v1/messages` path** (`providers/anthropic/language_model.go`),
 verified by a dedicated test asserting the header doesn't leak onto a
 chat request. Not wired into `ai.Registry`; call `.Files()` directly. See
-[Media § Files & skills](../core/media.md#files--skills).
+[Media § Files and skills](../core/media.md#files-and-skills).
 
 `p.UploadSkill(ctx, anthropic.UploadSkillCall{Zip, DisplayName})` /
 `p.DeleteSkill(ctx, id)` are a **distinct, Anthropic-only** capability

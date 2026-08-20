@@ -29,7 +29,7 @@ modules together), add a dev-only `replace github.com/azrtydxb/go-ai-sdk
 drop it before tagging. The release procedure for cutting a new
 `contrib/otel` tag against a new root version (tag root first, then bump
 the require and tag the nested module) is recorded in
-[the v6 parity final audit](../../docs/superpowers/specs/2026-08-03-v6-parity-final-audit.md#release-procedure-root-v020--contribotel-v020).
+[the v6 parity final audit](../../docs/superpowers/specs/2026-08-03-v6-parity-final-audit.md#release-procedure-for-root-v020-and-contribotel-v020).
 
 ## Usage
 
