@@ -45,6 +45,15 @@ that do not compile are blocking; external links are verified by
 `procoder docs --external` and CI — never skipped, never in the write hook.
 Keep CHANGELOG.md current: every release gets an entry a user can read.
 
+Standing judgment on `procoder docs` surface-coverage findings ("documentation
+never mentions exported X"): they are informational and stay that way. Test
+helpers (`ai/aitest`, `internal/**/…test`), everything under `internal/`, and
+methods that exist only to satisfy an interface on an unexported type are not
+surface a reader is meant to discover, so no markdown page will mention them.
+Only exported symbols on `ai`, `agent`, `provider`, and `mcp` that a user
+calls directly are worth documenting; treat a finding outside that set as
+already answered.
+
 Go-specific: exported symbols carry doc comments (`golint`-style, starting
 with the symbol name); inline Go generic syntax — a bracketed type
 parameter immediately followed by a parenthesized argument list — parses

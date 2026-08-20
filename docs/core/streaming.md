@@ -93,7 +93,9 @@ Valid once `Parts()` has been iterated (fully or partially):
 - **`Text()`** — accumulated text of the final step.
 - **`ReasoningText()`** — accumulated reasoning text of the final step.
 - **`Sources()`** — `[]provider.SourcePart` accumulated via `SourceEvent`
-  during the final step.
+  during the final step. The non-streaming counterpart is
+  `(*provider.Response).SourceParts()`, which filters the same parts out of
+  a completed response.
 - **`Steps()`** — every step executed so far. If iteration stopped because
   of a `*ai.NoSuchToolError`, that step is still appended with `ToolCalls`
   populated but `ToolResults` `nil` (execution never ran) — check `Err()`
