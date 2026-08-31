@@ -14,3 +14,6 @@ coverage.*
 
 # procoder local run state (per-clone, never shared)
 .procoder/state/
+
+# lychee link-checker cache (procoder docs); drop before staging
+.lycheecache
