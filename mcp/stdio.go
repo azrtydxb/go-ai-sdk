@@ -270,6 +270,8 @@ func NewStdioTransport(cmd []string, env []string) (Transport, error) {
 		return nil, errors.New("mcp: NewStdioTransport: empty command")
 	}
 
+	// Trusted developer configuration by contract (see NewStdioTransport docs).
+	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	c := exec.Command(cmd[0], cmd[1:]...)
 	c.Env = append(os.Environ(), env...)
 	c.Stderr = os.Stderr

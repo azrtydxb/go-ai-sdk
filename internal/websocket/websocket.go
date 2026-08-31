@@ -168,6 +168,9 @@ func (c *Conn) unlockWrite() {
 	<-c.writeSem()
 }
 
+// — the plain-text scheme is supported by design for localhost and test
+// fixtures; production endpoints use the TLS scheme.
+// nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket — by design, see above
 // Dial performs the RFC 6455 client opening handshake against a ws:// or
 // wss:// URL and returns an open connection. ctx governs both the TCP dial
 // and the HTTP handshake; once Dial returns, ctx no longer affects the
@@ -214,7 +217,10 @@ func Dial(ctx context.Context, wsURL string, opts DialOptions) (*Conn, error) {
 	if useTLS {
 		tlsConfig := opts.TLSConfig
 		if tlsConfig == nil {
-			tlsConfig = &tls.Config{}
+			// Explicit floor: never offer TLS 1.0/1.1. Mirrors the Go
+			// runtime default (1.2+ since Go 1.22); callers may raise it
+			// via DialOptions.TLSConfig.
+			tlsConfig = &tls.Config{MinVersion: tls.VersionTLS12}
 		}
 		if tlsConfig.ServerName == "" {
 			tlsConfig = tlsConfig.Clone()

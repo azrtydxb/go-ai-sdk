@@ -239,6 +239,10 @@ func (s *Stream[E]) readLoop() {
 	}
 }
 
+// nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
+// — ws:// is supported by design for localhost and test fixtures; production
+// endpoints use wss://.
+// nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket — ws:// by design, see above
 // DialURL derives a ws:// (or wss://) URL from baseURL by swapping the
 // http(s) scheme, then appends path to baseURL's path (trailing slashes
 // trimmed first). Every provider's dial-URL helper applied this same rule

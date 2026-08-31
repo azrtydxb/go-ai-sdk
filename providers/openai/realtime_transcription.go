@@ -76,6 +76,9 @@ func (m *streamingTranscriptionModel) StreamTranscribe(ctx context.Context, call
 	return &realtimeStream{stream: ws}, nil
 }
 
+// — the plain-text scheme is for test fixtures only; production dial URLs
+// use the TLS scheme.
+// nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket — test fixtures only
 // realtimeDialURL derives the wss:// (or ws://, for test fixtures) URL for
 // OpenAI's Realtime endpoint in transcription-intent mode from baseURL.
 func realtimeDialURL(baseURL string) (string, error) {
