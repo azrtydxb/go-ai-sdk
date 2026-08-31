@@ -1,0 +1,36 @@
+# gitleaks configuration for this repository.
+#
+# Keeps the full default ruleset, scoped by one allowlist covering the
+# procoder-generated question/answer records under .procoder/ask/. Their
+# `Key:` lines are deterministic 12-hex identifiers procoder writes for
+# settled questions (a new line per recorded answer); the generic-api-key
+# rule trips on them and re-opens the flag on every regeneration. Judged
+# as generated identifiers, not credentials, via `procoder ask` (recorded
+# in .procoder/ask/answers.md).
+#
+# Why both paths AND regexes in one allowlist: procoder's gate scans each
+# changed FILE separately (`gitleaks dir <file>`), where gitleaks applies
+# only the regex/stopword allowlist conditions; whole-tree scans apply
+# the path conditions. Both are needed for the two scan shapes to agree.
+#
+# Residual scope (reviewed): the line regex also suppresses any
+# `Key: <12-hex>` line-shaped secret anywhere in the tree — that exact
+# shape is the procoder key format and nothing else we use.
+#
+# gitleaks 8.30 syntax: extension lives under [extend] (useDefault), and
+# global allowlists are [[allowlists]] tables. Top-level `useDefaultConfig`
+# and `[allow]` tables are silently ignored by this version and leave the
+# scan running with zero rules — do not "simplify" them back.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "procoder generated question/answer records: deterministic question keys, not credentials"
+paths = [
+  '\.procoder/ask/',
+]
+regex-target = "line"
+regexes = [
+  '^Key: [0-9a-f]{12}$',
+]

@@ -1,6 +1,6 @@
 # Questions procoder cannot answer for you
 
-Written 2026-08-31 17:52 UTC.
+Written 2026-08-31 19:27 UTC.
 
 Answer each one by writing a line beginning `Answer: ` under it, then
 hand the file back with `procoder ask --file .procoder/ask/QA.md`.
@@ -8,39 +8,14 @@ Leave the `Key:` lines alone — they are what ties an answer to its question.
 
 ## Q1: [decision] decisions.md
 
-Key: d22cf0a50482
-Question: How to handle the 71 golangci-lint findings?
+Key: 8197b535e994
+Question: Landing the allowlist commit: the gate's per-file gitleaks scan can't see .gitleaks.toml — how to commit?
 
-- **A) One `procoder todo add` for a mechanical cleanup task** fixing errcheck (50), staticcheck (14), unused (3), govet (3), ineffassign (1), then gate + suite. (Default.)
-- **B) Fix now in this session**, no todo record.
-- **C) Defer** — leave the findings open, revisit later.
+Verified: procoder's gate runs `gitleaks dir <changed-file>` per file; gitleaks 8.30 hard-codes the DEFAULT config for single-file sources (repo config only applies to directory scans or via the GITLEAKS_CONFIG env). So the allowlist clears whole-tree scans but not the gate's per-file scan, which still blocks committing `.procoder/ask/` (its `Key:` lines). Options:
 
-**Decided: A)** `procoder todo add` — recorded as `.procoder/todo/20260831-mechanical-lint-cleanup-fix-all-71-golangci-lint-findings.md`.
+- **A) Split the commit**: land `.gitleaks.toml` + docs/code changes now (they contain no Key lines, so the gate passes); leave the ask records (QA.md, answers.md) for a later commit. (Default — gets the reviewed config in without weakening the gate.)
+- **B) Patch procoder** (the dev repo at ~/Development/procoder): make the per-file scan pass `-c <root>/.gitleaks.toml` when present, rebuild the launcher binary, then commit everything. Root-cause fix; procoder-side change, out of this session's scope.
+- **C) Set GITLEAKS_CONFIG** in the environments the hooks run in, commit everything now. Works with the current binary; depends on the hook process inheriting the variable.
+- **D) Skip the gate for this commit** (`--no-verify`). Against the contract; last resort.
 
-Answer: A) todo record — .procoder/todo/20260831-mechanical-lint-cleanup-fix-all-71-golangci-lint-findings.md (user: 3A)
-
-## Q2: [decision] decisions.md
-
-Key: 2a84c4d24883
-Question: TLS MinVersion in internal/websocket Dial: set explicitly or leave the Go default?
-
-- **A) Set `MinVersion: tls.VersionTLS12` explicitly** in `Dial`'s default TLS config (websocket.go:217). Matches the current Go 1.22+ default, makes it intentional, blocks 1.0/1.1. (Default.)
-- **B) Set `MinVersion: tls.VersionTLS13`.** Stricter, may break older endpoints and proxies.
-- **C) Leave as-is**, letting Go's default stand; callers can still override via `DialOptions.TLSConfig`.
-
-**Decided: A)** `MinVersion: tls.VersionTLS12` set explicitly in `Dial`'s default TLS config (internal/websocket/websocket.go).
-
-Answer: A) MinVersion tls.VersionTLS12 set explicitly in Dial's default TLS config (user: 2A)
-
-## Q3: [decision] decisions.md
-
-Key: 53c0b28e3ad3
-Question: mcp/stdio.go exec.Command: suppress the semgrep finding or add a validator?
-
-- **A) Add a lint suppression** with a written justification next to `NewStdioTransport` (mcp/stdio.go:273). The API's purpose is to run developer-configured commands; the doc comment already says callers passing user-influenced input own validation. (Default.)
-- **B) Add a defense-in-depth validator** (e.g. reject args containing shell metacharacters or non-absolute first element) that changes runtime behavior.
-- **C) Leave as-is** and accept the blocking security finding on the gate.
-
-**Decided: A)** Lint suppression with written justification, added at mcp/stdio.go (nosemgrep comment on the exec.Command call).
-
-Answer: A) lint suppression with written justification at mcp/stdio.go (user: 1A)
+Answer: A and B: the split-commit (A) was superseded because the gate scans the whole branch diff, not just staged files — B (patch procoder's per-file gitleaks scan to pass -c when a repo .gitleaks.toml exists, committed in the procoder repo) was done first, then all files committed together (user: A and B next)

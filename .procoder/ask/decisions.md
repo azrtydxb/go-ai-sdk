@@ -6,6 +6,25 @@
 
 **Decided: A)** Lint suppression with written justification, added at mcp/stdio.go (nosemgrep comment on the exec.Command call).
 
+## gitleaks flags procoder's own question keys in .procoder/ask/ — how to silence?
+
+`generic-api-key` matches the 12-hex `Key:` lines procoder writes to QA.md/answers.md (and re-flags a NEW line each time an answer is recorded — the last answer's own Key line is the current block). The keys are deterministic identifiers, not credentials; three have been judged so via `procoder ask`.
+
+- **A) Scoped allowlist: add `.gitleaks.toml`** (`useDefaultConfig = true` + `[allow]` paths for `.procoder/ask/`) so the scanner skips its own generated state permanently. Ends the whack-a-mole; the rest of the tree stays fully scanned. (Default.)
+- **B) Keep answering each flag as it appears** (per-finding `procoder ask` answers; `.gitleaksignore` was tried and is self-flagging, so it is out). Works, but every future decision record re-opens one.
+- **C) Leave blocking** and accept a red security report until procoder stops writing `Key:` lines into scanned files.
+
+**Decided: A)** `.gitleaks.toml` allowlist (gitleaks 8.30 syntax: `[extend] useDefault = true` + `[[allowlists]]` for `.procoder/ask/`). Note: the top-level `useDefaultConfig`/`[allow]` keys are silently ignored by gitleaks 8.30 and leave the scan running with zero rules — the config file carries a warning against "simplifying" it back.
+
+## Landing the allowlist commit: the gate's per-file gitleaks scan can't see .gitleaks.toml — how to commit?
+
+Verified: procoder's gate runs `gitleaks dir <changed-file>` per file; gitleaks 8.30 hard-codes the DEFAULT config for single-file sources (repo config only applies to directory scans or via the GITLEAKS_CONFIG env). So the allowlist clears whole-tree scans but not the gate's per-file scan, which still blocks committing `.procoder/ask/` (its `Key:` lines). Options:
+
+- **A) Split the commit**: land `.gitleaks.toml` + docs/code changes now (they contain no Key lines, so the gate passes); leave the ask records (QA.md, answers.md) for a later commit. (Default — gets the reviewed config in without weakening the gate.)
+- **B) Patch procoder** (the dev repo at ~/Development/procoder): make the per-file scan pass `-c <root>/.gitleaks.toml` when present, rebuild the launcher binary, then commit everything. Root-cause fix; procoder-side change, out of this session's scope.
+- **C) Set GITLEAKS_CONFIG** in the environments the hooks run in, commit everything now. Works with the current binary; depends on the hook process inheriting the variable.
+- **D) Skip the gate for this commit** (`--no-verify`). Against the contract; last resort.
+
 ## ws scheme: suppress the detect-insecure-websocket ERRORs or leave them blocking?
 
 `internal/websocket.Dial` deliberately supports both the ws (insecure, localhost and test fixtures) and wss (TLS) schemes — the semgrep ERROR on the ws case (websocket.go) is a false positive on a by-design feature; the same rule flags the ws-scheme test-fixture mentions in providers and docs. The gate blocks on that line while it is in scope.
