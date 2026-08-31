@@ -2,10 +2,17 @@ package provider
 
 import "context"
 
+// Capabilities reports what a model can do natively, so the SDK can choose
+// between a provider-enforced path and a prompted fallback rather than
+// guessing from the model ID.
 type Capabilities struct {
 	NativeJSON bool // supports schema-constrained JSON output natively
 }
 
+// LanguageModel is the interface every text-generating provider implements:
+// one call, one stream, and enough identity to attribute and configure it.
+// Everything in the ai package is built on top of this and nothing wider,
+// which is what keeps a new provider a self-contained addition.
 type LanguageModel interface {
 	Generate(ctx context.Context, call Call) (*Response, error)
 	Stream(ctx context.Context, call Call) (StreamResponse, error)
@@ -14,11 +21,16 @@ type LanguageModel interface {
 	Capabilities() Capabilities
 }
 
+// EmbeddingResponse is one embedding request's vectors, in the same order
+// as the input values, plus the token accounting for it.
 type EmbeddingResponse struct {
 	Embeddings [][]float64
 	Usage      Usage
 }
 
+// EmbeddingModel is the interface embedding providers implement.
+// MaxBatchSize is the provider's per-request ceiling; callers batching more
+// values than that must split, since the model does not split for them.
 type EmbeddingModel interface {
 	Embed(ctx context.Context, values []string) (*EmbeddingResponse, error)
 	MaxBatchSize() int

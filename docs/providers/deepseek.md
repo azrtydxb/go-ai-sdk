@@ -27,7 +27,7 @@ override the client used for requests.
   their chain of thought via `reasoning_content`, surfaced as
   `provider.ReasoningPart` (non-streamed) or a run of
   `provider.ReasoningDelta`s (streamed). See
-  [Reasoning](../core/reasoning.md#deepseek-reasoning_content).
+  [Reasoning](../core/reasoning.md#deepseek-reasoning-content).
 - **Structured JSON output** — supported, but constrained; see Quirks below.
 
 Not wired for this preset: embeddings, image generation, speech, or
@@ -103,4 +103,4 @@ entries here take priority over anything the SDK built from typed fields.
   and `convertResponse`)
 - [`internal/openaicompat/language_model.go`](../../internal/openaicompat/language_model.go)
 - [`internal/openaicompat/provideroptions_test.go`](../../internal/openaicompat/provideroptions_test.go)
-- [`docs/core/reasoning.md`](../core/reasoning.md#deepseek-reasoning_content)
+- [`docs/core/reasoning.md`](../core/reasoning.md#deepseek-reasoning-content)

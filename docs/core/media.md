@@ -510,7 +510,7 @@ returns an error):
 ### FileID and URL variants
 
 `FilePart` also accepts `FileID` (a reference to a file already uploaded
-to a provider's file store — see [Files & skills](#files--skills) below)
+to a provider's file store — see [Files and skills](#files-and-skills) below)
 or `URL` (an externally-hosted file) instead of inline `Data`. **Exactly
 one** of `Data`/`FileID`/`URL` must be set — a converter rejects a
 `FilePart` with none set, or with more than one:
@@ -529,7 +529,7 @@ unsupported `Data` `MediaType`):
 | Google, Vertex AI (`geminicompat`)        | ✗ (no wire shape)                                                 | A `fileData` part: `{"fileData":{"fileUri":...,"mimeType":...}}` (`mimeType` omitted when `MediaType` is empty; also accepts Gemini Files API URIs) |
 | Amazon Bedrock                            | ✗                                                                 | ✗ (Converse's document block has no file-reference primitive)                                                                                       |
 
-## Files & skills
+## Files and skills
 
 `ai.UploadFile`/`ai.DeleteFile` wrap `provider.FileStore`, the interface a
 provider's file-upload API implements — upload once, then reference the

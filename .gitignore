@@ -11,3 +11,9 @@ coverage.*
 
 # procoder local index (rebuilt with `procoder index build`; large binary artifacts)
 .procoder/index/
+
+# procoder local run state (per-clone, never shared)
+.procoder/state/
+
+# lychee link-checker cache (procoder docs); drop before staging
+.lycheecache

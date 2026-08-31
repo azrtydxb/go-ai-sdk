@@ -192,13 +192,13 @@ different target entirely.
 supports streaming partial output incrementally. `GenerateText`'s `Output`
 modes are fully shipped; only `StreamText`'s partial-streaming variant
 remains. This was already tracked before wave 14 (see
-[Migrating from the Vercel AI SDK § Future — plausible, not yet implemented](../../migrating-from-vercel-ai-sdk.md#future--plausible-not-yet-implemented))
+[Migrating from the Vercel AI SDK § Future: plausible, not yet implemented](../../migrating-from-vercel-ai-sdk.md#future-plausible-not-yet-implemented))
 and is called out here only for completeness, not as a new finding — it
 does not affect the "full v6 core parity" determination, since it isn't
 part of the core generate/stream contract Vercel's own docs treat as v6
 baseline (it's an experimental extension in both SDKs).
 
-## Release procedure: root v0.2.0 + contrib/otel v0.2.0
+## Release procedure for root v0.2.0 and contrib/otel v0.2.0
 
 `contrib/otel/go.mod` currently requires `github.com/azrtydxb/go-ai-sdk
 v0.1.0` (with a dev-only `replace github.com/azrtydxb/go-ai-sdk => ../..`
@@ -240,7 +240,7 @@ tagged-consumer resolution works today.
   the living, feature-by-feature status table this snapshot is drawn from
 - [v6 parity roadmap](../plans/2026-08-03-v6-parity-roadmap.md) — the
   wave-by-wave plan (waves 9–14) that reached this state
-- [CHANGELOG.md § 0.2.0](../../../CHANGELOG.md#020--2026-08-03) — the
+- [CHANGELOG.md § 0.2.0](../../../CHANGELOG.md#v020-2026-08-03) — the
   release this wave shipped as
 - [Architecture](../../architecture.md) — how the observability layer and
   `contrib/otel`'s nested-module split fit into the codebase

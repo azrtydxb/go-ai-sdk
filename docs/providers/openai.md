@@ -111,7 +111,7 @@ entries are merged in as extra multipart fields. See
 `DeleteFile` is `DELETE {base}/files/{id}`. Both use the provider's
 `Authorization: Bearer` header directly — no beta header, unlike
 Anthropic's Files API. Not wired into `ai.Registry`; call `.Files()`
-directly. See [Media § Files & skills](../core/media.md#files--skills).
+directly. See [Media § Files and skills](../core/media.md#files-and-skills).
 
 ⚠ **Not yet verified against the real OpenAI Files API** — tested only
 against an `httptest` fixture server, same caveat as the rest of this

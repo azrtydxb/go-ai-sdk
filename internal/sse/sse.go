@@ -19,6 +19,8 @@ import (
 // need to change it.
 var MaxEventBytes = 32 << 20
 
+// Event is one dispatched SSE event: the `event:` field and the `data:`
+// lines the blank line dispatched together.
 type Event struct {
 	Event string // event: field, "" if absent
 	Data  string // data: lines joined with \n

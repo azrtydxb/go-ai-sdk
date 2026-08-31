@@ -192,7 +192,7 @@ gained a leading `ctx context.Context` parameter and `ai.SpanInfo` gained
   `provider.FileStore` (OpenAI, Anthropic), referenced from a prompt via
   `provider.FilePart.FileID`; Anthropic's Skills API
   (`(*anthropic.Provider).UploadSkill`) is a distinct, Anthropic-only
-  capability. See [Media § Files & skills](docs/core/media.md#files--skills).
+  capability. See [Media § Files and skills](docs/core/media.md#files-and-skills).
 - **Middleware and registry** — compose behavior onto any
   `provider.LanguageModel` (`ExtractReasoningMiddleware`,
   `SimulateStreamingMiddleware`, `DefaultSettingsMiddleware`,

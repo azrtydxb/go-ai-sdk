@@ -237,7 +237,7 @@ each remains its own documented, non-blocking gap:
   `GenerateObject`/`StreamObject` only; the embed and media call paths
   don't thread per-call headers through to their provider requests.
 
-## [0.2.3] — 2026-08-04
+## v0.2.3 (2026-08-04)
 
 A documentation-only release ahead of announcing the module. No code, no
 public API, and no behavior changed — every change below is doc comments,
@@ -263,7 +263,7 @@ example tests, and the LICENSE copyright line.
 - **`LICENSE`**: filled in the Apache-2.0 appendix's
   `Copyright [yyyy] [name of copyright owner]` placeholder.
 
-## [0.2.2] — 2026-08-04
+## v0.2.2 (2026-08-04)
 
 A follow-up sweep closing every deferred/documented-not-fixed item left by
 the v0.2.1 hardening audits (concurrency, connection-reuse, and one
@@ -326,7 +326,7 @@ changes are called out under Changed.
   instead of each duplicating it — no behavior change. See
   [Architecture](docs/architecture.md).
 
-## [0.2.1] — 2026-08-04
+## v0.2.1 (2026-08-04)
 
 A hardening sweep across security (SSRF, injection, RNG), concurrency
 (goroutine/connection leaks, races), and correctness (two HIGH bugs
@@ -493,7 +493,7 @@ out under Changed.
   (previously the request was always sent). Conforming tool-serving servers
   advertise the capability, so this only affects servers that omit it.
 
-## [0.2.0] — 2026-08-03
+## v0.2.0 (2026-08-03)
 
 Waves 9, 10, 11, 12, 13, and 14 of the [AI SDK 6 parity roadmap](docs/superpowers/plans/2026-08-03-v6-parity-roadmap.md) —
 the closing release of the parity program. Wave 9: v5 leftovers plus quick
@@ -771,13 +771,13 @@ OnInputDelta, OnInputAvailable})`, mirroring the Vercel AI SDK v6's
   (`POST`/`DELETE /v1/files`, `anthropic-beta: files-api-2025-04-14` —
   isolated to `files.go`, never leaking onto `/v1/messages`) implement
   `FileStore`. Not wired into `ai.Registry`. See
-  [Media § Files & skills](docs/core/media.md#files--skills).
+  [Media § Files and skills](docs/core/media.md#files-and-skills).
 - `(*anthropic.Provider).UploadSkill`/`.DeleteSkill`: Anthropic's Skills
   API (`uploadSkill` in Vercel's terms) — a distinct, **Anthropic-only**
   capability with no generic `provider` interface, unlike Files.
   Multipart `POST /v1/skills` (file part `files[]`, field
   `display_name`), `anthropic-beta: skills-2025-10-02`. See
-  [Media § Files & skills](docs/core/media.md#files--skills).
+  [Media § Files and skills](docs/core/media.md#files-and-skills).
 
 **Wave 11**
 
@@ -844,7 +844,7 @@ OnInputDelta, OnInputAvailable})`, mirroring the Vercel AI SDK v6's
   by Anthropic, Google/Vertex AI (geminicompat), and Bedrock, replacing
   three byte-identical private copies — an internal consolidation with no
   behavior change, exported for reuse. See
-  [Reasoning § EffortBudgetTokens](docs/core/reasoning.md#effortbudgettokens-the-effort--token-budget-table).
+  [Reasoning § EffortBudgetTokens](docs/core/reasoning.md#effortbudgettokens-the-effort-to-token-budget-table).
 
 **Wave 10**
 
@@ -974,7 +974,7 @@ OnInputDelta, OnInputAvailable})`, mirroring the Vercel AI SDK v6's
   empty `error` field now includes the raw response body in the returned
   error, instead of reporting the failure with no detail at all.
 
-## [0.1.0] — 2026-08-03
+## v0.1.0 (2026-08-03)
 
 The public API described in the [design spec](docs/superpowers/specs/2026-08-02-go-ai-sdk-design.md)
 is implemented and tested end-to-end: the full core SDK, 22 providers, media
@@ -1094,10 +1094,3 @@ smoke-tested against live APIs yet (see the
   and [Architecture](docs/architecture.md).
 
 [Unreleased]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.4.0...HEAD
-[0.4.0]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.3.0...v0.4.0
-[0.3.0]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.3...v0.3.0
-[0.2.3]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.2...v0.2.3
-[0.2.2]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.1...v0.2.2
-[0.2.1]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.2.0...v0.2.1
-[0.2.0]: https://github.com/azrtydxb/go-ai-sdk/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/azrtydxb/go-ai-sdk/releases/tag/v0.1.0

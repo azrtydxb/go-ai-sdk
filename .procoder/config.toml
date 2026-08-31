@@ -1,0 +1,37 @@
+# Procoder repository configuration. Every value here wins over the
+# built-in default. The obligations below are set to "block" because the
+# repository already satisfies them at the time of writing — turning one
+# up costs nothing today and catches the regression tomorrow.
+
+[git]
+# The audit found work happening directly on main. Branch per change.
+default_branch_policy = "block"
+
+[lint]
+# golangci-lint reports zero findings over the whole tree; keep it there.
+policy = "block"
+
+[test]
+# `procoder test` passes across all 62 packages. A close controller that
+# cannot verify the suite should refuse rather than assume.
+policy = "block"
+
+[docs]
+# This is an SDK: the documentation is half the product, and a broken
+# reference is a broken promise.
+policy = "block"
+
+[ci]
+# ci.yml already pins every action to a commit SHA. Tags can be silently
+# repointed, so keep new ones from arriving unpinned.
+pin_actions_policy = "block"
+
+[release]
+# The version-bearing files `procoder release` checks for sync. There is
+# no docs/index.md in this repository; the README's status line and the
+# changelog's newest heading are what carry the version.
+files = ["README.md", "CHANGELOG.md"]
+
+[sprint]
+# No backlog or sprint workflow in use here yet.
+retro = "off"
