@@ -44,13 +44,13 @@ func newEmbeddingFixtureServer(t *testing.T, wantBearer string) *httptest.Server
 			if i > 0 {
 				sb.WriteString(",")
 			}
-			fmt.Fprintf(&sb, `{"embeddings":{"values":[%d.0,%d.0,%d.0],"statistics":{"truncated":false,"token_count":%d}}}`,
+			_, _ = fmt.Fprintf(&sb, `{"embeddings":{"values":[%d.0,%d.0,%d.0],"statistics":{"truncated":false,"token_count":%d}}}`,
 				i, i+1, i+2, len(inst.Content))
 		}
 		sb.WriteString(`]}`)
 
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(sb.String()))
+		_, _ = w.Write([]byte(sb.String()))
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(handler))
@@ -109,7 +109,7 @@ func TestEmbeddingModel(t *testing.T) {
 func TestEmbeddingModel_Error(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(500)
-		w.Write([]byte(`{"error":{"message":"internal error"}}`))
+		_, _ = w.Write([]byte(`{"error":{"message":"internal error"}}`))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -131,7 +131,7 @@ func TestEmbeddingModel_ShortResponseErrors(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Two values requested ("a", "b"), only one prediction returned.
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"predictions":[{"embeddings":{"values":[0.1,0.2],"statistics":{"token_count":1}}}]}`))
+		_, _ = w.Write([]byte(`{"predictions":[{"embeddings":{"values":[0.1,0.2],"statistics":{"token_count":1}}}]}`))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -156,7 +156,7 @@ func TestEmbeddingModel_HeadersApplied(t *testing.T) {
 		gotExtra = r.Header.Get("X-Test")
 		gotAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"predictions":[{"embeddings":{"values":[0.1],"statistics":{"token_count":1}}}]}`))
+		_, _ = w.Write([]byte(`{"predictions":[{"embeddings":{"values":[0.1],"statistics":{"token_count":1}}}]}`))
 	}))
 	t.Cleanup(srv.Close)
 

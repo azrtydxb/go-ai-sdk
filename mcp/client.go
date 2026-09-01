@@ -205,7 +205,7 @@ func (c *Client) ListTools(ctx context.Context) ([]ToolDef, error) {
 		}
 		items := make([]ToolDef, len(res.Tools))
 		for i, t := range res.Tools {
-			items[i] = ToolDef{Name: t.Name, Description: t.Description, InputSchema: t.InputSchema}
+			items[i] = ToolDef(t)
 		}
 		return items, res.NextCursor, nil
 	})

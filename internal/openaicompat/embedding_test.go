@@ -23,7 +23,7 @@ func TestEmbedMissingIndexErrors(t *testing.T) {
 			},
 			Usage: wireUsage{PromptTokens: 9, TotalTokens: 9},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)

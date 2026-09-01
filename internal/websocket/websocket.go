@@ -228,7 +228,7 @@ func Dial(ctx context.Context, wsURL string, opts DialOptions) (*Conn, error) {
 		}
 		tlsConn := tls.Client(rawConn, tlsConfig)
 		if err := tlsConn.HandshakeContext(ctx); err != nil {
-			rawConn.Close()
+			_ = rawConn.Close()
 			return nil, fmt.Errorf("websocket: tls handshake: %w", err)
 		}
 		conn = tlsConn
@@ -241,7 +241,7 @@ func Dial(ctx context.Context, wsURL string, opts DialOptions) (*Conn, error) {
 		return herr
 	})
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, err
 	}
 
@@ -265,11 +265,11 @@ func handshake(conn net.Conn, u *url.URL, extraHeaders http.Header) (*Conn, erro
 	key := base64.StdEncoding.EncodeToString(keyBytes)
 
 	var req bytes.Buffer
-	fmt.Fprintf(&req, "GET %s HTTP/1.1\r\n", u.RequestURI())
-	fmt.Fprintf(&req, "Host: %s\r\n", u.Host)
+	_, _ = fmt.Fprintf(&req, "GET %s HTTP/1.1\r\n", u.RequestURI())
+	_, _ = fmt.Fprintf(&req, "Host: %s\r\n", u.Host)
 	req.WriteString("Upgrade: websocket\r\n")
 	req.WriteString("Connection: Upgrade\r\n")
-	fmt.Fprintf(&req, "Sec-WebSocket-Key: %s\r\n", key)
+	_, _ = fmt.Fprintf(&req, "Sec-WebSocket-Key: %s\r\n", key)
 	req.WriteString("Sec-WebSocket-Version: 13\r\n")
 	for name, values := range extraHeaders {
 		if isReservedHeader(name) {
@@ -284,7 +284,7 @@ func handshake(conn net.Conn, u *url.URL, extraHeaders http.Header) (*Conn, erro
 			if strings.ContainsAny(v, "\r\n") {
 				return nil, fmt.Errorf("websocket: invalid value for header %q: contains CR or LF", name)
 			}
-			fmt.Fprintf(&req, "%s: %s\r\n", name, v)
+			_, _ = fmt.Fprintf(&req, "%s: %s\r\n", name, v)
 		}
 	}
 	req.WriteString("\r\n")
@@ -298,7 +298,7 @@ func handshake(conn net.Conn, u *url.URL, extraHeaders http.Header) (*Conn, erro
 	if err != nil {
 		return nil, fmt.Errorf("websocket: read handshake response: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusSwitchingProtocols {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
@@ -623,7 +623,7 @@ func (c *Conn) abort(code int, reason string) {
 func (c *Conn) shutdown() {
 	c.shutdownOnce.Do(func() {
 		c.localClose.Store(true)
-		c.conn.Close()
+		_ = c.conn.Close()
 	})
 }
 
@@ -661,7 +661,7 @@ func (c *Conn) writeControl(opcode uint8, payload []byte) error {
 	}
 	defer c.unlockWrite()
 	_ = c.conn.SetWriteDeadline(time.Now().Add(controlWriteTimeout))
-	defer c.conn.SetWriteDeadline(time.Time{})
+	defer func() { _ = c.conn.SetWriteDeadline(time.Time{}) }()
 	return writeFrame(c.conn, true, opcode, payload, &key)
 }
 

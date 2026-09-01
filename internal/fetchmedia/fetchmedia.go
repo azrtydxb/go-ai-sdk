@@ -140,7 +140,7 @@ func fetch(ctx context.Context, client *http.Client, rawURL string, maxBytes int
 	if err != nil {
 		return nil, "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
 	if err != nil {

@@ -34,7 +34,7 @@ func TestTranscribe_HappyPath(t *testing.T) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 		gotFileContentType = header.Header.Get("Content-Type")
 		buf := make([]byte, 1024)
 		n, _ := file.Read(buf)
@@ -42,7 +42,7 @@ func TestTranscribe_HappyPath(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"text": "hello world",
 			"language_code": "en",
 			"words": [
@@ -52,7 +52,7 @@ func TestTranscribe_HappyPath(t *testing.T) {
 			]
 		}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL))
 	m := p.TranscriptionModel("scribe_v1")
@@ -116,9 +116,9 @@ func TestTranscribe_NoLanguageOmitsField(t *testing.T) {
 			t.Error("language_code should not be present when Language is empty")
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"text":"hi","words":[]}`))
+		_, _ = w.Write([]byte(`{"text":"hi","words":[]}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.TranscriptionModel("scribe_v1")
@@ -136,7 +136,7 @@ func TestTranscribe_DurationIgnoresTrailingNonWordEntry(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"text": "hello world",
 			"language_code": "en",
 			"words": [
@@ -146,7 +146,7 @@ func TestTranscribe_DurationIgnoresTrailingNonWordEntry(t *testing.T) {
 			]
 		}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL))
 	m := p.TranscriptionModel("scribe_v1")
@@ -171,9 +171,9 @@ func TestTranscribe_EmptyWords(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"text":"hello world","language_code":"en","words":[]}`))
+		_, _ = w.Write([]byte(`{"text":"hello world","language_code":"en","words":[]}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL))
 	m := p.TranscriptionModel("scribe_v1")
@@ -200,9 +200,9 @@ func TestTranscribe_EmptyWords(t *testing.T) {
 func TestTranscribe_Unauthorized(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"detail":"missing api key"}`))
+		_, _ = w.Write([]byte(`{"detail":"missing api key"}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey(""), WithBaseURL(srv.URL))
 	m := p.TranscriptionModel("scribe_v1")
@@ -231,7 +231,7 @@ func TestTranscribe_ContextCancellation(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.TranscriptionModel("scribe_v1")
@@ -312,7 +312,7 @@ func TestTranscribe_RequestHeaders(t *testing.T) {
 		gotCustom = r.Header.Get("X-Custom-Header")
 		gotAuth = r.Header.Get("xi-api-key")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"text":"hi","language_code":"en","words":[]}`))
+		_, _ = w.Write([]byte(`{"text":"hi","language_code":"en","words":[]}`))
 	}))
 	t.Cleanup(srv.Close)
 

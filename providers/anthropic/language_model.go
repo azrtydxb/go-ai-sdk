@@ -107,7 +107,7 @@ func (m *languageModel) Generate(ctx context.Context, call provider.Call) (*prov
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -138,7 +138,7 @@ func (m *languageModel) Stream(ctx context.Context, call provider.Call) (provide
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		body, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
 			return nil, fmt.Errorf("anthropic: read error response: %w", readErr)
@@ -194,7 +194,6 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 		var usage provider.Usage
 		var stopReason string
 		haveStopReason := false
-		sawMessageStop := false
 		var cacheCreationInputTokens int
 
 		for ev, err := range sse.Scan(s.body) {
@@ -338,7 +337,6 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 				}
 
 			case "message_stop":
-				sawMessageStop = true
 				reason := provider.FinishOther
 				if haveStopReason {
 					reason = mapStopReason(stopReason)
@@ -355,10 +353,6 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 			default:
 				// ping and any other/unrecognized named events: ignore.
 			}
-		}
-
-		if sawMessageStop {
-			return
 		}
 
 		// The SSE stream ended (server closed the connection) without a

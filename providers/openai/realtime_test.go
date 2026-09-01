@@ -28,13 +28,13 @@ func TestRealtimeSession_HandshakeAndSessionUpdate(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		requestCapturingUpgrade(conn, &gotAuth, &gotBeta, &gotURL)
 		_, payload, err := websockettest.ReadMessage(conn)
 		if err == nil {
 			gotSessionMsg = payload
 		}
-		websockettest.WriteClose(conn, 1000, "")
+		_ = websockettest.WriteClose(conn, 1000, "")
 	}()
 
 	p := New(WithAPIKey("oa-key"), WithBaseURL(baseURL))
@@ -51,7 +51,7 @@ func TestRealtimeSession_HandshakeAndSessionUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RealtimeSession: %v", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	for range session.Events() {
 	}
@@ -107,7 +107,7 @@ func TestRealtimeSession_SessionUpdateOmitsEmptyFields(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		if err := websockettest.Upgrade(conn); err != nil {
 			return
 		}
@@ -115,7 +115,7 @@ func TestRealtimeSession_SessionUpdateOmitsEmptyFields(t *testing.T) {
 		if err == nil {
 			gotSessionMsg = payload
 		}
-		websockettest.WriteClose(conn, 1000, "")
+		_ = websockettest.WriteClose(conn, 1000, "")
 	}()
 
 	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
@@ -123,7 +123,7 @@ func TestRealtimeSession_SessionUpdateOmitsEmptyFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RealtimeSession: %v", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	for range session.Events() {
 	}
@@ -151,16 +151,16 @@ func TestRealtimeSession_SendAudioWireShape(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		if err := websockettest.Upgrade(conn); err != nil {
 			return
 		}
-		websockettest.ReadMessage(conn) // session update
+		_, _, _ = websockettest.ReadMessage(conn) // session update
 		_, payload, err := websockettest.ReadMessage(conn)
 		if err == nil {
 			msgCh <- payload
 		}
-		websockettest.WriteClose(conn, 1000, "")
+		_ = websockettest.WriteClose(conn, 1000, "")
 	}()
 
 	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
@@ -168,7 +168,7 @@ func TestRealtimeSession_SendAudioWireShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RealtimeSession: %v", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	if err := session.SendAudio(context.Background(), []byte("pcm-bytes")); err != nil {
 		t.Fatalf("SendAudio: %v", err)
@@ -204,16 +204,16 @@ func TestRealtimeSession_CommitAudioWireShape(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		if err := websockettest.Upgrade(conn); err != nil {
 			return
 		}
-		websockettest.ReadMessage(conn) // session update
+		_, _, _ = websockettest.ReadMessage(conn) // session update
 		_, payload, err := websockettest.ReadMessage(conn)
 		if err == nil {
 			msgCh <- payload
 		}
-		websockettest.WriteClose(conn, 1000, "")
+		_ = websockettest.WriteClose(conn, 1000, "")
 	}()
 
 	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
@@ -221,7 +221,7 @@ func TestRealtimeSession_CommitAudioWireShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RealtimeSession: %v", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	if err := session.CommitAudio(context.Background()); err != nil {
 		t.Fatalf("CommitAudio: %v", err)
@@ -249,16 +249,16 @@ func TestRealtimeSession_SendTextWireShape(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		if err := websockettest.Upgrade(conn); err != nil {
 			return
 		}
-		websockettest.ReadMessage(conn) // session update
+		_, _, _ = websockettest.ReadMessage(conn) // session update
 		_, payload, err := websockettest.ReadMessage(conn)
 		if err == nil {
 			msgCh <- payload
 		}
-		websockettest.WriteClose(conn, 1000, "")
+		_ = websockettest.WriteClose(conn, 1000, "")
 	}()
 
 	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
@@ -266,7 +266,7 @@ func TestRealtimeSession_SendTextWireShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RealtimeSession: %v", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	if err := session.SendText(context.Background(), "hello there"); err != nil {
 		t.Fatalf("SendText: %v", err)
@@ -313,16 +313,16 @@ func TestRealtimeSession_CreateResponseWireShape(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		if err := websockettest.Upgrade(conn); err != nil {
 			return
 		}
-		websockettest.ReadMessage(conn) // session update
+		_, _, _ = websockettest.ReadMessage(conn) // session update
 		_, payload, err := websockettest.ReadMessage(conn)
 		if err == nil {
 			msgCh <- payload
 		}
-		websockettest.WriteClose(conn, 1000, "")
+		_ = websockettest.WriteClose(conn, 1000, "")
 	}()
 
 	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
@@ -330,7 +330,7 @@ func TestRealtimeSession_CreateResponseWireShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RealtimeSession: %v", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	if err := session.CreateResponse(context.Background()); err != nil {
 		t.Fatalf("CreateResponse: %v", err)
@@ -357,26 +357,26 @@ func TestRealtimeSession_EventSurfacing(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		if err := websockettest.Upgrade(conn); err != nil {
 			return
 		}
-		websockettest.ReadMessage(conn) // session update
+		_, _, _ = websockettest.ReadMessage(conn) // session update
 
 		audioB64 := base64.StdEncoding.EncodeToString([]byte("pcm-out"))
-		websockettest.WriteMessage(conn, websockettest.OpText, []byte(
+		_ = websockettest.WriteMessage(conn, websockettest.OpText, []byte(
 			`{"type":"response.output_audio.delta","delta":"`+audioB64+`"}`))
-		websockettest.WriteMessage(conn, websockettest.OpText, []byte(
+		_ = websockettest.WriteMessage(conn, websockettest.OpText, []byte(
 			`{"type":"response.audio.delta","delta":"`+audioB64+`"}`))
-		websockettest.WriteMessage(conn, websockettest.OpText, []byte(
+		_ = websockettest.WriteMessage(conn, websockettest.OpText, []byte(
 			`{"type":"response.output_text.delta","delta":"hel"}`))
-		websockettest.WriteMessage(conn, websockettest.OpText, []byte(
+		_ = websockettest.WriteMessage(conn, websockettest.OpText, []byte(
 			`{"type":"response.text.delta","delta":"lo"}`))
-		websockettest.WriteMessage(conn, websockettest.OpText, []byte(
+		_ = websockettest.WriteMessage(conn, websockettest.OpText, []byte(
 			`{"type":"response.audio_transcript.delta","delta":"transcript"}`))
-		websockettest.WriteMessage(conn, websockettest.OpText, []byte(
+		_ = websockettest.WriteMessage(conn, websockettest.OpText, []byte(
 			`{"type":"session.created"}`))
-		websockettest.WriteClose(conn, 1000, "")
+		_ = websockettest.WriteClose(conn, 1000, "")
 	}()
 
 	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
@@ -384,7 +384,7 @@ func TestRealtimeSession_EventSurfacing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RealtimeSession: %v", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	var got []RealtimeEvent
 	for e := range session.Events() {
@@ -435,17 +435,17 @@ func TestRealtimeSession_CorruptAudioDeltaDeliversRawOnly(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		if err := websockettest.Upgrade(conn); err != nil {
 			return
 		}
-		websockettest.ReadMessage(conn) // session update
+		_, _, _ = websockettest.ReadMessage(conn) // session update
 
-		websockettest.WriteMessage(conn, websockettest.OpText, []byte(
+		_ = websockettest.WriteMessage(conn, websockettest.OpText, []byte(
 			`{"type":"response.output_audio.delta","delta":"not-valid-base64!!"}`))
-		websockettest.WriteMessage(conn, websockettest.OpText, []byte(
+		_ = websockettest.WriteMessage(conn, websockettest.OpText, []byte(
 			`{"type":"response.output_text.delta","delta":"after"}`))
-		websockettest.WriteClose(conn, 1000, "")
+		_ = websockettest.WriteClose(conn, 1000, "")
 	}()
 
 	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
@@ -453,7 +453,7 @@ func TestRealtimeSession_CorruptAudioDeltaDeliversRawOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RealtimeSession: %v", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	var got []RealtimeEvent
 	for e := range session.Events() {
@@ -494,16 +494,16 @@ func TestRealtimeSession_ErrorEventRecordedIterationContinues(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		if err := websockettest.Upgrade(conn); err != nil {
 			return
 		}
-		websockettest.ReadMessage(conn) // session update
-		websockettest.WriteMessage(conn, websockettest.OpText, []byte(
+		_, _, _ = websockettest.ReadMessage(conn) // session update
+		_ = websockettest.WriteMessage(conn, websockettest.OpText, []byte(
 			`{"type":"error","error":{"message":"bad request"}}`))
-		websockettest.WriteMessage(conn, websockettest.OpText, []byte(
+		_ = websockettest.WriteMessage(conn, websockettest.OpText, []byte(
 			`{"type":"response.output_text.delta","delta":"still here"}`))
-		websockettest.WriteClose(conn, 1000, "")
+		_ = websockettest.WriteClose(conn, 1000, "")
 	}()
 
 	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
@@ -511,7 +511,7 @@ func TestRealtimeSession_ErrorEventRecordedIterationContinues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RealtimeSession: %v", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	var got []RealtimeEvent
 	for e := range session.Events() {
@@ -541,12 +541,12 @@ func TestRealtimeSession_ServerCloseIsCleanEnd(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		if err := websockettest.Upgrade(conn); err != nil {
 			return
 		}
-		websockettest.ReadMessage(conn) // session update
-		websockettest.WriteClose(conn, 1000, "done")
+		_, _, _ = websockettest.ReadMessage(conn) // session update
+		_ = websockettest.WriteClose(conn, 1000, "done")
 	}()
 
 	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
@@ -554,7 +554,7 @@ func TestRealtimeSession_ServerCloseIsCleanEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RealtimeSession: %v", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	for range session.Events() {
 	}
@@ -580,23 +580,23 @@ func TestRealtimeSession_MalformedMessageClosesUnderlyingConn(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		if err := websockettest.Upgrade(conn); err != nil {
 			return
 		}
-		websockettest.ReadMessage(conn) // session update
-		websockettest.WriteMessage(conn, websockettest.OpText, []byte(`not json`))
+		_, _, _ = websockettest.ReadMessage(conn) // session update
+		_ = websockettest.WriteMessage(conn, websockettest.OpText, []byte(`not json`))
 
 		// The session's own Close() (called by the fixed readLoop) sends a
 		// close frame before tearing down the socket; drain it first so the
 		// raw Read below can't spuriously observe those buffered bytes
 		// instead of the eventual EOF/reset.
-		websockettest.ReadMessage(conn)
+		_, _, _ = websockettest.ReadMessage(conn)
 
 		// Without calling session.Close(), confirm the client tore down its
 		// socket as soon as readLoop saw the decode error, rather than
 		// leaving the TCP connection open until some later Close().
-		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 		var b [1]byte
 		_, rerr := conn.Read(b[:])
 		var netErr net.Error
@@ -636,12 +636,12 @@ func TestRealtimeSession_CtxCancelMidSession(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		if err := websockettest.Upgrade(conn); err != nil {
 			return
 		}
-		websockettest.ReadMessage(conn) // session update
-		websockettest.ReadMessage(conn) // block until client disconnects
+		_, _, _ = websockettest.ReadMessage(conn) // session update
+		_, _, _ = websockettest.ReadMessage(conn) // block until client disconnects
 	}()
 
 	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
@@ -650,7 +650,7 @@ func TestRealtimeSession_CtxCancelMidSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RealtimeSession: %v", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	cancel()
 
@@ -669,10 +669,10 @@ func TestRealtimeSession_CloseIdempotent(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
-		websockettest.Upgrade(conn)
-		websockettest.ReadMessage(conn)
-		websockettest.ReadMessage(conn)
+		defer func() { _ = conn.Close() }()
+		_ = websockettest.Upgrade(conn)
+		_, _, _ = websockettest.ReadMessage(conn)
+		_, _, _ = websockettest.ReadMessage(conn)
 	}()
 
 	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
@@ -703,10 +703,10 @@ func TestRealtimeSession_SendAfterCloseReturnsError(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
-		websockettest.Upgrade(conn)
-		websockettest.ReadMessage(conn)
-		websockettest.ReadMessage(conn)
+		defer func() { _ = conn.Close() }()
+		_ = websockettest.Upgrade(conn)
+		_, _, _ = websockettest.ReadMessage(conn)
+		_, _, _ = websockettest.ReadMessage(conn)
 	}()
 
 	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
@@ -755,20 +755,20 @@ func TestRealtimeSession_AbandonedEventsThenCloseUnblocksReadLoop(t *testing.T) 
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		if err := websockettest.Upgrade(conn); err != nil {
 			return
 		}
-		websockettest.ReadMessage(conn) // session update
+		_, _, _ = websockettest.ReadMessage(conn) // session update
 		// Flood far more delta events than the session's internal
 		// event-channel buffer (32) so the reader goroutine is guaranteed
 		// to still be blocked trying to deliver one when the consumer
 		// below abandons Events().
 		for i := 0; i < 200; i++ {
-			websockettest.WriteMessage(conn, websockettest.OpText, []byte(
+			_ = websockettest.WriteMessage(conn, websockettest.OpText, []byte(
 				`{"type":"response.output_text.delta","delta":"x"}`))
 		}
-		websockettest.ReadMessage(conn) // block until client disconnects
+		_, _, _ = websockettest.ReadMessage(conn) // block until client disconnects
 	}()
 
 	p := New(WithAPIKey("k"), WithBaseURL(baseURL))

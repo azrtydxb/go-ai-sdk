@@ -42,13 +42,13 @@ func newFixtureServer(t *testing.T, pollBodies []string) (srv *httptest.Server, 
 				}
 				if part.FormName() == "audio" {
 					gotFilename = part.FileName()
-					io.ReadAll(part)
+					_, _ = io.ReadAll(part)
 				}
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"audio_url":"https://cdn.gladia.test/audio123"}`))
+		_, _ = w.Write([]byte(`{"audio_url":"https://cdn.gladia.test/audio123"}`))
 	})
 	mux.HandleFunc("/v2/pre-recorded", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -56,10 +56,10 @@ func newFixtureServer(t *testing.T, pollBodies []string) (srv *httptest.Server, 
 		}
 		gotCreateKey = r.Header.Get("x-gladia-key")
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &gotCreateBody)
+		_ = json.Unmarshal(body, &gotCreateBody)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"job-1","result_url":"https://api.gladia.test/v2/pre-recorded/job-1"}`))
+		_, _ = w.Write([]byte(`{"id":"job-1","result_url":"https://api.gladia.test/v2/pre-recorded/job-1"}`))
 	})
 	mux.HandleFunc("/v2/pre-recorded/job-1", func(w http.ResponseWriter, r *http.Request) {
 		i := atomic.AddInt32(&n, 1)
@@ -69,7 +69,7 @@ func newFixtureServer(t *testing.T, pollBodies []string) (srv *httptest.Server, 
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(pollBodies[idx]))
+		_, _ = w.Write([]byte(pollBodies[idx]))
 	})
 
 	s := httptest.NewServer(mux)
@@ -254,9 +254,9 @@ func TestTranscribe_ProviderOptionsMergeTopLevel(t *testing.T) {
 func TestTranscribe_401Error(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"message":"invalid api key"}`))
+		_, _ = w.Write([]byte(`{"message":"invalid api key"}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("bad-key"), WithBaseURL(srv.URL))
 	m := p.TranscriptionModel("")
@@ -284,7 +284,7 @@ func TestTranscribe_ContextCancellationMidPoll(t *testing.T) {
 	mux.HandleFunc("/v2/upload", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"audio_url":"https://cdn.gladia.test/audio123"}`))
+		_, _ = w.Write([]byte(`{"audio_url":"https://cdn.gladia.test/audio123"}`))
 	})
 	mux.HandleFunc("/v2/pre-recorded", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -292,19 +292,19 @@ func TestTranscribe_ContextCancellationMidPoll(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"job-1","result_url":"x"}`))
+		_, _ = w.Write([]byte(`{"id":"job-1","result_url":"x"}`))
 	})
 	mux.HandleFunc("/v2/pre-recorded/job-1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"job-1","status":"queued"}`))
+		_, _ = w.Write([]byte(`{"id":"job-1","status":"queued"}`))
 		select {
 		case pollHit <- struct{}{}:
 		default:
 		}
 	})
 	srv := httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	// A poll interval long enough that the test can cancel the context
 	// while Transcribe is sleeping between polls.
@@ -334,7 +334,7 @@ func TestTranscribe_PollNon2xxError(t *testing.T) {
 	mux.HandleFunc("/v2/upload", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"audio_url":"https://cdn.gladia.test/audio123"}`))
+		_, _ = w.Write([]byte(`{"audio_url":"https://cdn.gladia.test/audio123"}`))
 	})
 	mux.HandleFunc("/v2/pre-recorded", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -342,15 +342,15 @@ func TestTranscribe_PollNon2xxError(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"job-1","result_url":"x"}`))
+		_, _ = w.Write([]byte(`{"id":"job-1","result_url":"x"}`))
 	})
 	mux.HandleFunc("/v2/pre-recorded/job-1", func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&pollHit, 1)
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"message":"internal error"}`))
+		_, _ = w.Write([]byte(`{"message":"internal error"}`))
 	})
 	srv := httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.TranscriptionModel("")
@@ -376,10 +376,10 @@ func TestTranscribe_EmptyAudioURLError(t *testing.T) {
 	mux.HandleFunc("/v2/upload", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"audio_url":""}`))
+		_, _ = w.Write([]byte(`{"audio_url":""}`))
 	})
 	srv := httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.TranscriptionModel("")
@@ -453,19 +453,19 @@ func TestTranscribe_RequestHeaders(t *testing.T) {
 		uploadCustom = r.Header.Get("X-Custom-Header")
 		uploadAuth = r.Header.Get("x-gladia-key")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"audio_url":"https://cdn.gladia.test/audio123"}`))
+		_, _ = w.Write([]byte(`{"audio_url":"https://cdn.gladia.test/audio123"}`))
 	})
 	mux.HandleFunc("/v2/pre-recorded", func(w http.ResponseWriter, r *http.Request) {
 		createCustom = r.Header.Get("X-Custom-Header")
 		createAuth = r.Header.Get("x-gladia-key")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"id":"job-1"}`))
+		_, _ = w.Write([]byte(`{"id":"job-1"}`))
 	})
 	mux.HandleFunc("/v2/pre-recorded/job-1", func(w http.ResponseWriter, r *http.Request) {
 		pollCustom = r.Header.Get("X-Custom-Header")
 		pollAuth = r.Header.Get("x-gladia-key")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"id":"job-1","status":"done","result":{"transcription":{"full_transcript":"hi"}}}`))
+		_, _ = w.Write([]byte(`{"id":"job-1","status":"done","result":{"transcription":{"full_transcript":"hi"}}}`))
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)

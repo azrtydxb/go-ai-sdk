@@ -63,13 +63,13 @@ func newEmbeddingFixtureServer(t *testing.T) (*httptest.Server, *embedFixtureSta
 		case "fail 400":
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(400)
-			w.Write([]byte(`{"message":"bad request"}`))
+			_, _ = w.Write([]byte(`{"message":"bad request"}`))
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(titanEmbedResponse{
+		_ = json.NewEncoder(w).Encode(titanEmbedResponse{
 			Embedding:           []float64{0.1, 0.2, 0.3},
 			InputTextTokenCount: len(req.InputText),
 		})
@@ -187,7 +187,7 @@ func TestEmbeddingModel_HeadersApplied(t *testing.T) {
 		gotExtra = r.Header.Get("X-Test")
 		gotAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(titanEmbedResponse{Embedding: []float64{0.1}})
+		_ = json.NewEncoder(w).Encode(titanEmbedResponse{Embedding: []float64{0.1}})
 	})
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
@@ -231,7 +231,7 @@ func TestEmbeddingModel_ProviderOptionsMerged(t *testing.T) {
 			t.Fatalf("fixture: decode request: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(titanEmbedResponse{Embedding: []float64{0.1}})
+		_ = json.NewEncoder(w).Encode(titanEmbedResponse{Embedding: []float64{0.1}})
 	})
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)

@@ -56,7 +56,7 @@ func Accept(l net.Listener) (net.Conn, error) {
 		return nil, err
 	}
 	if err := Upgrade(conn); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, err
 	}
 	return conn, nil
@@ -72,7 +72,7 @@ func Upgrade(conn net.Conn) error {
 	if err != nil {
 		return fmt.Errorf("websockettest: read request: %w", err)
 	}
-	defer req.Body.Close()
+	defer func() { _ = req.Body.Close() }()
 
 	if !strings.EqualFold(req.Header.Get("Upgrade"), "websocket") {
 		return fmt.Errorf("websockettest: missing Upgrade: websocket header")

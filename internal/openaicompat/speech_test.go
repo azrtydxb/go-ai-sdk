@@ -64,7 +64,9 @@ func TestSpeechRequestShapeExplicitVoiceAndFormat(t *testing.T) {
 
 	reqs := srv.Requests()
 	var req speechRequest
-	json.Unmarshal(reqs[len(reqs)-1], &req)
+	if err := json.Unmarshal(reqs[len(reqs)-1], &req); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if req.Voice != "nova" {
 		t.Errorf("voice = %q, want nova", req.Voice)
 	}

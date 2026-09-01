@@ -134,12 +134,12 @@ func newFixtureServer(t *testing.T) (*httptest.Server, *fixtureState) {
 		case "fail 429":
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(429)
-			w.Write([]byte(`{"message":"rate limited"}`))
+			_, _ = w.Write([]byte(`{"message":"rate limited"}`))
 			return
 		case "fail 400":
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(400)
-			w.Write([]byte(`{"message":"bad request"}`))
+			_, _ = w.Write([]byte(`{"message":"bad request"}`))
 			return
 		}
 
@@ -440,7 +440,7 @@ func TestGenerateReasoningContentRoundTrip(t *testing.T) {
 	mux.HandleFunc("/model/{id}/converse", func(w http.ResponseWriter, r *http.Request) {
 		raw := readBody(t, r)
 		var req converseRequest
-		json.Unmarshal(raw, &req)
+		_ = json.Unmarshal(raw, &req)
 		fs.record(raw, req, r)
 		writeJSON(t, w, converseResponse{
 			Output: converseOutput{Message: wireMessage{Role: "assistant", Content: []wireContentBlock{
@@ -595,7 +595,7 @@ func TestRequestShape_Headers(t *testing.T) {
 			Output:     converseOutput{Message: wireMessage{Role: "assistant", Content: []wireContentBlock{{Text: strPtr("hi")}}}},
 			StopReason: "end_turn",
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	t.Cleanup(srv.Close)
 
@@ -656,7 +656,7 @@ func TestRequestShape_CallerContentTypeDoesNotClobberSignedHeader(t *testing.T) 
 			Output:     converseOutput{Message: wireMessage{Role: "assistant", Content: []wireContentBlock{{Text: strPtr("hi")}}}},
 			StopReason: "end_turn",
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	t.Cleanup(srv.Close)
 
@@ -1117,7 +1117,7 @@ func TestStream_TruncatedWithoutMessageStop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer sr.Close()
+	defer func() { _ = sr.Close() }()
 
 	var finishes int
 	for part := range sr.Parts() {
@@ -1142,7 +1142,7 @@ func TestStream_ExceptionFrame(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer sr.Close()
+	defer func() { _ = sr.Close() }()
 
 	var finishes int
 	for part := range sr.Parts() {
@@ -1176,7 +1176,7 @@ func TestStream_TransportErrorFrame(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer sr.Close()
+	defer func() { _ = sr.Close() }()
 
 	var finishes int
 	for part := range sr.Parts() {
@@ -1208,7 +1208,7 @@ func TestModelPath_URLEscapesModelID(t *testing.T) {
 			Usage:      wireUsage{InputTokens: 1, OutputTokens: 1, TotalTokens: 2},
 		})
 	}))
-	defer server.Close()
+	defer func() { server.Close() }()
 
 	p := New(
 		WithRegion("us-east-1"),
@@ -1308,7 +1308,7 @@ func TestStream_ReasoningContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer sr.Close()
+	defer func() { _ = sr.Close() }()
 
 	var reasoningDeltas []string
 	var reasoningEnds []provider.ReasoningPart

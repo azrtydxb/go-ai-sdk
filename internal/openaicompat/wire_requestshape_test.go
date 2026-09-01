@@ -99,7 +99,9 @@ func TestRequestShapeToolResultMultiModalProjectsToText(t *testing.T) {
 	}
 	toolMsg := msgs[len(msgs)-1]
 	var role string
-	json.Unmarshal(toolMsg["role"], &role)
+	if err := json.Unmarshal(toolMsg["role"], &role); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if role != "tool" {
 		t.Fatalf("last message role = %q, want tool", role)
 	}
@@ -430,7 +432,9 @@ func TestRequestShapeTools(t *testing.T) {
 		t.Errorf("request missing tools field: %s", lastRawBody(srv))
 	}
 	var tools []wireTool
-	json.Unmarshal(raw["tools"], &tools)
+	if err := json.Unmarshal(raw["tools"], &tools); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if len(tools) != 1 || tools[0].Type != "function" || tools[0].Function.Name != "get_weather" {
 		t.Errorf("tools = %+v, want one function tool named get_weather", tools)
 	}
@@ -480,7 +484,7 @@ func TestRequestShapeToolChoiceModes(t *testing.T) {
 			t.Fatalf("Generate: %v", err)
 		}
 		var raw map[string]json.RawMessage
-		json.Unmarshal(lastRawBody(srv), &raw)
+		_ = json.Unmarshal(lastRawBody(srv), &raw)
 		if string(raw["tool_choice"]) != tc.want {
 			t.Errorf("mode %v: tool_choice = %s, want %s", tc.mode, raw["tool_choice"], tc.want)
 		}
@@ -499,9 +503,9 @@ func TestRequestShapeJSONObjectResponseFormat(t *testing.T) {
 	}
 
 	var raw map[string]json.RawMessage
-	json.Unmarshal(lastRawBody(srv), &raw)
+	_ = json.Unmarshal(lastRawBody(srv), &raw)
 	var rf map[string]string
-	json.Unmarshal(raw["response_format"], &rf)
+	_ = json.Unmarshal(raw["response_format"], &rf)
 	if rf["type"] != "json_object" {
 		t.Errorf("response_format.type = %q, want json_object", rf["type"])
 	}

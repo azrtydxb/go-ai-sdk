@@ -22,12 +22,12 @@ func TestGenerateImages_RequestShapeAndBytesPassthrough(t *testing.T) {
 		gotAuth = r.Header.Get("Authorization")
 		gotAccept = r.Header.Get("Accept")
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &gotBody)
+		_ = json.Unmarshal(body, &gotBody)
 		w.Header().Set("Content-Type", "image/jpeg")
 		w.WriteHeader(http.StatusOK)
-		w.Write(imgBytes)
+		_, _ = w.Write(imgBytes)
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL))
 	m := p.ImageModel("inference.flux.schnell.txt2img")
@@ -81,11 +81,11 @@ func TestGenerateImages_SeedOmittedWhenNil(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &gotBody)
+		_ = json.Unmarshal(body, &gotBody)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("bytes"))
+		_, _ = w.Write([]byte("bytes"))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.ImageModel("inference.flux.schnell.txt2img")
@@ -107,11 +107,11 @@ func TestGenerateImages_Seed(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &gotBody)
+		_ = json.Unmarshal(body, &gotBody)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("bytes"))
+		_, _ = w.Write([]byte("bytes"))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.ImageModel("inference.flux.schnell.txt2img")
@@ -131,11 +131,11 @@ func TestGenerateImages_ProviderOptionsMergeIntoConfig(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &gotBody)
+		_ = json.Unmarshal(body, &gotBody)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("bytes"))
+		_, _ = w.Write([]byte("bytes"))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.ImageModel("inference.flux.schnell.txt2img")
@@ -174,9 +174,9 @@ func TestGenerateImages_ProviderOptionsMergeIntoConfig(t *testing.T) {
 func TestGenerateImages_401Error(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error":"invalid api key"}`))
+		_, _ = w.Write([]byte(`{"error":"invalid api key"}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("bad-key"), WithBaseURL(srv.URL))
 	m := p.ImageModel("inference.flux.schnell.txt2img")
@@ -200,9 +200,9 @@ func TestGenerateImages_401Error(t *testing.T) {
 func TestGenerateImages_ContextCancellation(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("bytes"))
+		_, _ = w.Write([]byte("bytes"))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.ImageModel("inference.flux.schnell.txt2img")
@@ -222,9 +222,9 @@ func TestGenerateImages_RequestHeaders(t *testing.T) {
 		gotCustom = r.Header.Get("X-Custom-Header")
 		gotAuth = r.Header.Get("Authorization")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("bytes"))
+		_, _ = w.Write([]byte("bytes"))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL))
 	m := p.ImageModel("inference.flux.schnell.txt2img")

@@ -75,7 +75,7 @@ func (m *languageModel) Generate(ctx context.Context, call provider.Call) (*prov
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -106,7 +106,7 @@ func (m *languageModel) Stream(ctx context.Context, call provider.Call) (provide
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		body, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
 			return nil, fmt.Errorf("openaicompat: read error response: %w", readErr)

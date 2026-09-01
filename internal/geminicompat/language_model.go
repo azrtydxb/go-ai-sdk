@@ -71,7 +71,7 @@ func (m *languageModel) Generate(ctx context.Context, call provider.Call) (*prov
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -113,7 +113,7 @@ func (m *languageModel) Stream(ctx context.Context, call provider.Call) (provide
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		respBody, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
 			return nil, fmt.Errorf("%s: read error response: %w", m.cfg.Name, readErr)

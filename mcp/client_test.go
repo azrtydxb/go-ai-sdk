@@ -118,7 +118,7 @@ func sendError(t *testing.T, server *pipeTransport, id int64, code int, message 
 func TestInitializeHandshake(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	done := make(chan error, 1)
 	go func() { done <- c.Initialize(context.Background()) }()
@@ -169,7 +169,7 @@ func TestInitializeHandshake(t *testing.T) {
 func TestInitializeRejectsUnsupportedProtocolVersion(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	done := make(chan error, 1)
 	go func() { done <- c.Initialize(context.Background()) }()
@@ -204,7 +204,7 @@ func TestInitializeRejectsUnsupportedProtocolVersion(t *testing.T) {
 func TestInitializeAcceptsLatestProtocolVersion(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	done := make(chan error, 1)
 	go func() { done <- c.Initialize(context.Background()) }()
@@ -240,7 +240,7 @@ func TestInitializeAcceptsLatestProtocolVersion(t *testing.T) {
 func TestInitializeAcceptsOlderSupportedProtocolVersion(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	done := make(chan error, 1)
 	go func() { done <- c.Initialize(context.Background()) }()
@@ -262,7 +262,7 @@ func TestInitializeAcceptsOlderSupportedProtocolVersion(t *testing.T) {
 
 func TestListToolsPagination(t *testing.T) {
 	c, server := withCap("tools")
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	type toolWire struct {
 		Name        string          `json:"name"`
@@ -383,7 +383,7 @@ func TestPaginateStopsOnEmptyCursor(t *testing.T) {
 func TestListToolsRequiresCapability(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	// serverCaps left nil: as if Initialize's server never advertised "tools".
 
 	_, err := c.ListTools(context.Background())
@@ -405,7 +405,7 @@ func TestListToolsRequiresCapability(t *testing.T) {
 func TestCallToolRequiresCapability(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	_, err := c.CallTool(context.Background(), "echo", nil)
 	var capErr *CapabilityError
@@ -425,7 +425,7 @@ func TestCallToolRequiresCapability(t *testing.T) {
 
 func TestCallToolConcatenatesTextIntoTextField(t *testing.T) {
 	c, server := withCap("tools")
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	type result struct {
 		res *ToolResult
@@ -479,7 +479,7 @@ func TestCallToolConcatenatesTextIntoTextField(t *testing.T) {
 // remains the concatenation of just the "text" parts (fix task 6).
 func TestCallToolPreservesContentParts(t *testing.T) {
 	c, server := withCap("tools")
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	type result struct {
 		res *ToolResult
@@ -538,7 +538,7 @@ func TestCallToolPreservesContentParts(t *testing.T) {
 
 func TestCallToolIsError(t *testing.T) {
 	c, server := withCap("tools")
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	type result struct {
 		res *ToolResult
@@ -570,7 +570,7 @@ func TestCallToolIsError(t *testing.T) {
 
 func TestRPCErrorSurfaces(t *testing.T) {
 	c, server := withCap("tools")
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	results := make(chan error, 1)
 	go func() {
@@ -596,7 +596,7 @@ func TestRPCErrorSurfaces(t *testing.T) {
 
 func TestContextCancellationAbandonsCall(t *testing.T) {
 	c, server := withCap("tools")
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	results := make(chan error, 1)
@@ -660,7 +660,7 @@ func TestCloseUnblocksPendingCalls(t *testing.T) {
 func TestUnknownIDIsDroppedSilently(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	// Server sends a response for an id nobody is waiting on; must not
 	// panic or wedge the client. Then a real call still works.

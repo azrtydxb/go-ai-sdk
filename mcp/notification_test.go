@@ -27,7 +27,7 @@ func sendServerNotification(t *testing.T, server *pipeTransport, method string, 
 func TestNotificationHandlerReceivesNotification(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	var (
 		mu        sync.Mutex
@@ -78,7 +78,7 @@ func TestNotificationHandlerReceivesNotification(t *testing.T) {
 // dropped (no panic) and the client keeps serving normal calls afterward.
 func TestNotificationWithoutHandlerDroppedHarmlessly(t *testing.T) {
 	c, server := withCap("tools")
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	sendServerNotification(t, server, "notifications/message", map[string]any{
 		"level": "info",

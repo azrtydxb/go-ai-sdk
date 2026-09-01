@@ -58,13 +58,13 @@ func newFilesFixture(t *testing.T, uploadStatus int, uploadBody string, deleteSt
 			}
 		}
 		w.WriteHeader(uploadStatus)
-		w.Write([]byte(uploadBody))
+		_, _ = w.Write([]byte(uploadBody))
 	})
 	mux.HandleFunc("/files/file-1", func(w http.ResponseWriter, r *http.Request) {
 		f.deleteMethod = r.Method
 		f.deletePath = r.URL.Path
 		w.WriteHeader(deleteStatus)
-		w.Write([]byte(deleteBody))
+		_, _ = w.Write([]byte(deleteBody))
 	})
 
 	srv := httptest.NewServer(mux)

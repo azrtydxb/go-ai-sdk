@@ -51,7 +51,7 @@ func newImageFixtureServer(t *testing.T) *httptest.Server {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"predictions":[{"bytesBase64Encoded":"` + onePixelPNGBase64 + `","mimeType":"image/png"}]}`))
+		_, _ = w.Write([]byte(`{"predictions":[{"bytesBase64Encoded":"` + onePixelPNGBase64 + `","mimeType":"image/png"}]}`))
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(handler))

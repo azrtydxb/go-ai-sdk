@@ -24,18 +24,18 @@ func TestGenerateVideos_RequestShapeAndSingleVideoResponse(t *testing.T) {
 		gotPath = r.URL.Path
 		gotAuth = r.Header.Get("Authorization")
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &gotBody)
+		_ = json.Unmarshal(body, &gotBody)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"video":{"url":"` + srv.URL + `/vid.mp4","content_type":"video/mp4"}}`))
+		_, _ = w.Write([]byte(`{"video":{"url":"` + srv.URL + `/vid.mp4","content_type":"video/mp4"}}`))
 	})
 	mux.HandleFunc("/vid.mp4", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "video/mp4")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("mp4data"))
+		_, _ = w.Write([]byte("mp4data"))
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL))
 	m := p.VideoModel("fal-ai/kling-video/v1/standard/text-to-video")
@@ -75,18 +75,18 @@ func TestGenerateVideos_AspectRatioOmittedWhenEmpty(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/fal-ai/kling-video/v1/standard/text-to-video", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &gotBody)
+		_ = json.Unmarshal(body, &gotBody)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"video":{"url":"` + srv.URL + `/vid.mp4"}}`))
+		_, _ = w.Write([]byte(`{"video":{"url":"` + srv.URL + `/vid.mp4"}}`))
 	})
 	mux.HandleFunc("/vid.mp4", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "video/mp4")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("mp4data"))
+		_, _ = w.Write([]byte("mp4data"))
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.VideoModel("fal-ai/kling-video/v1/standard/text-to-video")
@@ -107,20 +107,20 @@ func TestGenerateVideos_VideosArrayResponse(t *testing.T) {
 	mux.HandleFunc("/fal-ai/kling-video/v1/standard/text-to-video", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"videos":[{"url":"` + srv.URL + `/v1.mp4"},{"url":"` + srv.URL + `/v2.mp4"}]}`))
+		_, _ = w.Write([]byte(`{"videos":[{"url":"` + srv.URL + `/v1.mp4"},{"url":"` + srv.URL + `/v2.mp4"}]}`))
 	})
 	mux.HandleFunc("/v1.mp4", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "video/mp4")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("mp4-one"))
+		_, _ = w.Write([]byte("mp4-one"))
 	})
 	mux.HandleFunc("/v2.mp4", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "video/mp4")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("mp4-two"))
+		_, _ = w.Write([]byte("mp4-two"))
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.VideoModel("fal-ai/kling-video/v1/standard/text-to-video")
@@ -144,18 +144,18 @@ func TestGenerateVideos_ProviderOptionsMergeTopLevel(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/fal-ai/kling-video/v1/standard/text-to-video", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &gotBody)
+		_ = json.Unmarshal(body, &gotBody)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"video":{"url":"` + srv.URL + `/vid.mp4"}}`))
+		_, _ = w.Write([]byte(`{"video":{"url":"` + srv.URL + `/vid.mp4"}}`))
 	})
 	mux.HandleFunc("/vid.mp4", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "video/mp4")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("mp4data"))
+		_, _ = w.Write([]byte("mp4data"))
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.VideoModel("fal-ai/kling-video/v1/standard/text-to-video")
@@ -191,14 +191,14 @@ func TestGenerateVideos_FetchVideoErrorIsSinglePrefixed(t *testing.T) {
 	mux.HandleFunc("/fal-ai/kling-video/v1/standard/text-to-video", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"video":{"url":"` + srv.URL + `/missing.mp4"}}`))
+		_, _ = w.Write([]byte(`{"video":{"url":"` + srv.URL + `/missing.mp4"}}`))
 	})
 	mux.HandleFunc("/missing.mp4", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("not found"))
+		_, _ = w.Write([]byte("not found"))
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.VideoModel("fal-ai/kling-video/v1/standard/text-to-video")
@@ -220,9 +220,9 @@ func TestGenerateVideos_EmptyVideosError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"videos":[]}`))
+		_, _ = w.Write([]byte(`{"videos":[]}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.VideoModel("fal-ai/kling-video/v1/standard/text-to-video")
@@ -236,9 +236,9 @@ func TestGenerateVideos_EmptyVideosError(t *testing.T) {
 func TestGenerateVideos_401Error(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"detail":"invalid api key"}`))
+		_, _ = w.Write([]byte(`{"detail":"invalid api key"}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("bad-key"), WithBaseURL(srv.URL))
 	m := p.VideoModel("fal-ai/kling-video/v1/standard/text-to-video")
@@ -262,9 +262,9 @@ func TestGenerateVideos_401Error(t *testing.T) {
 func TestGenerateVideos_429Retryable(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
-		w.Write([]byte(`{"detail":"rate limited"}`))
+		_, _ = w.Write([]byte(`{"detail":"rate limited"}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.VideoModel("fal-ai/kling-video/v1/standard/text-to-video")
@@ -286,9 +286,9 @@ func TestGenerateVideos_ContextCancellation(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"videos":[]}`))
+		_, _ = w.Write([]byte(`{"videos":[]}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.VideoModel("fal-ai/kling-video/v1/standard/text-to-video")
@@ -308,9 +308,9 @@ func TestGenerateVideos_RequestHeaders(t *testing.T) {
 		gotCustom = r.Header.Get("X-Custom-Header")
 		gotAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"videos":[]}`))
+		_, _ = w.Write([]byte(`{"videos":[]}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL))
 	m := p.VideoModel("fal-ai/kling-video/v1/standard/text-to-video")

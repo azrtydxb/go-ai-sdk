@@ -26,7 +26,7 @@ func TestTranscribe_HappyPath(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"metadata": {"duration": 1.2},
 			"results": {
 				"channels": [
@@ -46,7 +46,7 @@ func TestTranscribe_HappyPath(t *testing.T) {
 			}
 		}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL))
 	m := p.TranscriptionModel("nova-3")
@@ -120,7 +120,7 @@ func TestTranscribe_SegmentsPreferPunctuatedWord(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"metadata": {"duration": 1.2},
 			"results": {
 				"channels": [
@@ -139,7 +139,7 @@ func TestTranscribe_SegmentsPreferPunctuatedWord(t *testing.T) {
 			}
 		}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.TranscriptionModel("nova-3")
@@ -166,7 +166,7 @@ func TestTranscribe_SegmentsFallBackToWordWhenPunctuatedWordAbsent(t *testing.T)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"metadata": {"duration": 0.5},
 			"results": {
 				"channels": [
@@ -184,7 +184,7 @@ func TestTranscribe_SegmentsFallBackToWordWhenPunctuatedWordAbsent(t *testing.T)
 			}
 		}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.TranscriptionModel("nova-3")
@@ -210,9 +210,9 @@ func TestTranscribe_ProviderOptionsOverrideModelQueryParam(t *testing.T) {
 		gotQuery = r.URL.RawQuery
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"metadata":{"duration":0},"results":{"channels":[{"alternatives":[{"transcript":"hi","words":[]}]}]}}`))
+		_, _ = w.Write([]byte(`{"metadata":{"duration":0},"results":{"channels":[{"alternatives":[{"transcript":"hi","words":[]}]}]}}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.TranscriptionModel("nova-3")
@@ -245,9 +245,9 @@ func TestTranscribe_ProviderOptionsRepeatedListParam(t *testing.T) {
 		gotQuery = r.URL.RawQuery
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"metadata":{"duration":0},"results":{"channels":[{"alternatives":[{"transcript":"hi","words":[]}]}]}}`))
+		_, _ = w.Write([]byte(`{"metadata":{"duration":0},"results":{"channels":[{"alternatives":[{"transcript":"hi","words":[]}]}]}}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.TranscriptionModel("nova-3")
@@ -287,9 +287,9 @@ func TestTranscribe_NoLanguageOmitsQueryParam(t *testing.T) {
 		gotQuery = r.URL.RawQuery
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"metadata":{"duration":0},"results":{"channels":[{"alternatives":[{"transcript":"hi","words":[]}]}]}}`))
+		_, _ = w.Write([]byte(`{"metadata":{"duration":0},"results":{"channels":[{"alternatives":[{"transcript":"hi","words":[]}]}]}}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.TranscriptionModel("nova-3")
@@ -317,9 +317,9 @@ func TestTranscribe_DefaultContentType(t *testing.T) {
 		gotContentType = r.Header.Get("Content-Type")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"metadata":{"duration":0},"results":{"channels":[{"alternatives":[{"transcript":"hi","words":[]}]}]}}`))
+		_, _ = w.Write([]byte(`{"metadata":{"duration":0},"results":{"channels":[{"alternatives":[{"transcript":"hi","words":[]}]}]}}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.TranscriptionModel("nova-3")
@@ -339,9 +339,9 @@ func TestTranscribe_EmptyResultsIsError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"metadata":{"duration":0},"results":{"channels":[]}}`))
+		_, _ = w.Write([]byte(`{"metadata":{"duration":0},"results":{"channels":[]}}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.TranscriptionModel("nova-3")
@@ -358,9 +358,9 @@ func TestTranscribe_EmptyResultsIsError(t *testing.T) {
 func TestTranscribe_Unauthorized(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"err_msg":"invalid credentials"}`))
+		_, _ = w.Write([]byte(`{"err_msg":"invalid credentials"}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey(""), WithBaseURL(srv.URL))
 	m := p.TranscriptionModel("nova-3")
@@ -389,7 +389,7 @@ func TestTranscribe_ContextCancellation(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.TranscriptionModel("nova-3")
@@ -412,9 +412,9 @@ func TestTranscribe_RequestHeaders(t *testing.T) {
 		gotCustom = r.Header.Get("X-Custom-Header")
 		gotAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"results":{"channels":[{"alternatives":[{"transcript":"hi","words":[]}]}]}}`))
+		_, _ = w.Write([]byte(`{"results":{"channels":[{"alternatives":[{"transcript":"hi","words":[]}]}]}}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL))
 	m := p.TranscriptionModel("nova-3")

@@ -22,7 +22,7 @@ func listenerBaseURL(t *testing.T) (net.Listener, string) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	t.Cleanup(func() { l.Close() })
+	t.Cleanup(func() { _ = l.Close() })
 	return l, "http://" + l.Addr().String()
 }
 
@@ -35,7 +35,7 @@ func requestCapturingUpgrade(conn net.Conn, gotAuth, gotBeta, gotURL *string) *b
 	if err != nil {
 		return br
 	}
-	defer req.Body.Close()
+	defer func() { _ = req.Body.Close() }()
 	*gotAuth = req.Header.Get("Authorization")
 	*gotBeta = req.Header.Get("OpenAI-Beta")
 	*gotURL = req.URL.String()
@@ -46,7 +46,7 @@ func requestCapturingUpgrade(conn net.Conn, gotAuth, gotBeta, gotURL *string) *b
 		"Upgrade: websocket\r\n" +
 		"Connection: Upgrade\r\n" +
 		"Sec-WebSocket-Accept: " + accept + "\r\n\r\n"
-	conn.Write([]byte(resp))
+	_, _ = conn.Write([]byte(resp))
 	return br
 }
 
@@ -71,13 +71,13 @@ func TestStreamTranscribe_HandshakeAndSessionUpdate(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		requestCapturingUpgrade(conn, &gotAuth, &gotBeta, &gotURL)
 		_, payload, err := websockettest.ReadMessage(conn)
 		if err == nil {
 			gotSessionMsg = payload
 		}
-		websockettest.WriteClose(conn, 1000, "")
+		_ = websockettest.WriteClose(conn, 1000, "")
 	}()
 
 	p := New(WithAPIKey("oa-key"), WithBaseURL(baseURL))
@@ -92,7 +92,7 @@ func TestStreamTranscribe_HandshakeAndSessionUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StreamTranscribe: %v", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	for range stream.Events() {
 	}
@@ -146,13 +146,13 @@ func TestStreamTranscribe_HandshakeHeaders(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		br := bufio.NewReader(conn)
 		req, err := http.ReadRequest(br)
 		if err != nil {
 			return
 		}
-		defer req.Body.Close()
+		defer func() { _ = req.Body.Close() }()
 		gotAuth = req.Header.Get("Authorization")
 		gotCustom = req.Header.Get("X-Custom-Header")
 
@@ -162,9 +162,9 @@ func TestStreamTranscribe_HandshakeHeaders(t *testing.T) {
 			"Upgrade: websocket\r\n" +
 			"Connection: Upgrade\r\n" +
 			"Sec-WebSocket-Accept: " + accept + "\r\n\r\n"
-		conn.Write([]byte(resp))
-		websockettest.ReadMessage(conn)
-		websockettest.WriteClose(conn, 1000, "")
+		_, _ = conn.Write([]byte(resp))
+		_, _, _ = websockettest.ReadMessage(conn)
+		_ = websockettest.WriteClose(conn, 1000, "")
 	}()
 
 	p := New(WithAPIKey("oa-key"), WithBaseURL(baseURL))
@@ -178,7 +178,7 @@ func TestStreamTranscribe_HandshakeHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StreamTranscribe: %v", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	for range stream.Events() {
 	}
@@ -201,17 +201,17 @@ func TestStreamTranscribe_SendBase64Passthrough(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		if err := websockettest.Upgrade(conn); err != nil {
 			return
 		}
 		// Session update is the first client message; drain it.
-		websockettest.ReadMessage(conn)
+		_, _, _ = websockettest.ReadMessage(conn)
 		_, payload, err := websockettest.ReadMessage(conn)
 		if err == nil {
 			msgCh <- payload
 		}
-		websockettest.WriteClose(conn, 1000, "")
+		_ = websockettest.WriteClose(conn, 1000, "")
 	}()
 
 	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
@@ -220,7 +220,7 @@ func TestStreamTranscribe_SendBase64Passthrough(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StreamTranscribe: %v", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	if err := stream.Send(context.Background(), []byte("pcm-bytes")); err != nil {
 		t.Fatalf("Send: %v", err)
@@ -255,17 +255,17 @@ func TestStreamTranscribe_EventSequenceDeltaThenCompleted(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		if err := websockettest.Upgrade(conn); err != nil {
 			return
 		}
-		websockettest.ReadMessage(conn) // session update
+		_, _, _ = websockettest.ReadMessage(conn) // session update
 
-		websockettest.WriteMessage(conn, websockettest.OpText, []byte(
+		_ = websockettest.WriteMessage(conn, websockettest.OpText, []byte(
 			`{"type":"conversation.item.input_audio_transcription.delta","delta":"hel"}`))
-		websockettest.WriteMessage(conn, websockettest.OpText, []byte(
+		_ = websockettest.WriteMessage(conn, websockettest.OpText, []byte(
 			`{"type":"conversation.item.input_audio_transcription.completed","transcript":"hello"}`))
-		websockettest.WriteClose(conn, 1000, "")
+		_ = websockettest.WriteClose(conn, 1000, "")
 	}()
 
 	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
@@ -274,7 +274,7 @@ func TestStreamTranscribe_EventSequenceDeltaThenCompleted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StreamTranscribe: %v", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	var got []provider.TranscriptEvent
 	for e := range stream.Events() {
@@ -302,12 +302,12 @@ func TestStreamTranscribe_ErrorEventSetsErr(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		if err := websockettest.Upgrade(conn); err != nil {
 			return
 		}
-		websockettest.ReadMessage(conn) // session update
-		websockettest.WriteMessage(conn, websockettest.OpText, []byte(
+		_, _, _ = websockettest.ReadMessage(conn) // session update
+		_ = websockettest.WriteMessage(conn, websockettest.OpText, []byte(
 			`{"type":"error","error":{"message":"invalid audio format"}}`))
 	}()
 
@@ -317,7 +317,7 @@ func TestStreamTranscribe_ErrorEventSetsErr(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StreamTranscribe: %v", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	for range stream.Events() {
 	}
@@ -338,25 +338,25 @@ func TestStreamTranscribe_ErrorEventClosesUnderlyingConn(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		if err := websockettest.Upgrade(conn); err != nil {
 			return
 		}
-		websockettest.ReadMessage(conn) // session update
-		websockettest.WriteMessage(conn, websockettest.OpText, []byte(
+		_, _, _ = websockettest.ReadMessage(conn) // session update
+		_ = websockettest.WriteMessage(conn, websockettest.OpText, []byte(
 			`{"type":"error","error":{"message":"invalid audio format"}}`))
 
 		// The stream's own Close() (called by the fixed readLoop) sends a
 		// close frame before tearing down the socket; drain it first so
 		// the raw Read below can't spuriously observe those buffered
 		// bytes instead of the eventual EOF/reset.
-		websockettest.ReadMessage(conn)
+		_, _, _ = websockettest.ReadMessage(conn)
 
 		// Without calling stream.Close(), confirm the client tore down its
 		// socket as soon as readLoop saw the terminal "error" event,
 		// rather than leaving the TCP connection open until some later
 		// Close().
-		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 		var b [1]byte
 		_, rerr := conn.Read(b[:])
 		var netErr net.Error
@@ -398,11 +398,11 @@ func TestStreamTranscribe_CloseSendWireShape(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		if err := websockettest.Upgrade(conn); err != nil {
 			return
 		}
-		websockettest.ReadMessage(conn) // session update
+		_, _, _ = websockettest.ReadMessage(conn) // session update
 		opcode, payload, err := websockettest.ReadMessage(conn)
 		if err == nil {
 			frameCh <- struct {
@@ -410,7 +410,7 @@ func TestStreamTranscribe_CloseSendWireShape(t *testing.T) {
 				payload []byte
 			}{opcode, payload}
 		}
-		websockettest.WriteClose(conn, 1000, "")
+		_ = websockettest.WriteClose(conn, 1000, "")
 	}()
 
 	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
@@ -419,7 +419,7 @@ func TestStreamTranscribe_CloseSendWireShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StreamTranscribe: %v", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	if err := stream.CloseSend(context.Background()); err != nil {
 		t.Fatalf("CloseSend: %v", err)
@@ -449,12 +449,12 @@ func TestStreamTranscribe_ServerCloseIsCleanEnd(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		if err := websockettest.Upgrade(conn); err != nil {
 			return
 		}
-		websockettest.ReadMessage(conn) // session update
-		websockettest.WriteClose(conn, 1000, "done")
+		_, _, _ = websockettest.ReadMessage(conn) // session update
+		_ = websockettest.WriteClose(conn, 1000, "done")
 	}()
 
 	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
@@ -463,7 +463,7 @@ func TestStreamTranscribe_ServerCloseIsCleanEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StreamTranscribe: %v", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	for range stream.Events() {
 	}
@@ -480,12 +480,12 @@ func TestStreamTranscribe_CtxCancelMidStream(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		if err := websockettest.Upgrade(conn); err != nil {
 			return
 		}
-		websockettest.ReadMessage(conn) // session update
-		websockettest.ReadMessage(conn) // block until client disconnects
+		_, _, _ = websockettest.ReadMessage(conn) // session update
+		_, _, _ = websockettest.ReadMessage(conn) // block until client disconnects
 	}()
 
 	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
@@ -495,7 +495,7 @@ func TestStreamTranscribe_CtxCancelMidStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StreamTranscribe: %v", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	cancel()
 
@@ -514,10 +514,10 @@ func TestStreamTranscribe_CloseIdempotent(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
-		websockettest.Upgrade(conn)
-		websockettest.ReadMessage(conn)
-		websockettest.ReadMessage(conn)
+		defer func() { _ = conn.Close() }()
+		_ = websockettest.Upgrade(conn)
+		_, _, _ = websockettest.ReadMessage(conn)
+		_, _, _ = websockettest.ReadMessage(conn)
 	}()
 
 	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
@@ -556,20 +556,20 @@ func TestStreamTranscribe_AbandonedEventsThenCloseUnblocksReadLoop(t *testing.T)
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		if err := websockettest.Upgrade(conn); err != nil {
 			return
 		}
-		websockettest.ReadMessage(conn) // session update
+		_, _, _ = websockettest.ReadMessage(conn) // session update
 		// Flood far more delta events than the stream's internal
 		// event-channel buffer (32) so the reader goroutine is guaranteed
 		// to still be blocked trying to deliver one when the consumer
 		// below abandons Events().
 		for i := 0; i < 200; i++ {
-			websockettest.WriteMessage(conn, websockettest.OpText, []byte(
+			_ = websockettest.WriteMessage(conn, websockettest.OpText, []byte(
 				`{"type":"conversation.item.input_audio_transcription.delta","delta":"x"}`))
 		}
-		websockettest.ReadMessage(conn) // block until client disconnects
+		_, _, _ = websockettest.ReadMessage(conn) // block until client disconnects
 	}()
 
 	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
@@ -611,11 +611,11 @@ func TestStreamTranscribe_SendAfterCloseSend(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
-		websockettest.Upgrade(conn)
-		websockettest.ReadMessage(conn) // session update
-		websockettest.ReadMessage(conn) // commit
-		websockettest.WriteClose(conn, 1000, "")
+		defer func() { _ = conn.Close() }()
+		_ = websockettest.Upgrade(conn)
+		_, _, _ = websockettest.ReadMessage(conn) // session update
+		_, _, _ = websockettest.ReadMessage(conn) // commit
+		_ = websockettest.WriteClose(conn, 1000, "")
 	}()
 
 	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
@@ -624,7 +624,7 @@ func TestStreamTranscribe_SendAfterCloseSend(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StreamTranscribe: %v", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	if err := stream.CloseSend(context.Background()); err != nil {
 		t.Fatalf("CloseSend: %v", err)
@@ -650,9 +650,9 @@ func TestStreamTranscribe_SendAfterCloseErrorMessage(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
-		websockettest.Upgrade(conn)
-		websockettest.ReadMessage(conn) // session update
+		defer func() { _ = conn.Close() }()
+		_ = websockettest.Upgrade(conn)
+		_, _, _ = websockettest.ReadMessage(conn) // session update
 	}()
 
 	p := New(WithAPIKey("k"), WithBaseURL(baseURL))
@@ -688,9 +688,9 @@ func TestStreamTranscribe_CloseSendAfterCloseNoWsstreamLeak(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
-		websockettest.Upgrade(conn)
-		websockettest.ReadMessage(conn) // session update
+		defer func() { _ = conn.Close() }()
+		_ = websockettest.Upgrade(conn)
+		_, _, _ = websockettest.ReadMessage(conn) // session update
 	}()
 
 	p := New(WithAPIKey("k"), WithBaseURL(baseURL))

@@ -25,18 +25,18 @@ func TestGenerateImages_RequestShape(t *testing.T) {
 		gotAuth = r.Header.Get("Authorization")
 		gotPrefer = r.Header.Get("Prefer")
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &gotBody)
+		_ = json.Unmarshal(body, &gotBody)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"succeeded","output":"` + srv.URL + `/img.png"}`))
+		_, _ = w.Write([]byte(`{"status":"succeeded","output":"` + srv.URL + `/img.png"}`))
 	})
 	mux.HandleFunc("/img.png", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("pngdata"))
+		_, _ = w.Write([]byte("pngdata"))
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("test-token"), WithBaseURL(srv.URL))
 	m := p.ImageModel("black-forest-labs/flux-schnell")
@@ -87,18 +87,18 @@ func TestGenerateImages_OmitsZeroValues(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/models/black-forest-labs/flux-schnell/predictions", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &gotBody)
+		_ = json.Unmarshal(body, &gotBody)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"succeeded","output":"` + srv.URL + `/img.png"}`))
+		_, _ = w.Write([]byte(`{"status":"succeeded","output":"` + srv.URL + `/img.png"}`))
 	})
 	mux.HandleFunc("/img.png", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("pngdata"))
+		_, _ = w.Write([]byte("pngdata"))
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.ImageModel("black-forest-labs/flux-schnell")
@@ -143,18 +143,18 @@ func TestGenerateImages_ProviderOptionsMergeIntoInput(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/models/black-forest-labs/flux-schnell/predictions", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &gotBody)
+		_ = json.Unmarshal(body, &gotBody)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"succeeded","output":"` + srv.URL + `/img.png"}`))
+		_, _ = w.Write([]byte(`{"status":"succeeded","output":"` + srv.URL + `/img.png"}`))
 	})
 	mux.HandleFunc("/img.png", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("pngdata"))
+		_, _ = w.Write([]byte("pngdata"))
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.ImageModel("black-forest-labs/flux-schnell")
@@ -201,20 +201,20 @@ func TestGenerateImages_URLFetchHappyPathSingleAndArray(t *testing.T) {
 	mux.HandleFunc("/v1/models/black-forest-labs/flux-schnell/predictions", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"succeeded","output":["` + srv.URL + `/img1.png","` + srv.URL + `/img2.jpg"]}`))
+		_, _ = w.Write([]byte(`{"status":"succeeded","output":["` + srv.URL + `/img1.png","` + srv.URL + `/img2.jpg"]}`))
 	})
 	mux.HandleFunc("/img1.png", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		w.WriteHeader(http.StatusOK)
-		w.Write(pngBytes)
+		_, _ = w.Write(pngBytes)
 	})
 	mux.HandleFunc("/img2.jpg", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
 		w.WriteHeader(http.StatusOK)
-		w.Write(jpegBytes)
+		_, _ = w.Write(jpegBytes)
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.ImageModel("black-forest-labs/flux-schnell")
@@ -238,9 +238,9 @@ func TestGenerateImages_FailedStatusError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"failed","error":"NSFW content detected"}`))
+		_, _ = w.Write([]byte(`{"status":"failed","error":"NSFW content detected"}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.ImageModel("black-forest-labs/flux-schnell")
@@ -261,9 +261,9 @@ func TestGenerateImages_ProcessingStatusErrorNoErrorField(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"processing"}`))
+		_, _ = w.Write([]byte(`{"status":"processing"}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.ImageModel("black-forest-labs/flux-schnell")
@@ -280,9 +280,9 @@ func TestGenerateImages_ProcessingStatusErrorNoErrorField(t *testing.T) {
 func TestGenerateImages_401Error(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"detail":"Invalid token."}`))
+		_, _ = w.Write([]byte(`{"detail":"Invalid token."}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("bad-token"), WithBaseURL(srv.URL))
 	m := p.ImageModel("black-forest-labs/flux-schnell")
@@ -310,9 +310,9 @@ func TestGenerateImages_ContextCancellation(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"succeeded","output":"data:image/png;base64,ZA=="}`))
+		_, _ = w.Write([]byte(`{"status":"succeeded","output":"data:image/png;base64,ZA=="}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.ImageModel("black-forest-labs/flux-schnell")
@@ -334,14 +334,14 @@ func TestGenerateImages_RequestHeaders(t *testing.T) {
 		gotCustom = r.Header.Get("X-Custom-Header")
 		gotAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"status":"succeeded","output":"` + srv.URL + `/img.png"}`))
+		_, _ = w.Write([]byte(`{"status":"succeeded","output":"` + srv.URL + `/img.png"}`))
 	})
 	mux.HandleFunc("/img.png", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
-		w.Write([]byte("pngdata"))
+		_, _ = w.Write([]byte("pngdata"))
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL))
 	m := p.ImageModel("black-forest-labs/flux-schnell")

@@ -30,7 +30,7 @@ func newTestServer(t *testing.T) (net.Listener, string) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	t.Cleanup(func() { l.Close() })
+	t.Cleanup(func() { _ = l.Close() })
 	return l, "ws://" + l.Addr().String() + "/"
 }
 
@@ -115,7 +115,7 @@ func TestDial_HandshakeSuccess(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		time.Sleep(200 * time.Millisecond)
 	}()
 
@@ -124,7 +124,7 @@ func TestDial_HandshakeSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
-	defer conn.Close(CloseNormal, "")
+	defer func() { _ = conn.Close(CloseNormal, "") }()
 }
 
 func TestDial_WrongAccept(t *testing.T) {
@@ -134,19 +134,19 @@ func TestDial_WrongAccept(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		// Deliberately skip websockettest.Upgrade to send a bogus Accept.
 		br := bufio.NewReader(conn)
 		req, err := http.ReadRequest(br)
 		if err != nil {
 			return
 		}
-		req.Body.Close()
+		_ = req.Body.Close()
 		resp := "HTTP/1.1 101 Switching Protocols\r\n" +
 			"Upgrade: websocket\r\n" +
 			"Connection: Upgrade\r\n" +
 			"Sec-WebSocket-Accept: dGhpcyBpcyB3cm9uZw==\r\n\r\n"
-		conn.Write([]byte(resp))
+		_, _ = conn.Write([]byte(resp))
 	}()
 
 	ctx := dialCtx(t)
@@ -166,15 +166,15 @@ func TestDial_NonSwitchingProtocolsStatus(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		br := bufio.NewReader(conn)
 		req, err := http.ReadRequest(br)
 		if err != nil {
 			return
 		}
-		req.Body.Close()
+		_ = req.Body.Close()
 		body := "not found"
-		fmt.Fprintf(conn, "HTTP/1.1 404 Not Found\r\nContent-Length: %d\r\n\r\n%s", len(body), body)
+		_, _ = fmt.Fprintf(conn, "HTTP/1.1 404 Not Found\r\nContent-Length: %d\r\n\r\n%s", len(body), body)
 	}()
 
 	ctx := dialCtx(t)
@@ -194,7 +194,7 @@ func TestEchoTextAndBinary(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		for i := 0; i < 2; i++ {
 			op, payload, err := websockettest.ReadMessage(conn)
 			if err != nil {
@@ -211,7 +211,7 @@ func TestEchoTextAndBinary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
-	defer conn.Close(CloseNormal, "")
+	defer func() { _ = conn.Close(CloseNormal, "") }()
 
 	if err := conn.WriteText(ctx, []byte("hello")); err != nil {
 		t.Fatalf("WriteText: %v", err)
@@ -243,8 +243,8 @@ func TestFragmentationReassembly_TwoFragments(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
-		websockettest.WriteFragmented(conn, websockettest.OpText, []byte("Hel"), []byte("lo!"))
+		defer func() { _ = conn.Close() }()
+		_ = websockettest.WriteFragmented(conn, websockettest.OpText, []byte("Hel"), []byte("lo!"))
 	}()
 
 	ctx := dialCtx(t)
@@ -252,7 +252,7 @@ func TestFragmentationReassembly_TwoFragments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
-	defer conn.Close(CloseNormal, "")
+	defer func() { _ = conn.Close(CloseNormal, "") }()
 
 	mt, data, err := conn.Read(ctx)
 	if err != nil {
@@ -271,12 +271,12 @@ func TestFragmentationReassembly_ThreeFragmentsInterleavedPing(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
-		websockettest.WriteFrame(conn, false, websockettest.OpText, []byte("abc"))
-		websockettest.WriteFrame(conn, true, websockettest.OpPing, []byte("ping1"))
-		websockettest.WriteFrame(conn, false, websockettest.OpContinuation, []byte("def"))
-		websockettest.WriteFrame(conn, true, websockettest.OpContinuation, []byte("ghi"))
+		_ = websockettest.WriteFrame(conn, false, websockettest.OpText, []byte("abc"))
+		_ = websockettest.WriteFrame(conn, true, websockettest.OpPing, []byte("ping1"))
+		_ = websockettest.WriteFrame(conn, false, websockettest.OpContinuation, []byte("def"))
+		_ = websockettest.WriteFrame(conn, true, websockettest.OpContinuation, []byte("ghi"))
 
 		op, payload, err := websockettest.ReadMessage(conn)
 		if err == nil && op == websockettest.OpPong {
@@ -291,7 +291,7 @@ func TestFragmentationReassembly_ThreeFragmentsInterleavedPing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
-	defer conn.Close(CloseNormal, "")
+	defer func() { _ = conn.Close(CloseNormal, "") }()
 
 	mt, data, err := conn.Read(ctx)
 	if err != nil {
@@ -319,8 +319,8 @@ func TestPingAutoPong(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
-		websockettest.WriteFrame(conn, true, websockettest.OpPing, []byte("hello-ping"))
+		defer func() { _ = conn.Close() }()
+		_ = websockettest.WriteFrame(conn, true, websockettest.OpPing, []byte("hello-ping"))
 
 		op, payload, err := websockettest.ReadMessage(conn)
 		if err == nil && op == websockettest.OpPong {
@@ -335,14 +335,14 @@ func TestPingAutoPong(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
-	defer conn.Close(CloseNormal, "")
+	defer func() { _ = conn.Close(CloseNormal, "") }()
 
 	// Read handles the ping internally and then blocks for a data message
 	// that never arrives; run it in the background purely to drive the
 	// automatic pong, and let the deferred Close above unblock it at the
 	// end of the test.
 	go func() {
-		conn.Read(context.Background())
+		_, _, _ = conn.Read(context.Background())
 	}()
 
 	select {
@@ -363,7 +363,7 @@ func TestMaskedServerFrame_ProtocolError(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		// Write a frame with the mask bit set, which is never valid from a
 		// server (masking is a client-to-server requirement only).
@@ -378,7 +378,7 @@ func TestMaskedServerFrame_ProtocolError(t *testing.T) {
 		header.WriteByte(0x80 | byte(len(masked)))
 		header.Write(key[:])
 		header.Write(masked)
-		conn.Write(header.Bytes())
+		_, _ = conn.Write(header.Bytes())
 
 		op, payload2, err := websockettest.ReadMessage(conn)
 		if err == nil && op == websockettest.OpClose && len(payload2) >= 2 {
@@ -393,7 +393,7 @@ func TestMaskedServerFrame_ProtocolError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
-	defer conn.Close(CloseNormal, "")
+	defer func() { _ = conn.Close(CloseNormal, "") }()
 
 	if _, _, err := conn.Read(ctx); err == nil {
 		t.Fatal("expected error for masked server frame")
@@ -417,9 +417,9 @@ func TestOversizedMessage_ClosesWith1009(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		big := bytes.Repeat([]byte{'z'}, 200)
-		websockettest.WriteMessage(conn, websockettest.OpText, big)
+		_ = websockettest.WriteMessage(conn, websockettest.OpText, big)
 
 		op, payload, err := websockettest.ReadMessage(conn)
 		if err == nil && op == websockettest.OpClose && len(payload) >= 2 {
@@ -434,7 +434,7 @@ func TestOversizedMessage_ClosesWith1009(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
-	defer conn.Close(CloseNormal, "")
+	defer func() { _ = conn.Close(CloseNormal, "") }()
 
 	if _, _, err := conn.Read(ctx); err == nil {
 		t.Fatal("expected error for oversized message")
@@ -460,8 +460,8 @@ func TestLengthBoundaries(t *testing.T) {
 				if err != nil {
 					return
 				}
-				defer conn.Close()
-				websockettest.WriteMessage(conn, websockettest.OpBinary, payload)
+				defer func() { _ = conn.Close() }()
+				_ = websockettest.WriteMessage(conn, websockettest.OpBinary, payload)
 			}()
 
 			ctx := dialCtx(t)
@@ -469,7 +469,7 @@ func TestLengthBoundaries(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Dial: %v", err)
 			}
-			defer conn.Close(CloseNormal, "")
+			defer func() { _ = conn.Close(CloseNormal, "") }()
 
 			mt, data, err := conn.Read(ctx)
 			if err != nil {
@@ -490,8 +490,8 @@ func TestServerInitiatedClose(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
-		websockettest.WriteClose(conn, CloseGoingAway, "bye")
+		defer func() { _ = conn.Close() }()
+		_ = websockettest.WriteClose(conn, CloseGoingAway, "bye")
 
 		op, payload, err := websockettest.ReadMessage(conn)
 		if err == nil && op == websockettest.OpClose && len(payload) >= 2 {
@@ -537,7 +537,7 @@ func TestCloseIdempotent(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		time.Sleep(300 * time.Millisecond)
 	}()
 
@@ -562,7 +562,7 @@ func TestCtxCancelUnblocksRead(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		time.Sleep(2 * time.Second) // hold the connection open, send nothing
 	}()
 
@@ -570,7 +570,7 @@ func TestCtxCancelUnblocksRead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
-	defer conn.Close(CloseNormal, "")
+	defer func() { _ = conn.Close(CloseNormal, "") }()
 
 	readCtx, readCancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
@@ -605,7 +605,7 @@ func TestDialWSS(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		accept := websockettest.ComputeAccept(r.Header.Get("Sec-WebSocket-Key"))
 		resp := "HTTP/1.1 101 Switching Protocols\r\n" +
@@ -620,9 +620,9 @@ func TestDialWSS(t *testing.T) {
 		if err != nil {
 			return
 		}
-		websockettest.WriteMessage(conn, op, payload)
+		_ = websockettest.WriteMessage(conn, op, payload)
 	}))
-	defer server.Close()
+	defer func() { server.Close() }()
 
 	pool := x509.NewCertPool()
 	pool.AddCert(server.Certificate())
@@ -633,7 +633,7 @@ func TestDialWSS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial wss: %v", err)
 	}
-	defer conn.Close(CloseNormal, "")
+	defer func() { _ = conn.Close(CloseNormal, "") }()
 
 	if err := conn.WriteText(ctx, []byte("secure hello")); err != nil {
 		t.Fatalf("WriteText: %v", err)
@@ -662,10 +662,10 @@ func TestOversizedMessage_HugeDeclaredLengthNoHangNoPanic(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		// Declare an enormous (but MSB-unset, so individually "legal")
 		// length and never send any payload bytes at all.
-		writeRawHeaderOnly(conn, opBinary, 1<<62)
+		_ = writeRawHeaderOnly(conn, opBinary, 1<<62)
 	}()
 
 	ctx := dialCtx(t)
@@ -673,7 +673,7 @@ func TestOversizedMessage_HugeDeclaredLengthNoHangNoPanic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
-	defer conn.Close(CloseNormal, "")
+	defer func() { _ = conn.Close(CloseNormal, "") }()
 
 	readDone := make(chan error, 1)
 	go func() {
@@ -698,9 +698,9 @@ func TestOversizedMessage_JustOverBudgetNoPayloadSent(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		// Declare 101 bytes (budget is 100) and never write them.
-		writeRawHeaderOnly(conn, opText, 101)
+		_ = writeRawHeaderOnly(conn, opText, 101)
 	}()
 
 	ctx := dialCtx(t)
@@ -708,7 +708,7 @@ func TestOversizedMessage_JustOverBudgetNoPayloadSent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
-	defer conn.Close(CloseNormal, "")
+	defer func() { _ = conn.Close(CloseNormal, "") }()
 
 	readDone := make(chan error, 1)
 	go func() {
@@ -737,7 +737,7 @@ func TestCtxCancelAfterSuccess_ConnStaysUsable(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		for i := 0; i < iterations; i++ {
 			op, payload, err := websockettest.ReadMessage(conn)
 			if err != nil {
@@ -753,7 +753,7 @@ func TestCtxCancelAfterSuccess_ConnStaysUsable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
-	defer conn.Close(CloseNormal, "")
+	defer func() { _ = conn.Close(CloseNormal, "") }()
 
 	for i := 0; i < iterations; i++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -899,12 +899,12 @@ func TestProtocolViolation_ClosesSocketAndSends1002(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		// A 126-byte ping is a direct RFC 6455 §5.5 violation (control
 		// frames must be <=125 bytes) surfaced as a protocolErr from
 		// readFrameHeader.
-		websockettest.WriteFrame(conn, true, websockettest.OpPing, bytes.Repeat([]byte{'p'}, 126))
+		_ = websockettest.WriteFrame(conn, true, websockettest.OpPing, bytes.Repeat([]byte{'p'}, 126))
 
 		op, payload, err := websockettest.ReadMessage(conn)
 		if err == nil && op == websockettest.OpClose && len(payload) >= 2 {
@@ -920,7 +920,7 @@ func TestProtocolViolation_ClosesSocketAndSends1002(t *testing.T) {
 		// "connection reset by peer" (both are legitimate outcomes of the
 		// peer having torn down the socket); only a timeout indicates the
 		// fd was never actually closed.
-		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 		var b [1]byte
 		_, rerr := conn.Read(b[:])
 		var netErr net.Error
@@ -933,7 +933,7 @@ func TestProtocolViolation_ClosesSocketAndSends1002(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
-	defer conn.Close(CloseNormal, "")
+	defer func() { _ = conn.Close(CloseNormal, "") }()
 
 	if _, _, err := conn.Read(ctx); err == nil {
 		t.Fatal("expected an error for the oversized ping")
@@ -968,9 +968,9 @@ func TestServerInitiatedClose_EmptyPayloadEchoedEmpty(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		// No status code at all — an entirely empty close payload.
-		websockettest.WriteFrame(conn, true, websockettest.OpClose, nil)
+		_ = websockettest.WriteFrame(conn, true, websockettest.OpClose, nil)
 
 		op, payload, err := websockettest.ReadMessage(conn)
 		if err == nil && op == websockettest.OpClose {
@@ -1004,7 +1004,7 @@ func TestServerInitiatedClose_EmptyPayloadEchoedEmpty(t *testing.T) {
 		t.Fatal("timed out waiting for the close echo")
 	}
 
-	conn.Close(CloseNormal, "")
+	_ = conn.Close(CloseNormal, "")
 }
 
 // --- Fix wave MINOR 4 — a close frame with exactly a 1-byte payload is not
@@ -1019,8 +1019,8 @@ func TestServerInitiatedClose_OneBytePayloadAborts(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
-		websockettest.WriteFrame(conn, true, websockettest.OpClose, []byte{0x03})
+		defer func() { _ = conn.Close() }()
+		_ = websockettest.WriteFrame(conn, true, websockettest.OpClose, []byte{0x03})
 
 		op, payload, err := websockettest.ReadMessage(conn)
 		if err == nil && op == websockettest.OpClose && len(payload) >= 2 {
@@ -1035,7 +1035,7 @@ func TestServerInitiatedClose_OneBytePayloadAborts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
-	defer conn.Close(CloseNormal, "")
+	defer func() { _ = conn.Close(CloseNormal, "") }()
 
 	if _, _, err := conn.Read(ctx); err == nil {
 		t.Fatal("expected an error for the 1-byte close payload")
@@ -1109,7 +1109,7 @@ func TestDial_HeaderCRLFRejected(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		// The malformed header must be caught before any bytes are sent,
 		// so there's nothing for the server to do here except not hang.
 	}()
@@ -1133,14 +1133,14 @@ func TestDial_ReservedHeadersSkipped(t *testing.T) {
 			reqCh <- nil
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		br := bufio.NewReader(conn)
 		req, err := http.ReadRequest(br)
 		if err != nil {
 			reqCh <- nil
 			return
 		}
-		req.Body.Close()
+		_ = req.Body.Close()
 		reqCh <- req
 
 		accept := websockettest.ComputeAccept(req.Header.Get("Sec-WebSocket-Key"))
@@ -1148,7 +1148,7 @@ func TestDial_ReservedHeadersSkipped(t *testing.T) {
 			"Upgrade: websocket\r\n" +
 			"Connection: Upgrade\r\n" +
 			"Sec-WebSocket-Accept: " + accept + "\r\n\r\n"
-		conn.Write([]byte(resp))
+		_, _ = conn.Write([]byte(resp))
 	}()
 
 	ctx := dialCtx(t)
@@ -1160,7 +1160,7 @@ func TestDial_ReservedHeadersSkipped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
-	defer conn.Close(CloseNormal, "")
+	defer func() { _ = conn.Close(CloseNormal, "") }()
 
 	req := <-reqCh
 	if req == nil {
@@ -1203,7 +1203,7 @@ func (b *blockingConn) Write(p []byte) (int, error) {
 		case <-b.releaseWrite:
 			return len(p), nil
 		case <-ticker.C:
-			_, _, writeDeadlines := b.fakeConn.snapshot()
+			_, _, writeDeadlines := b.snapshot()
 			if len(writeDeadlines) == 0 {
 				continue
 			}

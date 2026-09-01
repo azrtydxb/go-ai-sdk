@@ -38,9 +38,9 @@ func TestFetchImageUsesContentTypeWhenImage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("not-really-png-but-whatever"))
+		_, _ = w.Write([]byte("not-really-png-but-whatever"))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	data, mediaType, err := FetchImage(context.Background(), nil, srv.URL, "test")
 	if err != nil {
@@ -58,9 +58,9 @@ func TestFetchImageStripsContentTypeParameters(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg; charset=binary")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("fake-jpeg-bytes"))
+		_, _ = w.Write([]byte("fake-jpeg-bytes"))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	_, mediaType, err := FetchImage(context.Background(), nil, srv.URL, "test")
 	if err != nil {
@@ -76,9 +76,9 @@ func TestFetchImageSniffsWhenContentTypeNotImage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
-		w.Write(pngBytes)
+		_, _ = w.Write(pngBytes)
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	data, mediaType, err := FetchImage(context.Background(), nil, srv.URL, "test")
 	if err != nil {
@@ -95,9 +95,9 @@ func TestFetchImageSniffsWhenContentTypeNotImage(t *testing.T) {
 func TestFetchImageNon2xxErrorIsRetryableFor5xx(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
-		w.Write([]byte("upstream hiccup"))
+		_, _ = w.Write([]byte("upstream hiccup"))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	_, _, err := FetchImage(context.Background(), nil, srv.URL, "test")
 	if err == nil {
@@ -120,9 +120,9 @@ func TestFetchImageNon2xxErrorTruncatesBody(t *testing.T) {
 	bigBody := strings.Repeat("x", 5000)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(bigBody))
+		_, _ = w.Write([]byte(bigBody))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	_, _, err := FetchImage(context.Background(), nil, srv.URL, "test")
 	if err == nil {

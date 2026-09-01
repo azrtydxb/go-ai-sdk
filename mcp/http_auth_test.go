@@ -24,7 +24,7 @@ func TestHTTPTransportTokenProviderPerRequest(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	var calls int32
 	tp := TokenProviderFunc(func(ctx context.Context) (string, error) {
@@ -33,7 +33,7 @@ func TestHTTPTransportTokenProviderPerRequest(t *testing.T) {
 	})
 
 	tr := NewStreamableHTTPTransportWithOptions(srv.URL, WithTokenProvider(tp))
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
@@ -67,13 +67,13 @@ func TestHTTPTransportTokenProviderErrorFailsCleanly(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	wantErr := errors.New("token unavailable")
 	tp := TokenProviderFunc(func(ctx context.Context) (string, error) { return "", wantErr })
 
 	tr := NewStreamableHTTPTransportWithOptions(srv.URL, WithTokenProvider(tp), WithHTTPRetry(3))
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
@@ -101,11 +101,11 @@ func TestHTTPTransportCustomAuthHeader(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	tp := TokenProviderFunc(func(ctx context.Context) (string, error) { return "secret-tok", nil })
 	tr := NewStreamableHTTPTransportWithOptions(srv.URL, WithTokenProvider(tp), WithAuthHeader("X-Api-Key"))
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
@@ -133,14 +133,14 @@ func TestHTTPTransportTokenProviderOverridesStaticHeader(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	tp := TokenProviderFunc(func(ctx context.Context) (string, error) { return "fresh-tok", nil })
 	tr := NewStreamableHTTPTransportWithOptions(srv.URL,
 		withStaticHeaders(map[string]string{"Authorization": "Bearer stale-static"}),
 		WithTokenProvider(tp),
 	)
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
@@ -166,10 +166,10 @@ func TestHTTPTransportStaticHeadersBackwardCompat(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	tr := NewStreamableHTTPTransport(srv.URL, map[string]string{"Authorization": "Bearer static-tok"})
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
@@ -203,10 +203,10 @@ func TestHTTPTransportRetryOn429ThenSuccess(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	tr := NewStreamableHTTPTransportWithOptions(srv.URL, WithHTTPRetry(3))
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
@@ -233,11 +233,11 @@ func TestHTTPTransportRetryExhausted(t *testing.T) {
 		atomic.AddInt32(&attempts, 1)
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	tr := NewStreamableHTTPTransportWithOptions(srv.URL, WithHTTPRetry(2))
 	setRetryBaseDelay(tr, time.Millisecond)
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
@@ -258,11 +258,11 @@ func TestHTTPTransportNoRetryOn400(t *testing.T) {
 		atomic.AddInt32(&attempts, 1)
 		w.WriteHeader(http.StatusBadRequest)
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	tr := NewStreamableHTTPTransportWithOptions(srv.URL, WithHTTPRetry(3))
 	setRetryBaseDelay(tr, time.Millisecond)
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
@@ -284,11 +284,11 @@ func TestHTTPTransportRetryCtxCancelDuringBackoff(t *testing.T) {
 		atomic.AddInt32(&attempts, 1)
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	tr := NewStreamableHTTPTransportWithOptions(srv.URL, WithHTTPRetry(5))
 	setRetryBaseDelay(tr, time.Hour) // backoff would otherwise far outlast the test
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -322,15 +322,15 @@ func TestHTTPTransportNoRetryMidSSEStream(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		fl := w.(http.Flusher)
-		fmt.Fprintf(w, "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n\n")
+		_, _ = fmt.Fprintf(w, "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n\n")
 		fl.Flush()
 		// End the stream abruptly without a trailing blank line; the
 		// important thing is the transport must not reissue the request.
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	tr := NewStreamableHTTPTransportWithOptions(srv.URL, WithHTTPRetry(3))
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
@@ -370,13 +370,13 @@ func TestHTTPTransportNoRetryOnMidFlightConnectionError(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Hijack: %v", err)
 		}
-		conn.Close() // simulate a connection error after the request was received
+		_ = conn.Close() // simulate a connection error after the request was received
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	tr := NewStreamableHTTPTransportWithOptions(srv.URL, WithHTTPRetry(2))
 	setRetryBaseDelay(tr, time.Millisecond)
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
@@ -407,7 +407,7 @@ func TestHTTPTransportRetryOnConnectionRefused(t *testing.T) {
 
 	tr := NewStreamableHTTPTransportWithOptions("http://"+addr, WithHTTPRetry(2))
 	setRetryBaseDelay(tr, time.Millisecond)
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 

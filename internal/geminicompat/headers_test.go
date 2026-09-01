@@ -23,7 +23,7 @@ func TestEmbedding_HeadersApplied(t *testing.T) {
 		gotExtra = r.Header.Get("X-Test")
 		gotAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"embeddings":[{"values":[0.1]}]}`))
+		_, _ = w.Write([]byte(`{"embeddings":[{"values":[0.1]}]}`))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -62,7 +62,7 @@ func TestImage_HeadersApplied(t *testing.T) {
 		gotExtra = r.Header.Get("X-Test")
 		gotAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"predictions":[]}`))
+		_, _ = w.Write([]byte(`{"predictions":[]}`))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -98,7 +98,7 @@ func TestEmbedding_HeadersRespectCustomAuthHeaderName(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("X-Goog-Api-Key")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"embeddings":[{"values":[0.1]}]}`))
+		_, _ = w.Write([]byte(`{"embeddings":[{"values":[0.1]}]}`))
 	}))
 	t.Cleanup(srv.Close)
 

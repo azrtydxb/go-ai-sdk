@@ -429,7 +429,7 @@ func BenchmarkPartialTrackerFeed(b *testing.B) {
 		if i > 0 {
 			sb.WriteByte(',')
 		}
-		fmt.Fprintf(&sb, `{"id":%d,"name":"item-%d","note":"some padding text"}`, i, i)
+		_, _ = fmt.Fprintf(&sb, `{"id":%d,"name":"item-%d","note":"some padding text"}`, i, i)
 	}
 	sb.WriteString("]}")
 	doc := sb.String()

@@ -22,7 +22,7 @@ func TestGenerateSystemFingerprintPopulatesProviderMetadata(t *testing.T) {
 			SystemFingerprint: "fp_abc123",
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	})
 
 	resp, err := model.Generate(context.Background(), provider.Call{
@@ -50,7 +50,7 @@ func TestGenerateNoSystemFingerprintLeavesProviderMetadataNil(t *testing.T) {
 			}},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	})
 
 	resp, err := model.Generate(context.Background(), provider.Call{
@@ -76,10 +76,10 @@ func TestStreamSystemFingerprintPopulatesFinishPartProviderMetadata(t *testing.T
 			`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
 		}
 		for _, c := range chunks {
-			fmt.Fprintf(w, "data: %s\n\n", c)
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", c)
 			flusher.Flush()
 		}
-		fmt.Fprint(w, "data: [DONE]\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 		flusher.Flush()
 	})
 
@@ -89,7 +89,7 @@ func TestStreamSystemFingerprintPopulatesFinishPartProviderMetadata(t *testing.T
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer sr.Close()
+	defer func() { _ = sr.Close() }()
 
 	var finish provider.FinishPart
 	for part := range sr.Parts() {
@@ -121,10 +121,10 @@ func TestStreamNoSystemFingerprintLeavesFinishPartProviderMetadataNil(t *testing
 			`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
 		}
 		for _, c := range chunks {
-			fmt.Fprintf(w, "data: %s\n\n", c)
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", c)
 			flusher.Flush()
 		}
-		fmt.Fprint(w, "data: [DONE]\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 		flusher.Flush()
 	})
 
@@ -134,7 +134,7 @@ func TestStreamNoSystemFingerprintLeavesFinishPartProviderMetadataNil(t *testing
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer sr.Close()
+	defer func() { _ = sr.Close() }()
 
 	var finish provider.FinishPart
 	for part := range sr.Parts() {

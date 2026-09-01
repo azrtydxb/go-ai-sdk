@@ -26,10 +26,10 @@ func TestHTTPTransportDirectJSONResponse(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	tr := NewStreamableHTTPTransport(srv.URL, nil)
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
@@ -67,7 +67,7 @@ func TestHTTPTransportCloseInterruptsStalledJSONBody(t *testing.T) {
 		fl := w.(http.Flusher)
 		// Deliberately incomplete body with no Content-Length: the client
 		// has no way to know it's "done" and must keep reading.
-		fmt.Fprint(w, `{"jsonrpc":"2.0","id`)
+		_, _ = fmt.Fprint(w, `{"jsonrpc":"2.0","id`)
 		fl.Flush()
 		<-release // hang until the test lets the handler return
 	}))
@@ -119,15 +119,15 @@ func TestHTTPTransportSSEMultipleMessages(t *testing.T) {
 		if !ok {
 			t.Fatal("ResponseWriter does not support Flush")
 		}
-		fmt.Fprintf(w, "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"n\":1}}\n\n")
+		_, _ = fmt.Fprintf(w, "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"n\":1}}\n\n")
 		fl.Flush()
-		fmt.Fprintf(w, "data: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"n\":2}}\n\n")
+		_, _ = fmt.Fprintf(w, "data: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"n\":2}}\n\n")
 		fl.Flush()
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	tr := NewStreamableHTTPTransport(srv.URL, nil)
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
@@ -173,10 +173,10 @@ func TestHTTPTransportSessionIDEcho(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{}}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	tr := NewStreamableHTTPTransport(srv.URL, nil)
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
@@ -205,10 +205,10 @@ func TestHTTPTransportExtraHeaders(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	tr := NewStreamableHTTPTransport(srv.URL, map[string]string{"Authorization": "Bearer tok123"})
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
@@ -227,10 +227,10 @@ func TestHTTPTransportNotificationNoMessage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	tr := NewStreamableHTTPTransport(srv.URL, nil)
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
@@ -256,7 +256,7 @@ func TestHTTPTransportCloseInterruptsStalled202Body(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 		fl := w.(http.Flusher)
-		fmt.Fprint(w, "not valid json, and deliberately never finished")
+		_, _ = fmt.Fprint(w, "not valid json, and deliberately never finished")
 		fl.Flush()
 		<-release // hang until the test lets the handler return
 	}))
@@ -321,14 +321,14 @@ func TestHTTPTransportSSEBodyStaysOpen(t *testing.T) {
 		case "initialize":
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":{"protocolVersion":"2025-03-26","capabilities":{"tools":{}}}}`, *req.ID)
+			_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":{"protocolVersion":"2025-03-26","capabilities":{"tools":{}}}}`, *req.ID)
 		case "notifications/initialized":
 			w.WriteHeader(http.StatusAccepted)
 		case "tools/call":
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.WriteHeader(http.StatusOK)
 			fl := w.(http.Flusher)
-			fmt.Fprintf(w, "data: {\"jsonrpc\":\"2.0\",\"id\":%d,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"isError\":false}}\n\n", *req.ID)
+			_, _ = fmt.Fprintf(w, "data: {\"jsonrpc\":\"2.0\",\"id\":%d,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"isError\":false}}\n\n", *req.ID)
 			fl.Flush()
 			// Deliberately keep the body open (no return) until the test
 			// tells the client to Close, to simulate a server that doesn't
@@ -338,7 +338,7 @@ func TestHTTPTransportSSEBodyStaysOpen(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	tr := NewStreamableHTTPTransport(srv.URL, nil)
 	c := NewClient(tr)
@@ -439,7 +439,7 @@ func TestHTTPTransportSendClosedRaceDoesNotLeakBody(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		fl := w.(http.Flusher)
-		fmt.Fprintf(w, "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n\n")
+		_, _ = fmt.Fprintf(w, "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n\n")
 		fl.Flush()
 		<-hang // never close the stream on the server side either
 	}))
@@ -503,10 +503,7 @@ func TestHTTPTransportSendClosedRaceDoesNotLeakBody(t *testing.T) {
 	// never closes its side): a leaked, never-closed body is exactly the
 	// bug this test guards against.
 	deadline := time.After(testTimeout)
-	for {
-		if atomic.LoadInt32(&closedBodies) == 1 {
-			break
-		}
+	for atomic.LoadInt32(&closedBodies) != 1 {
 		select {
 		case <-deadline:
 			t.Fatalf("closed bodies = %d, want exactly 1 (body leaked)", atomic.LoadInt32(&closedBodies))
@@ -540,22 +537,22 @@ func TestHTTPTransportIntegrationWithClient(t *testing.T) {
 		case "initialize":
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":{"protocolVersion":"2025-03-26","capabilities":{"tools":{}}}}`, *req.ID)
+			_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":{"protocolVersion":"2025-03-26","capabilities":{"tools":{}}}}`, *req.ID)
 		case "notifications/initialized":
 			w.WriteHeader(http.StatusAccepted)
 		case "tools/call":
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprintf(w, "data: {\"jsonrpc\":\"2.0\",\"id\":%d,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"isError\":false}}\n\n", *req.ID)
+			_, _ = fmt.Fprintf(w, "data: {\"jsonrpc\":\"2.0\",\"id\":%d,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"isError\":false}}\n\n", *req.ID)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	tr := NewStreamableHTTPTransport(srv.URL, nil)
 	c := NewClient(tr)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
@@ -581,14 +578,14 @@ func TestHTTPTransportSuccessBodyOverCapErrors(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		// A direct-JSON response body larger than the cap.
-		w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":"`))
-		w.Write([]byte(strings.Repeat("x", 4096)))
-		w.Write([]byte(`"}`))
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":"`))
+		_, _ = w.Write([]byte(strings.Repeat("x", 4096)))
+		_, _ = w.Write([]byte(`"}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	tr := NewStreamableHTTPTransport(srv.URL, nil)
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 	ctx := context.Background()
 	err := tr.Send(ctx, json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
 	if err == nil {
@@ -603,12 +600,12 @@ func TestHTTPTransportSuccessBodyUnderCapWorks(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":"ok"}`))
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":"ok"}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	tr := NewStreamableHTTPTransport(srv.URL, nil)
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 	ctx := context.Background()
 	if err := tr.Send(ctx, json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"ping"}`)); err != nil {
 		t.Fatalf("send: %v", err)
@@ -627,7 +624,7 @@ func TestHTTPTransportSuccessBodyUnderCapWorks(t *testing.T) {
 // built on it picks that up at NewClient time.
 func TestHTTPTransportSelfSerializes(t *testing.T) {
 	tr := NewStreamableHTTPTransport("http://example.invalid/mcp", nil)
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 
 	ss, ok := tr.(selfSerializingTransport)
 	if !ok {
@@ -638,7 +635,7 @@ func TestHTTPTransportSelfSerializes(t *testing.T) {
 	}
 
 	c := NewClient(tr)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	if !c.selfSerializes {
 		t.Fatal("Client.selfSerializes = false for an httpTransport, want true")
 	}
@@ -713,10 +710,10 @@ func TestHTTPRetryDoesNotHeadOfLineBlockConcurrentCalls(t *testing.T) {
 		WithHTTPRetry(3),
 		WithHTTPClientOpt(&http.Client{Transport: rt}),
 	)
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 
 	c := NewClient(tr)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	// backoffDelay(0) + backoffDelay(1) with the default 200ms base ==
 	// 200ms + 400ms == 600ms minimum before the slow call's 3rd attempt
@@ -788,7 +785,7 @@ func TestHTTPTransportCloseSendsDELETEWithSessionID(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	tr := NewStreamableHTTPTransport(srv.URL, nil)
 
@@ -830,7 +827,7 @@ func TestHTTPTransportCloseNoSessionNoDELETE(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	tr := NewStreamableHTTPTransport(srv.URL, nil)
 

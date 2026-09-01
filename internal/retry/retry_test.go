@@ -65,10 +65,12 @@ func TestBackoffWithFastDelay(t *testing.T) {
 
 	start := time.Now()
 	calls := 0
-	Do(t.Context(), 2, func() (int, error) {
+	if _, err := Do(t.Context(), 2, func() (int, error) {
 		calls++
 		return 0, &retryableErr{true}
-	})
+	}); err == nil {
+		t.Fatal("expected a retry-exhaustion error")
+	}
 	elapsed := time.Since(start)
 
 	// With 2 retries and BaseDelay=1ms, we should have backoff delays.

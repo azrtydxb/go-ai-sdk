@@ -41,9 +41,9 @@ func streamSSEServer(t *testing.T, chunks []generateContentResponse) *httptest.S
 
 func writeSSE(w http.ResponseWriter, flusher http.Flusher, v any) {
 	b, _ := json.Marshal(v)
-	w.Write([]byte("data: "))
-	w.Write(b)
-	w.Write([]byte("\n\n"))
+	_, _ = w.Write([]byte("data: "))
+	_, _ = w.Write(b)
+	_, _ = w.Write([]byte("\n\n"))
 	flusher.Flush()
 }
 
@@ -76,7 +76,7 @@ func TestStreamToolCallIDsAreDistinctAcrossChunks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer sr.Close()
+	defer func() { _ = sr.Close() }()
 
 	var ends []provider.ToolCallEnd
 	for part := range sr.Parts() {
@@ -115,7 +115,7 @@ func TestStreamEndsWithFinishReasonSeen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer sr.Close()
+	defer func() { _ = sr.Close() }()
 
 	var finishes []provider.FinishPart
 	for part := range sr.Parts() {
@@ -153,7 +153,7 @@ func TestStreamTruncatedBeforeFinishReason(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer sr.Close()
+	defer func() { _ = sr.Close() }()
 
 	var finishes []provider.FinishPart
 	for part := range sr.Parts() {

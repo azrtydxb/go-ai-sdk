@@ -230,13 +230,23 @@ func TestForType_ExportedEmbedPromotesFields(t *testing.T) {
 
 type base struct {
 	ID     string `json:"id"`
-	hidden string
+	hidden string `json:"-"` // fixture: unexported fields must be skipped
 }
 
 type withUnexportedEmbed struct {
 	base
 	Name string `json:"name"`
 }
+
+// The fixture fields below are never read: their existence is the test
+// (unexported fields skipped, embed cycles rejected). The blank
+// identifiers keep the unused linter satisfied without reading them for
+// real.
+var (
+	_              = base{}.hidden
+	_              = embedCycleA{}.embedCycleB
+	_ *embedCycleA = embedCycleB{}.embedCycleA
+)
 
 func TestForType_UnexportedEmbedPromotesExportedFields(t *testing.T) {
 	raw, err := For[withUnexportedEmbed]()
@@ -319,6 +329,10 @@ type embedCycleB struct {
 func TestForType_EmbeddedCycleDetection(t *testing.T) {
 	if _, err := For[embedCycleA](); err == nil {
 		t.Fatal("want error for cyclic embedding")
+	}
+	// Both sides of the cycle must be rejected, not just the one named.
+	if _, err := For[embedCycleB](); err == nil {
+		t.Fatal("want error for cyclic embedding (reverse direction)")
 	}
 }
 

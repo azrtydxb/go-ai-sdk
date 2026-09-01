@@ -11,7 +11,7 @@ import (
 
 func TestListPromptsWithArguments(t *testing.T) {
 	c, server := withCap("prompts")
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	type outcome struct {
 		res []Prompt
@@ -80,7 +80,7 @@ func TestListPromptsWithArguments(t *testing.T) {
 
 func TestGetPromptMultiPartWithEmbeddedResource(t *testing.T) {
 	c, server := withCap("prompts")
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	type outcome struct {
 		description string
@@ -166,7 +166,7 @@ func TestGetPromptSingleContentObject(t *testing.T) {
 	// array. The client must flatten this into a one-element PromptPart
 	// slice rather than erroring.
 	c, server := withCap("prompts")
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	type outcome struct {
 		messages []PromptMessage
@@ -202,7 +202,7 @@ func TestGetPromptSingleContentObject(t *testing.T) {
 
 func TestGetPromptUnknownContentTypePreserved(t *testing.T) {
 	c, server := withCap("prompts")
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	type outcome struct {
 		messages []PromptMessage
@@ -245,7 +245,7 @@ func TestGetPromptUnknownContentTypePreserved(t *testing.T) {
 func TestPromptsCapabilityAbsent(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	_, _, err := c.GetPrompt(context.Background(), "greet", nil)
 	var capErr *CapabilityError
@@ -265,7 +265,7 @@ func TestPromptsCapabilityAbsent(t *testing.T) {
 
 func TestGetPromptRPCErrorSurfaces(t *testing.T) {
 	c, server := withCap("prompts")
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	results := make(chan error, 1)
 	go func() {

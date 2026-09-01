@@ -66,7 +66,7 @@ func readBody(t *testing.T, r *http.Request) []byte {
 
 func writeSSE(w http.ResponseWriter, flusher http.Flusher, data any) {
 	b, _ := json.Marshal(data)
-	fmt.Fprintf(w, "data: %s\n\n", b)
+	_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
 	flusher.Flush()
 }
 
@@ -96,12 +96,12 @@ func newFixtureServer(t *testing.T) (*httptest.Server, *fixtureState) {
 		case "fail 429":
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(429)
-			w.Write([]byte(`{"message":"rate limited"}`))
+			_, _ = w.Write([]byte(`{"message":"rate limited"}`))
 			return
 		case "fail 400":
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(400)
-			w.Write([]byte(`{"message":"bad request"}`))
+			_, _ = w.Write([]byte(`{"message":"bad request"}`))
 			return
 		}
 
@@ -171,7 +171,7 @@ func newFixtureServer(t *testing.T) (*httptest.Server, *fixtureState) {
 				FinishReason: "COMPLETE",
 				Usage:        chatResponseUsage{Tokens: chatResponseTokens{InputTokens: 5, OutputTokens: 3}},
 			}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "tool":
 			resp := chatResponse{
 				Message: &chatResponseMessage{
@@ -184,7 +184,7 @@ func newFixtureServer(t *testing.T) (*httptest.Server, *fixtureState) {
 				FinishReason: "TOOL_CALL",
 				Usage:        chatResponseUsage{Tokens: chatResponseTokens{InputTokens: 6, OutputTokens: 4}},
 			}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		default:
 			t.Fatalf("fixture: unknown scenario %q", text)
 		}
@@ -354,7 +354,7 @@ func TestRequestShapeHeaders(t *testing.T) {
 			Message:      &chatResponseMessage{Content: []chatResponseContent{{Type: "text", Text: "hi"}}},
 			FinishReason: "COMPLETE",
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	t.Cleanup(hdrSrv.Close)
 	model := New(WithAPIKey("k"), WithBaseURL(hdrSrv.URL)).Model("cohere-test")
@@ -394,13 +394,13 @@ func TestRequestShapeResponseFormatWithSchema(t *testing.T) {
 	}
 
 	var raw map[string]json.RawMessage
-	json.Unmarshal(fs.rawBody(), &raw)
+	_ = json.Unmarshal(fs.rawBody(), &raw)
 	var rf map[string]json.RawMessage
 	if err := json.Unmarshal(raw["response_format"], &rf); err != nil {
 		t.Fatalf("decode response_format: %v", err)
 	}
 	var typ string
-	json.Unmarshal(rf["type"], &typ)
+	_ = json.Unmarshal(rf["type"], &typ)
 	if typ != "json_object" {
 		t.Errorf("response_format.type = %q, want json_object", typ)
 	}
@@ -601,7 +601,7 @@ func TestRequestShapeToolChoiceAutoSendsToolsAsIsNoField(t *testing.T) {
 		t.Errorf("Tools = %d, want 1 (sent as-is)", len(req.Tools))
 	}
 	var raw map[string]json.RawMessage
-	json.Unmarshal(fs.rawBody(), &raw)
+	_ = json.Unmarshal(fs.rawBody(), &raw)
 	if _, ok := raw["tool_choice"]; ok {
 		t.Errorf("request has tool_choice field, want none for auto mode")
 	}
@@ -686,7 +686,7 @@ func TestStreamTruncatedBeforeMessageEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer sr.Close()
+	defer func() { _ = sr.Close() }()
 
 	var finishes []provider.FinishPart
 	for part := range sr.Parts() {
@@ -730,7 +730,7 @@ func TestStreamWithMessageEndIsWellFormed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer sr.Close()
+	defer func() { _ = sr.Close() }()
 
 	var finishes []provider.FinishPart
 	for part := range sr.Parts() {

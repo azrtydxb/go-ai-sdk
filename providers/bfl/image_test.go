@@ -36,10 +36,10 @@ func TestGenerateImages_CreatePollSampleHappyPath(t *testing.T) {
 	var gotCreateKey, gotPollKey string
 	mux.HandleFunc("/v1/flux-pro-1.1", func(w http.ResponseWriter, r *http.Request) {
 		gotCreateKey = r.Header.Get("x-key")
-		io.ReadAll(r.Body)
+		_, _ = io.ReadAll(r.Body)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1","polling_url":"` + srv.URL + `/poll"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","polling_url":"` + srv.URL + `/poll"}`))
 	})
 	mux.HandleFunc("/poll", func(w http.ResponseWriter, r *http.Request) {
 		gotPollKey = r.Header.Get("x-key")
@@ -51,15 +51,15 @@ func TestGenerateImages_CreatePollSampleHappyPath(t *testing.T) {
 		body := strings.ReplaceAll(pollBodies[idx], "SAMPLE_URL", srv.URL+"/sample")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(body))
+		_, _ = w.Write([]byte(body))
 	})
 	mux.HandleFunc("/sample", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		w.WriteHeader(http.StatusOK)
-		w.Write(sampleBytes)
+		_, _ = w.Write(sampleBytes)
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.ImageModel("flux-pro-1.1")
@@ -100,23 +100,23 @@ func TestGenerateImages_WidthHeightFromSize(t *testing.T) {
 	var srv *httptest.Server
 	mux.HandleFunc("/v1/flux-pro-1.1", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &gotBody)
+		_ = json.Unmarshal(body, &gotBody)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1","polling_url":"` + srv.URL + `/poll"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","polling_url":"` + srv.URL + `/poll"}`))
 	})
 	mux.HandleFunc("/poll", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1","status":"Ready","result":{"sample":"` + srv.URL + `/sample"}}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","status":"Ready","result":{"sample":"` + srv.URL + `/sample"}}`))
 	})
 	mux.HandleFunc("/sample", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		w.WriteHeader(http.StatusOK)
-		w.Write(sampleBytes)
+		_, _ = w.Write(sampleBytes)
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.ImageModel("flux-pro-1.1")
@@ -139,15 +139,15 @@ func TestGenerateImages_ErrorStatus(t *testing.T) {
 	mux.HandleFunc("/v1/flux-pro-1.1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1","polling_url":"` + srv.URL + `/poll"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","polling_url":"` + srv.URL + `/poll"}`))
 	})
 	mux.HandleFunc("/poll", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1","status":"Error"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","status":"Error"}`))
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.ImageModel("flux-pro-1.1")
@@ -167,15 +167,15 @@ func TestGenerateImages_ContentModeratedStatus(t *testing.T) {
 	mux.HandleFunc("/v1/flux-pro-1.1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1","polling_url":"` + srv.URL + `/poll"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","polling_url":"` + srv.URL + `/poll"}`))
 	})
 	mux.HandleFunc("/poll", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1","status":"Content Moderated"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","status":"Content Moderated"}`))
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.ImageModel("flux-pro-1.1")
@@ -192,9 +192,9 @@ func TestGenerateImages_ContentModeratedStatus(t *testing.T) {
 func TestGenerateImages_401Error(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error":"invalid api key"}`))
+		_, _ = w.Write([]byte(`{"error":"invalid api key"}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("bad-key"), WithBaseURL(srv.URL))
 	m := p.ImageModel("flux-pro-1.1")
@@ -222,15 +222,15 @@ func TestGenerateImages_PollNon2xxError(t *testing.T) {
 	mux.HandleFunc("/v1/flux-pro-1.1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1","polling_url":"` + srv.URL + `/poll"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","polling_url":"` + srv.URL + `/poll"}`))
 	})
 	mux.HandleFunc("/poll", func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&pollHit, 1)
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"error":"internal error"}`))
+		_, _ = w.Write([]byte(`{"error":"internal error"}`))
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.ImageModel("flux-pro-1.1")
@@ -259,19 +259,19 @@ func TestGenerateImages_ContextCancellationMidPoll(t *testing.T) {
 	mux.HandleFunc("/v1/flux-pro-1.1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1","polling_url":"` + srv.URL + `/poll"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","polling_url":"` + srv.URL + `/poll"}`))
 	})
 	mux.HandleFunc("/poll", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1","status":"Pending"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","status":"Pending"}`))
 		select {
 		case pollHit <- struct{}{}:
 		default:
 		}
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	// A poll interval long enough that the test can cancel the context
 	// while GenerateImages is sleeping between polls.
@@ -302,23 +302,23 @@ func TestGenerateImages_ProviderOptionsMergeTopLevel(t *testing.T) {
 	var srv *httptest.Server
 	mux.HandleFunc("/v1/flux-pro-1.1", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &gotBody)
+		_ = json.Unmarshal(body, &gotBody)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1","polling_url":"` + srv.URL + `/poll"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","polling_url":"` + srv.URL + `/poll"}`))
 	})
 	mux.HandleFunc("/poll", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1","status":"Ready","result":{"sample":"` + srv.URL + `/sample"}}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","status":"Ready","result":{"sample":"` + srv.URL + `/sample"}}`))
 	})
 	mux.HandleFunc("/sample", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		w.WriteHeader(http.StatusOK)
-		w.Write(sampleBytes)
+		_, _ = w.Write(sampleBytes)
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.ImageModel("flux-pro-1.1")
@@ -401,9 +401,9 @@ func TestGenerateImages_RegionalPollingURLSameRegistrableDomainWorks(t *testing.
 	regionSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1","status":"Ready","result":{"sample":"https://api.us1.bfl.ai/sample"}}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","status":"Ready","result":{"sample":"https://api.us1.bfl.ai/sample"}}`))
 	}))
-	defer regionSrv.Close()
+	defer func() { regionSrv.Close() }()
 
 	target, err := url.Parse(regionSrv.URL)
 	if err != nil {
@@ -448,21 +448,21 @@ func TestGenerateImages_SameOriginPollingURLWorks(t *testing.T) {
 	mux.HandleFunc("/v1/flux-pro-1.1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1","polling_url":"` + srv.URL + `/poll"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","polling_url":"` + srv.URL + `/poll"}`))
 	})
 	mux.HandleFunc("/poll", func(w http.ResponseWriter, r *http.Request) {
 		gotPollKey = r.Header.Get("x-key")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1","status":"Ready","result":{"sample":"` + srv.URL + `/sample"}}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","status":"Ready","result":{"sample":"` + srv.URL + `/sample"}}`))
 	})
 	mux.HandleFunc("/sample", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		w.WriteHeader(http.StatusOK)
-		w.Write(sampleBytes)
+		_, _ = w.Write(sampleBytes)
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("secret-key"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.ImageModel("flux-pro-1.1")
@@ -502,9 +502,9 @@ func TestGenerateImages_EmptyPollingURLError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1","polling_url":""}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","polling_url":""}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.ImageModel("flux-pro-1.1")
@@ -529,20 +529,20 @@ func TestGenerateImages_RequestHeaders(t *testing.T) {
 		createCustom = r.Header.Get("X-Custom-Header")
 		createAuth = r.Header.Get("x-key")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"id":"gen-1","polling_url":"` + srv.URL + `/poll"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","polling_url":"` + srv.URL + `/poll"}`))
 	})
 	mux.HandleFunc("/poll", func(w http.ResponseWriter, r *http.Request) {
 		pollCustom = r.Header.Get("X-Custom-Header")
 		pollAuth = r.Header.Get("x-key")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"id":"gen-1","status":"Ready","result":{"sample":"` + srv.URL + `/sample"}}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","status":"Ready","result":{"sample":"` + srv.URL + `/sample"}}`))
 	})
 	mux.HandleFunc("/sample", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
-		w.Write([]byte("bytes"))
+		_, _ = w.Write([]byte("bytes"))
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.ImageModel("flux-pro-1.1")

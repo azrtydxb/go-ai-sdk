@@ -98,7 +98,7 @@ func lastUserText(req generateContentRequest) string {
 
 func writeSSE(w http.ResponseWriter, flusher http.Flusher, v any) {
 	b, _ := json.Marshal(v)
-	fmt.Fprintf(w, "data: %s\n\n", b)
+	_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
 	flusher.Flush()
 }
 
@@ -149,12 +149,12 @@ func handleGenerate(t *testing.T, w http.ResponseWriter, r *http.Request, stream
 	case "fail 429":
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(429)
-		w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+		_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
 		return
 	case "fail 400":
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(400)
-		w.Write([]byte(`{"error":{"message":"bad request"}}`))
+		_, _ = w.Write([]byte(`{"error":{"message":"bad request"}}`))
 		return
 	}
 
@@ -190,7 +190,7 @@ func handleGenerate(t *testing.T, w http.ResponseWriter, r *http.Request, stream
 				UsageMetadata: &wireUsageMetadata{PromptTokenCount: 6, CandidatesTokenCount: 4, TotalTokenCount: 10},
 			})
 		default:
-			fmt.Fprintf(w, ": unknown streaming scenario %q\n\n", text)
+			_, _ = fmt.Fprintf(w, ": unknown streaming scenario %q\n\n", text)
 			flusher.Flush()
 		}
 		return
@@ -200,7 +200,7 @@ func handleGenerate(t *testing.T, w http.ResponseWriter, r *http.Request, stream
 
 	switch text {
 	case "simple":
-		json.NewEncoder(w).Encode(generateContentResponse{
+		_ = json.NewEncoder(w).Encode(generateContentResponse{
 			Candidates: []wireCandidate{{
 				Content:      wireResponseContent{Role: "model", Parts: []wireResponsePart{{Text: "Hello from vertex!"}}},
 				FinishReason: "STOP",
@@ -208,7 +208,7 @@ func handleGenerate(t *testing.T, w http.ResponseWriter, r *http.Request, stream
 			UsageMetadata: &wireUsageMetadata{PromptTokenCount: 5, CandidatesTokenCount: 3, TotalTokenCount: 8},
 		})
 	case "tool":
-		json.NewEncoder(w).Encode(generateContentResponse{
+		_ = json.NewEncoder(w).Encode(generateContentResponse{
 			Candidates: []wireCandidate{{
 				Content: wireResponseContent{Role: "model", Parts: []wireResponsePart{{
 					FunctionCall: &wireFunctionCall{Name: "get_weather", Args: json.RawMessage(`{"city":"Ghent"}`)},

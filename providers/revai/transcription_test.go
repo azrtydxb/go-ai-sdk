@@ -53,16 +53,16 @@ func newJobFixture(t *testing.T, pollBodies []string, transcript string) (*httpt
 				switch part.FormName() {
 				case "media":
 					f.createFilename = part.FileName()
-					io.ReadAll(part)
+					_, _ = io.ReadAll(part)
 				case "options":
 					b, _ := io.ReadAll(part)
-					json.Unmarshal(b, &f.createOptions)
+					_ = json.Unmarshal(b, &f.createOptions)
 				}
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"job-1","status":"in_progress"}`))
+		_, _ = w.Write([]byte(`{"id":"job-1","status":"in_progress"}`))
 	})
 	mux.HandleFunc("/speechtotext/v1/jobs/job-1", func(w http.ResponseWriter, r *http.Request) {
 		n := atomic.AddInt32(&f.pollCount, 1)
@@ -72,13 +72,13 @@ func newJobFixture(t *testing.T, pollBodies []string, transcript string) (*httpt
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(f.pollBodies[idx]))
+		_, _ = w.Write([]byte(f.pollBodies[idx]))
 	})
 	mux.HandleFunc("/speechtotext/v1/jobs/job-1/transcript", func(w http.ResponseWriter, r *http.Request) {
 		f.transcriptAccept = r.Header.Get("Accept")
 		w.Header().Set("Content-Type", "application/vnd.rev.transcript.v1.0+json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(f.transcript))
+		_, _ = w.Write([]byte(f.transcript))
 	})
 
 	srv := httptest.NewServer(mux)
@@ -251,9 +251,9 @@ func TestTranscribe_FailedStatus_EmptyFailureDetailFallsBackToBody(t *testing.T)
 func TestTranscribe_401Error(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"title":"Unauthorized","detail":"invalid access token"}`))
+		_, _ = w.Write([]byte(`{"title":"Unauthorized","detail":"invalid access token"}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("bad-key"), WithBaseURL(srv.URL))
 	m := p.TranscriptionModel("")
@@ -277,9 +277,9 @@ func TestTranscribe_401Error(t *testing.T) {
 func TestTranscribe_401Error_TitleFallback(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"title":"Unauthorized"}`))
+		_, _ = w.Write([]byte(`{"title":"Unauthorized"}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("bad-key"), WithBaseURL(srv.URL))
 	m := p.TranscriptionModel("")
@@ -304,19 +304,19 @@ func TestTranscribe_ContextCancellationMidPoll(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"job-1","status":"in_progress"}`))
+		_, _ = w.Write([]byte(`{"id":"job-1","status":"in_progress"}`))
 	})
 	mux.HandleFunc("/speechtotext/v1/jobs/job-1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"job-1","status":"in_progress"}`))
+		_, _ = w.Write([]byte(`{"id":"job-1","status":"in_progress"}`))
 		select {
 		case pollHit <- struct{}{}:
 		default:
 		}
 	})
 	srv := httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(200*time.Millisecond))
 	m := p.TranscriptionModel("")
@@ -347,15 +347,15 @@ func TestTranscribe_PollNon2xxError(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"job-1","status":"in_progress"}`))
+		_, _ = w.Write([]byte(`{"id":"job-1","status":"in_progress"}`))
 	})
 	mux.HandleFunc("/speechtotext/v1/jobs/job-1", func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&pollHit, 1)
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"title":"internal error"}`))
+		_, _ = w.Write([]byte(`{"title":"internal error"}`))
 	})
 	srv := httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.TranscriptionModel("")
@@ -456,19 +456,19 @@ func TestTranscribe_RequestHeaders(t *testing.T) {
 		createCustom = r.Header.Get("X-Custom-Header")
 		createAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"id":"job-1"}`))
+		_, _ = w.Write([]byte(`{"id":"job-1"}`))
 	})
 	mux.HandleFunc("/speechtotext/v1/jobs/job-1", func(w http.ResponseWriter, r *http.Request) {
 		pollCustom = r.Header.Get("X-Custom-Header")
 		pollAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"id":"job-1","status":"transcribed"}`))
+		_, _ = w.Write([]byte(`{"id":"job-1","status":"transcribed"}`))
 	})
 	mux.HandleFunc("/speechtotext/v1/jobs/job-1/transcript", func(w http.ResponseWriter, r *http.Request) {
 		fetchCustom = r.Header.Get("X-Custom-Header")
 		fetchAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"monologues":[]}`))
+		_, _ = w.Write([]byte(`{"monologues":[]}`))
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)

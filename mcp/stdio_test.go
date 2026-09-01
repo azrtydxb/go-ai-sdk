@@ -31,7 +31,7 @@ func TestFramedTransportSend(t *testing.T) {
 	var buf bytes.Buffer
 	wc := &nopWriteCloser{Writer: &buf}
 	tr := newFramedTransport(strings.NewReader(""), wc, nil)
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 
 	ctx := context.Background()
 	if err := tr.Send(ctx, json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"ping"}`)); err != nil {
@@ -57,7 +57,7 @@ func TestFramedTransportSendRejectsEmbeddedNewline(t *testing.T) {
 	var buf bytes.Buffer
 	wc := &nopWriteCloser{Writer: &buf}
 	tr := newFramedTransport(strings.NewReader(""), wc, nil)
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 
 	ctx := context.Background()
 	err := tr.Send(ctx, json.RawMessage("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\",\n\"params\":1}"))
@@ -72,7 +72,7 @@ func TestFramedTransportSendRejectsEmbeddedNewline(t *testing.T) {
 func TestFramedTransportReceive(t *testing.T) {
 	r, w := io.Pipe()
 	tr := newFramedTransport(r, &nopWriteCloser{Writer: io.Discard}, nil)
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 
 	go func() {
 		_, _ = io.WriteString(w, "{\"a\":1}\n")
@@ -102,7 +102,7 @@ func TestFramedTransportReceive(t *testing.T) {
 func TestFramedTransportReceiveEOF(t *testing.T) {
 	r, w := io.Pipe()
 	tr := newFramedTransport(r, &nopWriteCloser{Writer: io.Discard}, nil)
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 
 	go func() {
 		_, _ = io.WriteString(w, "{\"a\":1}\n")
@@ -123,7 +123,7 @@ func TestFramedTransportReceiveEOF(t *testing.T) {
 func TestFramedTransportReceiveCtxCancel(t *testing.T) {
 	r, _ := io.Pipe() // nothing written, Receive should block until ctx cancel
 	tr := newFramedTransport(r, &nopWriteCloser{Writer: io.Discard}, nil)
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -176,8 +176,8 @@ func TestFramedTransportOverPipeEndToEnd(t *testing.T) {
 
 	a := newFramedTransport(aR, &nopWriteCloser{Writer: aW}, nil)
 	b := newFramedTransport(bR, &nopWriteCloser{Writer: bW}, nil)
-	defer a.Close()
-	defer b.Close()
+	defer func() { _ = a.Close() }()
+	defer func() { _ = b.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
@@ -218,7 +218,7 @@ func TestFramedTransportOverPipeEndToEnd(t *testing.T) {
 func TestFramedTransportLargeLine(t *testing.T) {
 	r, w := io.Pipe()
 	tr := newFramedTransport(r, &nopWriteCloser{Writer: io.Discard}, nil)
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 
 	big := strings.Repeat("x", 1024*1024) // 1MB, well under the 10MB cap
 	payload := `{"jsonrpc":"2.0","id":1,"result":"` + big + `"}`
@@ -247,7 +247,7 @@ func TestFramedTransportLargeLine(t *testing.T) {
 func TestFramedTransportRepeatedTimeoutThenMessage(t *testing.T) {
 	r, w := io.Pipe()
 	tr := newFramedTransport(r, &nopWriteCloser{Writer: io.Discard}, nil)
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 
 	for i := 0; i < 5; i++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
@@ -286,10 +286,10 @@ func TestFramedTransportSendCtxCancelOnBlockedWrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("os.Pipe: %v", err)
 	}
-	defer pr.Close()
+	defer func() { _ = pr.Close() }()
 
 	tr := newFramedTransport(strings.NewReader(""), pw, nil)
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 
 	// A message large enough to exceed any realistic OS pipe buffer size
 	// (typically 16-64KB), so the underlying Write blocks partway through
@@ -341,7 +341,7 @@ func TestFramedTransportSendCtxCancelZeroBytesDoesNotAbandon(t *testing.T) {
 	if err != nil {
 		t.Fatalf("os.Pipe: %v", err)
 	}
-	defer pr.Close()
+	defer func() { _ = pr.Close() }()
 
 	// Saturate the pipe's kernel buffer: keep attempting bounded writes
 	// until two in a row make no progress at all, meaning free space is
@@ -363,7 +363,7 @@ func TestFramedTransportSendCtxCancelZeroBytesDoesNotAbandon(t *testing.T) {
 	}
 
 	tr := newFramedTransport(strings.NewReader(""), pw, nil)
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
@@ -401,7 +401,7 @@ func TestFramedTransportSendSubprocessRoundTripStillWorks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStdioTransport: %v", err)
 	}
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
@@ -433,7 +433,7 @@ func TestNewStdioTransportSubprocess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStdioTransport: %v", err)
 	}
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
@@ -500,15 +500,15 @@ func TestStdioClientConcurrentCallsStaySerialized(t *testing.T) {
 
 	clientTr := newFramedTransport(aR, &chunkedWriteCloser{w: &nopWriteCloser{Writer: aW}}, nil)
 	serverTr := newFramedTransport(bR, &nopWriteCloser{Writer: bW}, nil)
-	defer clientTr.Close()
-	defer serverTr.Close()
+	defer func() { _ = clientTr.Close() }()
+	defer func() { _ = serverTr.Close() }()
 
 	if _, ok := any(clientTr).(selfSerializingTransport); ok {
 		t.Fatal("framedTransport must not implement selfSerializingTransport")
 	}
 
 	c := NewClient(clientTr)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	if c.selfSerializes {
 		t.Fatal("Client.selfSerializes must be false for the stdio transport")
 	}

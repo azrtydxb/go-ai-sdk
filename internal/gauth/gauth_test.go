@@ -133,7 +133,7 @@ func newTokenServer(t *testing.T, pub *rsa.PublicKey, accessToken string, expire
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"access_token":%q,"expires_in":%d,"token_type":"Bearer"}`, accessToken, expiresIn)
+		_, _ = fmt.Fprintf(w, `{"access_token":%q,"expires_in":%d,"token_type":"Bearer"}`, accessToken, expiresIn)
 	}))
 }
 
@@ -177,7 +177,7 @@ func TestNewServiceAccountTokenSourceFromFile(t *testing.T) {
 
 	var reqCount int32
 	srv := newTokenServer(t, &priv.PublicKey, "tok-from-file", 3600, &reqCount, nil)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 	ts.SetTokenURL(srv.URL)
 
 	tok, err := ts.Token(context.Background())
@@ -205,7 +205,7 @@ func TestServiceAccountTokenSource_TokenFlow(t *testing.T) {
 	var reqCount int32
 	var claims map[string]any
 	srv := newTokenServer(t, &priv.PublicKey, "access-token-1", 3600, &reqCount, &claims)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 	ts.SetTokenURL(srv.URL)
 
 	tok, err := ts.Token(context.Background())
@@ -261,7 +261,7 @@ func TestServiceAccountTokenSource_RefreshesAfterExpiry(t *testing.T) {
 	// expires_in of 60s means the cache TTL (expiry - 60s) is ~0, so the
 	// very next call should refresh rather than serve from cache.
 	srv := newTokenServer(t, &priv.PublicKey, "short-lived-token", 60, &reqCount, nil)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 	ts.SetTokenURL(srv.URL)
 
 	if _, err := ts.Token(context.Background()); err != nil {
@@ -285,9 +285,9 @@ func TestServiceAccountTokenSource_TokenEndpointError(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(401)
-		w.Write([]byte(`{"error":"invalid_grant"}`))
+		_, _ = w.Write([]byte(`{"error":"invalid_grant"}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 	ts.SetTokenURL(srv.URL)
 
 	_, err = ts.Token(context.Background())
@@ -321,9 +321,9 @@ func TestServiceAccountTokenSource_TokenEndpoint5xxIsRetryable(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte(`{"error":"unavailable"}`))
+		_, _ = w.Write([]byte(`{"error":"unavailable"}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 	ts.SetTokenURL(srv.URL)
 
 	_, err = ts.Token(context.Background())
@@ -422,7 +422,7 @@ func TestServiceAccountTokenSource_SingleFlight(t *testing.T) {
 
 	var reqCount int32
 	srv := newTokenServer(t, &priv.PublicKey, "single-flight-token", 3600, &reqCount, nil)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 	ts.SetTokenURL(srv.URL)
 
 	const n = 10

@@ -30,10 +30,10 @@ func newFixtureServer(t *testing.T, pollBodies []string) (*httptest.Server, *int
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v2/upload", func(w http.ResponseWriter, r *http.Request) {
 		gotUploadAuth = r.Header.Get("Authorization")
-		io.ReadAll(r.Body)
+		_, _ = io.ReadAll(r.Body)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"upload_url":"https://cdn.assemblyai.test/audio123"}`))
+		_, _ = w.Write([]byte(`{"upload_url":"https://cdn.assemblyai.test/audio123"}`))
 	})
 	mux.HandleFunc("/v2/transcript", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -41,10 +41,10 @@ func newFixtureServer(t *testing.T, pollBodies []string) (*httptest.Server, *int
 		}
 		gotCreateAuth = r.Header.Get("Authorization")
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &gotCreateBody)
+		_ = json.Unmarshal(body, &gotCreateBody)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"transcript-1","status":"queued"}`))
+		_, _ = w.Write([]byte(`{"id":"transcript-1","status":"queued"}`))
 	})
 	mux.HandleFunc("/v2/transcript/transcript-1", func(w http.ResponseWriter, r *http.Request) {
 		n := atomic.AddInt32(&pollCount, 1)
@@ -54,7 +54,7 @@ func newFixtureServer(t *testing.T, pollBodies []string) (*httptest.Server, *int
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(pollBodies[idx]))
+		_, _ = w.Write([]byte(pollBodies[idx]))
 	})
 
 	srv := httptest.NewServer(mux)
@@ -255,9 +255,9 @@ func TestTranscribe_ProviderOptionsMergeTopLevel(t *testing.T) {
 func TestTranscribe_401Error(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error":"invalid api key"}`))
+		_, _ = w.Write([]byte(`{"error":"invalid api key"}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("bad-key"), WithBaseURL(srv.URL))
 	m := p.TranscriptionModel("universal")
@@ -285,7 +285,7 @@ func TestTranscribe_ContextCancellationMidPoll(t *testing.T) {
 	mux.HandleFunc("/v2/upload", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"upload_url":"https://cdn.assemblyai.test/audio123"}`))
+		_, _ = w.Write([]byte(`{"upload_url":"https://cdn.assemblyai.test/audio123"}`))
 	})
 	mux.HandleFunc("/v2/transcript", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -293,19 +293,19 @@ func TestTranscribe_ContextCancellationMidPoll(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"transcript-1","status":"queued"}`))
+		_, _ = w.Write([]byte(`{"id":"transcript-1","status":"queued"}`))
 	})
 	mux.HandleFunc("/v2/transcript/transcript-1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"transcript-1","status":"queued"}`))
+		_, _ = w.Write([]byte(`{"id":"transcript-1","status":"queued"}`))
 		select {
 		case pollHit <- struct{}{}:
 		default:
 		}
 	})
 	srv := httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	// A poll interval long enough that the test can cancel the context
 	// while Transcribe is sleeping between polls.
@@ -335,7 +335,7 @@ func TestTranscribe_PollNon2xxError(t *testing.T) {
 	mux.HandleFunc("/v2/upload", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"upload_url":"https://cdn.assemblyai.test/audio123"}`))
+		_, _ = w.Write([]byte(`{"upload_url":"https://cdn.assemblyai.test/audio123"}`))
 	})
 	mux.HandleFunc("/v2/transcript", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -343,15 +343,15 @@ func TestTranscribe_PollNon2xxError(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"transcript-1","status":"queued"}`))
+		_, _ = w.Write([]byte(`{"id":"transcript-1","status":"queued"}`))
 	})
 	mux.HandleFunc("/v2/transcript/transcript-1", func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&pollHit, 1)
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"error":"internal error"}`))
+		_, _ = w.Write([]byte(`{"error":"internal error"}`))
 	})
 	srv := httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.TranscriptionModel("universal")
@@ -377,10 +377,10 @@ func TestTranscribe_EmptyUploadURLError(t *testing.T) {
 	mux.HandleFunc("/v2/upload", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"upload_url":""}`))
+		_, _ = w.Write([]byte(`{"upload_url":""}`))
 	})
 	srv := httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.TranscriptionModel("universal")
@@ -424,7 +424,7 @@ func TestTranscribe_RequestHeaders(t *testing.T) {
 		uploadCustom = r.Header.Get("X-Custom-Header")
 		uploadAuth = r.Header.Get("authorization")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"upload_url":"https://cdn.assemblyai.test/audio123"}`))
+		_, _ = w.Write([]byte(`{"upload_url":"https://cdn.assemblyai.test/audio123"}`))
 	})
 	mux.HandleFunc("/v2/transcript", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -433,13 +433,13 @@ func TestTranscribe_RequestHeaders(t *testing.T) {
 		createCustom = r.Header.Get("X-Custom-Header")
 		createAuth = r.Header.Get("authorization")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"id":"transcript-1"}`))
+		_, _ = w.Write([]byte(`{"id":"transcript-1"}`))
 	})
 	mux.HandleFunc("/v2/transcript/transcript-1", func(w http.ResponseWriter, r *http.Request) {
 		pollCustom = r.Header.Get("X-Custom-Header")
 		pollAuth = r.Header.Get("authorization")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"id":"transcript-1","status":"completed","text":"hi"}`))
+		_, _ = w.Write([]byte(`{"id":"transcript-1","status":"completed","text":"hi"}`))
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)

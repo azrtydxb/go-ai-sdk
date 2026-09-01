@@ -195,7 +195,7 @@ func lastUserText(req chatRequest) string {
 
 func writeSSE(w http.ResponseWriter, flusher http.Flusher, v any) {
 	b, _ := json.Marshal(v)
-	fmt.Fprintf(w, "data: %s\n\n", b)
+	_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
 	flusher.Flush()
 }
 
@@ -230,12 +230,12 @@ func NewFixtureServer(t *testing.T, providerName string) *Server {
 		case "fail 429":
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(429)
-			w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+			_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
 			return
 		case "fail 400":
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(400)
-			w.Write([]byte(`{"error":{"message":"bad request"}}`))
+			_, _ = w.Write([]byte(`{"error":{"message":"bad request"}}`))
 			return
 		}
 
@@ -257,7 +257,7 @@ func NewFixtureServer(t *testing.T, providerName string) *Server {
 				stop := "stop"
 				writeSSE(w, flusher, chatStreamChunk{Choices: []chatStreamChoice{{FinishReason: &stop}}})
 				writeSSE(w, flusher, chatStreamChunk{Usage: &wireUsage{PromptTokens: 5, CompletionTokens: 2, TotalTokens: 7}})
-				fmt.Fprint(w, "data: [DONE]\n\n")
+				_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 				flusher.Flush()
 			case "stream tool":
 				writeSSE(w, flusher, chatStreamChunk{Choices: []chatStreamChoice{{Delta: chatStreamDelta{
@@ -272,7 +272,7 @@ func NewFixtureServer(t *testing.T, providerName string) *Server {
 				toolCalls := "tool_calls"
 				writeSSE(w, flusher, chatStreamChunk{Choices: []chatStreamChoice{{FinishReason: &toolCalls}}})
 				writeSSE(w, flusher, chatStreamChunk{Usage: &wireUsage{PromptTokens: 8, CompletionTokens: 4, TotalTokens: 12}})
-				fmt.Fprint(w, "data: [DONE]\n\n")
+				_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 				flusher.Flush()
 			default:
 				// Response headers (200 OK, text/event-stream) are already
@@ -281,7 +281,7 @@ func NewFixtureServer(t *testing.T, providerName string) *Server {
 				// gets a deterministic (if wrong) response instead of a
 				// hang.
 				t.Errorf("compattest: unknown streaming scenario %q", text)
-				fmt.Fprintf(w, ": compattest: unknown streaming scenario %q\n\n", text)
+				_, _ = fmt.Fprintf(w, ": compattest: unknown streaming scenario %q\n\n", text)
 				flusher.Flush()
 			}
 			return
@@ -299,7 +299,7 @@ func NewFixtureServer(t *testing.T, providerName string) *Server {
 				}},
 				Usage: wireUsage{PromptTokens: 5, CompletionTokens: 3, TotalTokens: 8},
 			}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "tool":
 			resp := chatResponse{
 				Choices: []chatResponseChoice{{
@@ -317,7 +317,7 @@ func NewFixtureServer(t *testing.T, providerName string) *Server {
 				}},
 				Usage: wireUsage{PromptTokens: 6, CompletionTokens: 4, TotalTokens: 10},
 			}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		default:
 			msg := fmt.Sprintf("compattest: unknown scenario %q", text)
 			t.Errorf("%s", msg)
@@ -354,7 +354,7 @@ func NewFixtureServer(t *testing.T, providerName string) *Server {
 			Usage: wireUsage{PromptTokens: total, TotalTokens: total},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	})
 
 	mux.HandleFunc("/images/generations", func(w http.ResponseWriter, r *http.Request) {
@@ -365,7 +365,7 @@ func NewFixtureServer(t *testing.T, providerName string) *Server {
 		s.record(raw, r.Header.Clone())
 
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"data":[{"b64_json":%q}]}`, onePixelPNGBase64)
+		_, _ = fmt.Fprintf(w, `{"data":[{"b64_json":%q}]}`, onePixelPNGBase64)
 	})
 
 	mux.HandleFunc("/audio/speech", func(w http.ResponseWriter, r *http.Request) {
@@ -376,7 +376,7 @@ func NewFixtureServer(t *testing.T, providerName string) *Server {
 		s.record(raw, r.Header.Clone())
 
 		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Write([]byte("FAKEAUDIO"))
+		_, _ = w.Write([]byte("FAKEAUDIO"))
 	})
 
 	mux.HandleFunc("/audio/transcriptions", func(w http.ResponseWriter, r *http.Request) {
@@ -390,7 +390,7 @@ func NewFixtureServer(t *testing.T, providerName string) *Server {
 		s.record(raw, r.Header.Clone())
 
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"text":"hello world","language":"en","duration":1.5,`+
+		_, _ = fmt.Fprint(w, `{"text":"hello world","language":"en","duration":1.5,`+
 			`"segments":[{"text":"hello","start":0,"end":0.5},{"text":"world","start":0.5,"end":1.5}]}`)
 	})
 

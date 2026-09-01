@@ -39,7 +39,7 @@ func TestGenerateReasoningContent(t *testing.T) {
 			},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	})
 
 	resp, err := model.Generate(context.Background(), provider.Call{
@@ -85,10 +85,10 @@ func TestStreamReasoningContent(t *testing.T) {
 			`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
 		}
 		for _, c := range chunks {
-			fmt.Fprintf(w, "data: %s\n\n", c)
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", c)
 			flusher.Flush()
 		}
-		fmt.Fprint(w, "data: [DONE]\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 		flusher.Flush()
 	})
 
@@ -98,7 +98,7 @@ func TestStreamReasoningContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer sr.Close()
+	defer func() { _ = sr.Close() }()
 
 	var reasoningDeltas []provider.ReasoningDelta
 	var textDeltas []provider.TextDelta
@@ -133,10 +133,10 @@ func TestStreamUsageDetails(t *testing.T) {
 			`{"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15,"prompt_tokens_details":{"cached_tokens":6},"completion_tokens_details":{"reasoning_tokens":2}}}`,
 		}
 		for _, c := range chunks {
-			fmt.Fprintf(w, "data: %s\n\n", c)
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", c)
 			flusher.Flush()
 		}
-		fmt.Fprint(w, "data: [DONE]\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 		flusher.Flush()
 	})
 
@@ -146,7 +146,7 @@ func TestStreamUsageDetails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer sr.Close()
+	defer func() { _ = sr.Close() }()
 
 	var finish provider.FinishPart
 	for part := range sr.Parts() {
@@ -179,7 +179,7 @@ func TestAssistantReasoningPartNotRoundTripped(t *testing.T) {
 		}
 		resp := chatResponse{Choices: []chatResponseChoice{{Message: chatResponseMessage{Content: strPtr("ok")}, FinishReason: "stop"}}}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	})
 
 	_, err := model.Generate(context.Background(), provider.Call{
@@ -218,7 +218,7 @@ func TestAssistantSourcePartSkippedNotError(t *testing.T) {
 		}
 		resp := chatResponse{Choices: []chatResponseChoice{{Message: chatResponseMessage{Content: strPtr("ok")}, FinishReason: "stop"}}}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	})
 
 	_, err := model.Generate(context.Background(), provider.Call{

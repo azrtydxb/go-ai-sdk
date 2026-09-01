@@ -24,7 +24,7 @@ func TestGenerateCacheCreationPopulatesProviderMetadata(t *testing.T) {
 			},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	t.Cleanup(srv.Close)
 	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
@@ -54,7 +54,7 @@ func TestGenerateNoCacheCreationLeavesProviderMetadataNil(t *testing.T) {
 			Usage:      wireUsage{InputTokens: 10, OutputTokens: 5},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	t.Cleanup(srv.Close)
 	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
@@ -103,7 +103,7 @@ func TestStreamCacheCreationPopulatesFinishPartProviderMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer sr.Close()
+	defer func() { _ = sr.Close() }()
 
 	var finish provider.FinishPart
 	for part := range sr.Parts() {
@@ -156,7 +156,7 @@ func TestStreamNoCacheCreationLeavesFinishPartProviderMetadataNil(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer sr.Close()
+	defer func() { _ = sr.Close() }()
 
 	var finish provider.FinishPart
 	for part := range sr.Parts() {

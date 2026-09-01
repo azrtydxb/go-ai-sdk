@@ -23,13 +23,13 @@ func TestImageModel_RequestShape(t *testing.T) {
 		gotPath = r.URL.Path
 		gotAuthHeader = r.Header.Get("x-goog-api-key")
 		body := make([]byte, r.ContentLength)
-		r.Body.Read(body)
+		_, _ = r.Body.Read(body)
 		gotBody = body
 
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"predictions":[{"bytesBase64Encoded":"` + onePixelPNGBase64 + `","mimeType":"image/png"}]}`))
+		_, _ = w.Write([]byte(`{"predictions":[{"bytesBase64Encoded":"` + onePixelPNGBase64 + `","mimeType":"image/png"}]}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	cfg := Config{
 		Name: "google",
@@ -110,12 +110,12 @@ func TestImageModel_DefaultSampleCount(t *testing.T) {
 	var gotBody []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body := make([]byte, r.ContentLength)
-		r.Body.Read(body)
+		_, _ = r.Body.Read(body)
 		gotBody = body
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"predictions":[]}`))
+		_, _ = w.Write([]byte(`{"predictions":[]}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	cfg := Config{
 		Name:        "google",
@@ -161,9 +161,9 @@ func TestImageModel_SizeUnsupported(t *testing.T) {
 func TestImageModel_EmptyBytesBase64Encoded(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"predictions":[{"bytesBase64Encoded":"","mimeType":"image/png"}]}`))
+		_, _ = w.Write([]byte(`{"predictions":[{"bytesBase64Encoded":"","mimeType":"image/png"}]}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	cfg := Config{
 		Name:        "google",
@@ -184,9 +184,9 @@ func TestImageModel_EmptyBytesBase64Encoded(t *testing.T) {
 func TestImageModel_InvalidBase64(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"predictions":[{"bytesBase64Encoded":"!!!","mimeType":"image/png"}]}`))
+		_, _ = w.Write([]byte(`{"predictions":[{"bytesBase64Encoded":"!!!","mimeType":"image/png"}]}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	cfg := Config{
 		Name:        "google",
@@ -208,9 +208,9 @@ func TestImageModel_APIError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(400)
-		w.Write([]byte(`{"error":{"message":"bad request"}}`))
+		_, _ = w.Write([]byte(`{"error":{"message":"bad request"}}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	cfg := Config{
 		Name:        "google",
@@ -235,9 +235,9 @@ func TestImageModel_SniffsMediaTypeWhenMimeTypeAbsent(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		// No mimeType field: the model must sniff the decoded bytes' magic
 		// bytes to determine the MediaType.
-		w.Write([]byte(`{"predictions":[{"bytesBase64Encoded":"` + onePixelPNGBase64 + `"}]}`))
+		_, _ = w.Write([]byte(`{"predictions":[{"bytesBase64Encoded":"` + onePixelPNGBase64 + `"}]}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	cfg := Config{
 		Name:        "google",

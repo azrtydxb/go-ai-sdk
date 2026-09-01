@@ -27,23 +27,23 @@ func TestGenerateImages_RequestShape(t *testing.T) {
 		gotMethod = r.Method
 		gotAuth = r.Header.Get("Authorization")
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &gotBody)
+		_ = json.Unmarshal(body, &gotBody)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1"}`))
 	})
 	mux.HandleFunc("/dream-machine/v1/generations/gen-1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1","state":"completed","assets":{"image":"` + srv.URL + `/img.png"}}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","state":"completed","assets":{"image":"` + srv.URL + `/img.png"}}`))
 	})
 	mux.HandleFunc("/img.png", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("pngdata"))
+		_, _ = w.Write([]byte("pngdata"))
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.ImageModel("photon-1")
@@ -89,23 +89,23 @@ func TestGenerateImages_OmitsAspectRatioWhenEmpty(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/dream-machine/v1/generations/image", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &gotBody)
+		_ = json.Unmarshal(body, &gotBody)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1"}`))
 	})
 	mux.HandleFunc("/dream-machine/v1/generations/gen-1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1","state":"completed","assets":{"image":"` + srv.URL + `/img.png"}}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","state":"completed","assets":{"image":"` + srv.URL + `/img.png"}}`))
 	})
 	mux.HandleFunc("/img.png", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("pngdata"))
+		_, _ = w.Write([]byte("pngdata"))
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.ImageModel("photon-1")
@@ -128,25 +128,25 @@ func TestGenerateImages_PollHappyPath(t *testing.T) {
 	mux.HandleFunc("/dream-machine/v1/generations/image", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1"}`))
 	})
 	mux.HandleFunc("/dream-machine/v1/generations/gen-1", func(w http.ResponseWriter, r *http.Request) {
 		n := atomic.AddInt32(&pollCount, 1)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		if n <= 2 {
-			w.Write([]byte(`{"id":"gen-1","state":"pending"}`))
+			_, _ = w.Write([]byte(`{"id":"gen-1","state":"pending"}`))
 			return
 		}
-		w.Write([]byte(`{"id":"gen-1","state":"completed","assets":{"image":"` + srv.URL + `/img.png"}}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","state":"completed","assets":{"image":"` + srv.URL + `/img.png"}}`))
 	})
 	mux.HandleFunc("/img.png", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("pngdata"))
+		_, _ = w.Write([]byte("pngdata"))
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.ImageModel("photon-1")
@@ -168,15 +168,15 @@ func TestGenerateImages_FailedState(t *testing.T) {
 	mux.HandleFunc("/dream-machine/v1/generations/image", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1"}`))
 	})
 	mux.HandleFunc("/dream-machine/v1/generations/gen-1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1","state":"failed","failure_reason":"content policy violation"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","state":"failed","failure_reason":"content policy violation"}`))
 	})
 	srv := httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.ImageModel("photon-1")
@@ -195,10 +195,10 @@ func TestGenerateImages_EmptyCreateIDError(t *testing.T) {
 	mux.HandleFunc("/dream-machine/v1/generations/image", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":""}`))
+		_, _ = w.Write([]byte(`{"id":""}`))
 	})
 	srv := httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.ImageModel("photon-1")
@@ -219,15 +219,15 @@ func TestGenerateImages_PollNon2xxError(t *testing.T) {
 	mux.HandleFunc("/dream-machine/v1/generations/image", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1"}`))
 	})
 	mux.HandleFunc("/dream-machine/v1/generations/gen-1", func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&pollHit, 1)
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"detail":"internal error"}`))
+		_, _ = w.Write([]byte(`{"detail":"internal error"}`))
 	})
 	srv := httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.ImageModel("photon-1")
@@ -257,19 +257,19 @@ func TestGenerateImages_ContextCancellationMidPoll(t *testing.T) {
 	mux.HandleFunc("/dream-machine/v1/generations/image", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1"}`))
 	})
 	mux.HandleFunc("/dream-machine/v1/generations/gen-1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1","state":"pending"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","state":"pending"}`))
 		select {
 		case pollHit <- struct{}{}:
 		default:
 		}
 	})
 	srv := httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	// A poll interval long enough that the test can cancel the context
 	// while GenerateImages is sleeping between polls.
@@ -299,23 +299,23 @@ func TestGenerateImages_ProviderOptionsMergeTopLevel(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/dream-machine/v1/generations/image", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &gotBody)
+		_ = json.Unmarshal(body, &gotBody)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1"}`))
 	})
 	mux.HandleFunc("/dream-machine/v1/generations/gen-1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1","state":"completed","assets":{"image":"` + srv.URL + `/img.png"}}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","state":"completed","assets":{"image":"` + srv.URL + `/img.png"}}`))
 	})
 	mux.HandleFunc("/img.png", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("pngdata"))
+		_, _ = w.Write([]byte("pngdata"))
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.ImageModel("photon-1")
@@ -380,9 +380,9 @@ func TestGenerateImages_SizeUnsupported(t *testing.T) {
 func TestGenerateImages_401Error(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"detail":"invalid api key"}`))
+		_, _ = w.Write([]byte(`{"detail":"invalid api key"}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("bad-key"), WithBaseURL(srv.URL))
 	m := p.ImageModel("photon-1")
@@ -414,20 +414,20 @@ func TestGenerateImages_RequestHeaders(t *testing.T) {
 		createCustom = r.Header.Get("X-Custom-Header")
 		createAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"id":"gen-1"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1"}`))
 	})
 	mux.HandleFunc("/dream-machine/v1/generations/gen-1", func(w http.ResponseWriter, r *http.Request) {
 		pollCustom = r.Header.Get("X-Custom-Header")
 		pollAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"id":"gen-1","state":"completed","assets":{"image":"` + srv.URL + `/img.png"}}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","state":"completed","assets":{"image":"` + srv.URL + `/img.png"}}`))
 	})
 	mux.HandleFunc("/img.png", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
-		w.Write([]byte("pngdata"))
+		_, _ = w.Write([]byte("pngdata"))
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.ImageModel("photon-1")

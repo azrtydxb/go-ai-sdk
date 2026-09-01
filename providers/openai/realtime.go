@@ -84,11 +84,11 @@ func (p *Provider) RealtimeSession(ctx context.Context, cfg RealtimeConfig) (*Re
 
 	sessionUpdate, err := buildRealtimeSessionUpdate(cfg)
 	if err != nil {
-		conn.Close(websocket.CloseNormal, "")
+		_ = conn.Close(websocket.CloseNormal, "")
 		return nil, err
 	}
 	if err := conn.WriteText(ctx, sessionUpdate); err != nil {
-		conn.Close(websocket.CloseNormal, "")
+		_ = conn.Close(websocket.CloseNormal, "")
 		return nil, fmt.Errorf("openai: send session.update: %w", err)
 	}
 

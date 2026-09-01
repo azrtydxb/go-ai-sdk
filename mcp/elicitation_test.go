@@ -51,7 +51,7 @@ func recvServerResponse(t *testing.T, server *pipeTransport) serverResponseMsg {
 func TestElicitationHandlerAccept(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	var gotReq ElicitationRequest
 	c.SetElicitationHandler(func(ctx context.Context, req ElicitationRequest) (ElicitationResult, error) {
@@ -94,7 +94,7 @@ func TestElicitationHandlerAccept(t *testing.T) {
 func TestElicitationNilHandlerAutoDeclines(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	initializeWithCaps(t, client, server, c, map[string]any{})
 
@@ -125,7 +125,7 @@ func TestElicitationNilHandlerAutoDeclines(t *testing.T) {
 func TestElicitationHandlerErrorRespondsInternalError(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	c.SetElicitationHandler(func(ctx context.Context, req ElicitationRequest) (ElicitationResult, error) {
 		return ElicitationResult{}, errors.New("boom")
@@ -203,7 +203,7 @@ func recvServerResponseRawID(t *testing.T, server *pipeTransport) (rawID json.Ra
 func TestServerRequestStringIDRoundTrips(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	c.SetElicitationHandler(func(ctx context.Context, req ElicitationRequest) (ElicitationResult, error) {
 		return ElicitationResult{Action: "decline"}, nil
@@ -241,7 +241,7 @@ func TestServerRequestStringIDRoundTrips(t *testing.T) {
 func TestElicitationCreateMalformedParamsRespondsInvalidParams(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	c.SetElicitationHandler(func(ctx context.Context, req ElicitationRequest) (ElicitationResult, error) {
 		t.Fatal("handler should not be invoked for malformed params")
@@ -272,7 +272,7 @@ func TestElicitationCreateMalformedParamsRespondsInvalidParams(t *testing.T) {
 func TestUnknownServerMethodRespondsMethodNotFound(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	initializeWithCaps(t, client, server, c, map[string]any{})
 
@@ -294,7 +294,7 @@ func TestInitializeDeclaresElicitationOnlyWithHandler(t *testing.T) {
 	// Without a handler: capabilities must not include "elicitation".
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	done := make(chan error, 1)
 	go func() { done <- c.Initialize(context.Background()) }()
@@ -322,7 +322,7 @@ func TestInitializeDeclaresElicitationOnlyWithHandler(t *testing.T) {
 func TestInitializeDeclaresElicitationWithHandler(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	c.SetElicitationHandler(func(ctx context.Context, req ElicitationRequest) (ElicitationResult, error) {
 		return ElicitationResult{Action: "decline"}, nil
@@ -360,7 +360,7 @@ func TestInitializeDeclaresElicitationWithHandler(t *testing.T) {
 func TestElicitationReachableAtLatestProtocolVersion(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	handlerCalled := make(chan struct{}, 1)
 	c.SetElicitationHandler(func(ctx context.Context, req ElicitationRequest) (ElicitationResult, error) {
@@ -414,7 +414,7 @@ func TestElicitationReachableAtLatestProtocolVersion(t *testing.T) {
 func TestServerRequestConcurrentWithClientCall(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	handlerCalled := make(chan struct{}, 1)
 	c.SetElicitationHandler(func(ctx context.Context, req ElicitationRequest) (ElicitationResult, error) {

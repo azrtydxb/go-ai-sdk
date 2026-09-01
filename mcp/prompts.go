@@ -83,7 +83,7 @@ func (c *Client) ListPrompts(ctx context.Context) ([]Prompt, error) {
 		for i, p := range res.Prompts {
 			args := make([]PromptArgument, len(p.Arguments))
 			for j, a := range p.Arguments {
-				args[j] = PromptArgument{Name: a.Name, Description: a.Description, Required: a.Required}
+				args[j] = PromptArgument(a)
 			}
 			items[i] = Prompt{Name: p.Name, Title: p.Title, Description: p.Description, Arguments: args}
 		}

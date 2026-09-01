@@ -10,7 +10,7 @@ import (
 func TestSamplingHandlerCreatesMessage(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	var gotReq CreateMessageRequest
 	c.SetSamplingHandler(func(ctx context.Context, req CreateMessageRequest) (CreateMessageResult, error) {
@@ -83,7 +83,7 @@ func TestSamplingHandlerCreatesMessage(t *testing.T) {
 func TestSamplingNilHandlerRespondsMethodNotFound(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	initializeWithCaps(t, client, server, c, map[string]any{})
 
@@ -106,7 +106,7 @@ func TestSamplingNilHandlerRespondsMethodNotFound(t *testing.T) {
 func TestSamplingCreateMessageMalformedParamsRespondsInvalidParams(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	c.SetSamplingHandler(func(ctx context.Context, req CreateMessageRequest) (CreateMessageResult, error) {
 		t.Fatal("handler should not be invoked for malformed params")
@@ -135,7 +135,7 @@ func TestSamplingCreateMessageMalformedParamsRespondsInvalidParams(t *testing.T)
 func TestSamplingHandlerErrorRespondsInternalError(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	c.SetSamplingHandler(func(ctx context.Context, req CreateMessageRequest) (CreateMessageResult, error) {
 		return CreateMessageResult{}, errors.New("boom")
@@ -165,7 +165,7 @@ func TestSamplingHandlerErrorRespondsInternalError(t *testing.T) {
 func TestInitializeDeclaresSamplingWithHandler(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	c.SetSamplingHandler(func(ctx context.Context, req CreateMessageRequest) (CreateMessageResult, error) {
 		return CreateMessageResult{}, nil
@@ -197,7 +197,7 @@ func TestInitializeDeclaresSamplingWithHandler(t *testing.T) {
 func TestInitializeDoesNotDeclareSamplingWithoutHandler(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	done := make(chan error, 1)
 	go func() { done <- c.Initialize(context.Background()) }()

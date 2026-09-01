@@ -31,7 +31,7 @@ func main() {
 		return
 	}
 	client := mcp.NewClient(transport)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	if err := client.Initialize(ctx); err != nil {
 		fmt.Println("error:", err)
