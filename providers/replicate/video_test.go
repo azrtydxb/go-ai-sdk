@@ -27,18 +27,18 @@ func TestGenerateVideos_RequestShape(t *testing.T) {
 		gotAuth = r.Header.Get("Authorization")
 		gotPrefer = r.Header.Get("Prefer")
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &gotBody)
+		_ = json.Unmarshal(body, &gotBody)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"succeeded","output":"` + srv.URL + `/vid.mp4"}`))
+		_, _ = w.Write([]byte(`{"status":"succeeded","output":"` + srv.URL + `/vid.mp4"}`))
 	})
 	mux.HandleFunc("/vid.mp4", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "video/mp4")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("mp4data"))
+		_, _ = w.Write([]byte("mp4data"))
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("test-token"), WithBaseURL(srv.URL))
 	m := p.VideoModel("minimax/video-01")
@@ -86,18 +86,18 @@ func TestGenerateVideos_AspectRatioOmittedWhenEmpty(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/models/minimax/video-01/predictions", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &gotBody)
+		_ = json.Unmarshal(body, &gotBody)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"succeeded","output":"` + srv.URL + `/vid.mp4"}`))
+		_, _ = w.Write([]byte(`{"status":"succeeded","output":"` + srv.URL + `/vid.mp4"}`))
 	})
 	mux.HandleFunc("/vid.mp4", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "video/mp4")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("mp4data"))
+		_, _ = w.Write([]byte("mp4data"))
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.VideoModel("minimax/video-01")
@@ -120,18 +120,18 @@ func TestGenerateVideos_ProviderOptionsMergeIntoInput(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/models/minimax/video-01/predictions", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &gotBody)
+		_ = json.Unmarshal(body, &gotBody)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"succeeded","output":"` + srv.URL + `/vid.mp4"}`))
+		_, _ = w.Write([]byte(`{"status":"succeeded","output":"` + srv.URL + `/vid.mp4"}`))
 	})
 	mux.HandleFunc("/vid.mp4", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "video/mp4")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("mp4data"))
+		_, _ = w.Write([]byte("mp4data"))
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.VideoModel("minimax/video-01")
@@ -174,20 +174,20 @@ func TestGenerateVideos_URLFetchHappyPathSingleAndArray(t *testing.T) {
 	mux.HandleFunc("/v1/models/minimax/video-01/predictions", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"succeeded","output":["` + srv.URL + `/v1.mp4","` + srv.URL + `/v2.mp4"]}`))
+		_, _ = w.Write([]byte(`{"status":"succeeded","output":["` + srv.URL + `/v1.mp4","` + srv.URL + `/v2.mp4"]}`))
 	})
 	mux.HandleFunc("/v1.mp4", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "video/mp4")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("mp4-one"))
+		_, _ = w.Write([]byte("mp4-one"))
 	})
 	mux.HandleFunc("/v2.mp4", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "video/mp4")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("mp4-two"))
+		_, _ = w.Write([]byte("mp4-two"))
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.VideoModel("minimax/video-01")
@@ -210,14 +210,14 @@ func TestGenerateVideos_FetchVideoErrorIsSinglePrefixed(t *testing.T) {
 	mux.HandleFunc("/v1/models/minimax/video-01/predictions", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"succeeded","output":["` + srv.URL + `/missing.mp4"]}`))
+		_, _ = w.Write([]byte(`{"status":"succeeded","output":["` + srv.URL + `/missing.mp4"]}`))
 	})
 	mux.HandleFunc("/missing.mp4", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("not found"))
+		_, _ = w.Write([]byte("not found"))
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.VideoModel("minimax/video-01")
@@ -239,9 +239,9 @@ func TestGenerateVideos_FailedStatusError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"failed","error":"NSFW content detected"}`))
+		_, _ = w.Write([]byte(`{"status":"failed","error":"NSFW content detected"}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.VideoModel("minimax/video-01")
@@ -261,9 +261,9 @@ func TestGenerateVideos_FailedStatusError(t *testing.T) {
 func TestGenerateVideos_401Error(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"detail":"Invalid token."}`))
+		_, _ = w.Write([]byte(`{"detail":"Invalid token."}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("bad-token"), WithBaseURL(srv.URL))
 	m := p.VideoModel("minimax/video-01")
@@ -287,9 +287,9 @@ func TestGenerateVideos_401Error(t *testing.T) {
 func TestGenerateVideos_429Retryable(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
-		w.Write([]byte(`{"detail":"rate limited"}`))
+		_, _ = w.Write([]byte(`{"detail":"rate limited"}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.VideoModel("minimax/video-01")
@@ -319,25 +319,25 @@ func TestGenerateVideos_ProcessingStatusPollsUntilSucceeded(t *testing.T) {
 	mux.HandleFunc("/v1/models/minimax/video-01/predictions", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"pred-1","status":"starting"}`))
+		_, _ = w.Write([]byte(`{"id":"pred-1","status":"starting"}`))
 	})
 	mux.HandleFunc("/v1/predictions/pred-1", func(w http.ResponseWriter, r *http.Request) {
 		n := pollCount.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		if n < 3 {
-			w.Write([]byte(`{"id":"pred-1","status":"processing"}`))
+			_, _ = w.Write([]byte(`{"id":"pred-1","status":"processing"}`))
 			return
 		}
-		w.Write([]byte(`{"id":"pred-1","status":"succeeded","output":"` + srv.URL + `/vid.mp4"}`))
+		_, _ = w.Write([]byte(`{"id":"pred-1","status":"succeeded","output":"` + srv.URL + `/vid.mp4"}`))
 	})
 	mux.HandleFunc("/vid.mp4", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "video/mp4")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("mp4data"))
+		_, _ = w.Write([]byte("mp4data"))
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.VideoModel("minimax/video-01")
@@ -359,15 +359,15 @@ func TestGenerateVideos_PollFailedStatusError(t *testing.T) {
 	mux.HandleFunc("/v1/models/minimax/video-01/predictions", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"pred-1","status":"processing"}`))
+		_, _ = w.Write([]byte(`{"id":"pred-1","status":"processing"}`))
 	})
 	mux.HandleFunc("/v1/predictions/pred-1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"pred-1","status":"failed","error":"NSFW content detected"}`))
+		_, _ = w.Write([]byte(`{"id":"pred-1","status":"failed","error":"NSFW content detected"}`))
 	})
 	srv := httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.VideoModel("minimax/video-01")
@@ -389,15 +389,15 @@ func TestGenerateVideos_CtxCancelMidPoll(t *testing.T) {
 	mux.HandleFunc("/v1/models/minimax/video-01/predictions", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"pred-1","status":"processing"}`))
+		_, _ = w.Write([]byte(`{"id":"pred-1","status":"processing"}`))
 	})
 	mux.HandleFunc("/v1/predictions/pred-1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"pred-1","status":"processing"}`))
+		_, _ = w.Write([]byte(`{"id":"pred-1","status":"processing"}`))
 	})
 	srv := httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	// A poll interval long enough that the ctx will be cancelled while
 	// sleeping between polls, not while an HTTP call is in flight.
@@ -420,9 +420,9 @@ func TestGenerateVideos_ContextCancellation(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"succeeded","output":"https://example.test/vid.mp4"}`))
+		_, _ = w.Write([]byte(`{"status":"succeeded","output":"https://example.test/vid.mp4"}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.VideoModel("minimax/video-01")
@@ -446,16 +446,16 @@ func TestGenerateVideos_RequestHeaders(t *testing.T) {
 		createCustom = r.Header.Get("X-Custom-Header")
 		createAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"id":"pred-1","status":"starting"}`))
+		_, _ = w.Write([]byte(`{"id":"pred-1","status":"starting"}`))
 	})
 	mux.HandleFunc("/v1/predictions/pred-1", func(w http.ResponseWriter, r *http.Request) {
 		pollCustom = r.Header.Get("X-Custom-Header")
 		pollAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"id":"pred-1","status":"succeeded","output":"https://example.test/vid.mp4"}`))
+		_, _ = w.Write([]byte(`{"id":"pred-1","status":"succeeded","output":"https://example.test/vid.mp4"}`))
 	})
 	srv := httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.VideoModel("minimax/video-01")

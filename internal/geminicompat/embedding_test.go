@@ -20,9 +20,9 @@ func TestEmbed_ShortResponseErrors(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Two values requested, only one embedding returned.
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"embeddings":[{"values":[0.1,0.2]}]}`))
+		_, _ = w.Write([]byte(`{"embeddings":[{"values":[0.1,0.2]}]}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	cfg := Config{
 		EndpointFor: func(modelID, method string) string { return srv.URL },

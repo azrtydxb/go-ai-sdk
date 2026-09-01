@@ -35,7 +35,7 @@ func newEmbeddingFixtureServer(t *testing.T) *httptest.Server {
 			},
 			Usage: wireUsage{PromptTokens: 9, TotalTokens: 9},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -97,7 +97,7 @@ func TestEmbedMissingIndexErrors(t *testing.T) {
 			},
 			Usage: wireUsage{PromptTokens: 9, TotalTokens: 9},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -116,7 +116,7 @@ func TestEmbedErrorPropagatesAPICallError(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/embeddings", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(400)
-		w.Write([]byte(`{"message":"bad request"}`))
+		_, _ = w.Write([]byte(`{"message":"bad request"}`))
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -146,7 +146,7 @@ func TestEmbedCallProviderOptionsMerge(t *testing.T) {
 			t.Fatalf("fixture: decode request: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(embeddingResponse{
+		_ = json.NewEncoder(w).Encode(embeddingResponse{
 			Data: []embeddingData{{Index: 0, Embedding: []float64{0.1}}},
 		})
 	})
@@ -182,7 +182,7 @@ func TestEmbedCallRequestHeaders(t *testing.T) {
 		gotCustom = r.Header.Get("X-Custom-Header")
 		gotAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(embeddingResponse{
+		_ = json.NewEncoder(w).Encode(embeddingResponse{
 			Data: []embeddingData{{Index: 0, Embedding: []float64{0.1}}},
 		})
 	})

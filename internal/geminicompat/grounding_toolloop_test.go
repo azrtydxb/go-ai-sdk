@@ -59,7 +59,7 @@ func TestToolLoopSecondRequestSucceedsAfterGroundedStep(t *testing.T) {
 					FinishReason: "STOP",
 				}},
 			}
-			json.NewEncoder(w).Encode(wr)
+			_ = json.NewEncoder(w).Encode(wr)
 			return
 		}
 
@@ -72,9 +72,9 @@ func TestToolLoopSecondRequestSucceedsAfterGroundedStep(t *testing.T) {
 				FinishReason: "STOP",
 			}},
 		}
-		json.NewEncoder(w).Encode(wr)
+		_ = json.NewEncoder(w).Encode(wr)
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	model := NewLanguageModel(testConfig(srv.URL), "gemini-test")
 
@@ -118,7 +118,7 @@ func TestToolLoopSecondRequestSucceedsAfterGroundedStep(t *testing.T) {
 
 func readAll(t *testing.T, r *http.Request) []byte {
 	t.Helper()
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 	b, err := io.ReadAll(r.Body)
 	if err != nil {
 		t.Fatalf("read body: %v", err)

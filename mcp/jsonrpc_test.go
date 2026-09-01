@@ -51,7 +51,7 @@ func (t *erroringTransport) Close() error {
 func TestRecvErrorClosesTransport(t *testing.T) {
 	tr := &erroringTransport{recvErr: errors.New("simulated read error")}
 	c := NewClient(tr)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	// recvLoop runs on its own goroutine and hits the read error almost
 	// immediately; wait for the client to observe closure rather than
@@ -98,7 +98,7 @@ func TestCloseIsIdempotentOnTransport(t *testing.T) {
 func TestCallAfterDeathReturnsCloseErr(t *testing.T) {
 	tr := &erroringTransport{recvErr: errors.New("the actual root cause")}
 	c := NewClient(tr)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	select {
 	case <-c.loopDone:
@@ -124,7 +124,7 @@ func TestCallAfterDeathReturnsCloseErr(t *testing.T) {
 func TestServerDispatchBoundedConcurrency(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	release := make(chan struct{})
 	var concurrent int32
@@ -279,7 +279,7 @@ func TestCloseReturnsWithinGraceWhenHandlerIgnoresCtx(t *testing.T) {
 func TestBusyReplyDropsWithoutWedgingRecvLoop(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	if c.selfSerializes {
 		t.Fatal("Client.selfSerializes must be false for pipeTransport")
 	}
@@ -456,7 +456,7 @@ func runConcurrentCalls(t *testing.T, c *Client, n int) {
 func TestClientSerializesSendForNonSelfSerializingTransport(t *testing.T) {
 	tr := newConcurrencyTrackingTransport()
 	c := NewClient(tr)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	if c.selfSerializes {
 		t.Fatal("Client.selfSerializes = true for a transport that doesn't implement selfSerializingTransport")
 	}
@@ -479,7 +479,7 @@ func TestClientDoesNotSerializeSendForSelfSerializingTransport(t *testing.T) {
 	inner := newConcurrencyTrackingTransport()
 	tr := &selfSerializingConcurrencyTransport{inner}
 	c := NewClient(tr)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	if !c.selfSerializes {
 		t.Fatal("Client.selfSerializes = false for a transport implementing selfSerializingTransport that returns true")
 	}

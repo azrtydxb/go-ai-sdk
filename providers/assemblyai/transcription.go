@@ -125,7 +125,7 @@ func (m *transcriptionModel) upload(ctx context.Context, call provider.Transcrip
 		return "", err
 	}
 	body, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if err != nil {
 		return "", fmt.Errorf("assemblyai: read upload response: %w", err)
 	}
@@ -175,7 +175,7 @@ func (m *transcriptionModel) create(ctx context.Context, call provider.Transcrip
 		return "", err
 	}
 	body, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if err != nil {
 		return "", fmt.Errorf("assemblyai: read transcript response: %w", err)
 	}
@@ -218,7 +218,7 @@ func (m *transcriptionModel) poll(ctx context.Context, id string, headers map[st
 			return nil, nil, err
 		}
 		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if err != nil {
 			return nil, nil, fmt.Errorf("assemblyai: read poll response: %w", err)
 		}

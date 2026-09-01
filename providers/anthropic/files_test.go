@@ -58,14 +58,14 @@ func newAnthFilesFixture(t *testing.T, uploadStatus int, uploadBody string, dele
 			}
 		}
 		w.WriteHeader(uploadStatus)
-		w.Write([]byte(uploadBody))
+		_, _ = w.Write([]byte(uploadBody))
 	})
 	mux.HandleFunc("/v1/files/file-1", func(w http.ResponseWriter, r *http.Request) {
 		f.deleteMethod = r.Method
 		f.deletePath = r.URL.Path
 		f.deleteBeta = r.Header.Get("anthropic-beta")
 		w.WriteHeader(deleteStatus)
-		w.Write([]byte(deleteBody))
+		_, _ = w.Write([]byte(deleteBody))
 	})
 
 	srv := httptest.NewServer(mux)
@@ -363,7 +363,7 @@ func TestFilesBetaHeaderNotOnLanguageModelPath(t *testing.T) {
 		gotBeta = r.Header.Get("anthropic-beta")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"hi"}],"model":"claude-test","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"hi"}],"model":"claude-test","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)

@@ -45,7 +45,7 @@ func For[T any]() (json.RawMessage, error) {
 //
 //	{"type":"object","properties":{...},"required":[...],"additionalProperties":false}
 func forType(t reflect.Type) (json.RawMessage, error) {
-	for t.Kind() == reflect.Ptr {
+	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	if t.Kind() != reflect.Struct || t == rawMessageType {
@@ -138,7 +138,7 @@ func collectFields(t reflect.Type, visiting map[reflect.Type]bool, depth int) (m
 			// Pure embedding (no explicit json tag name): promote the
 			// embedded struct's fields into this level, one depth deeper.
 			ft := f.Type
-			for ft.Kind() == reflect.Ptr {
+			for ft.Kind() == reflect.Pointer {
 				ft = ft.Elem()
 			}
 			if ft.Kind() == reflect.Struct && ft != rawMessageType {
@@ -180,7 +180,7 @@ func collectFields(t reflect.Type, visiting map[reflect.Type]bool, depth int) (m
 
 		applyJSONSchemaTag(f, fieldSchema)
 
-		req := f.Type.Kind() != reflect.Ptr && !omitempty && !omitzero
+		req := f.Type.Kind() != reflect.Pointer && !omitempty && !omitzero
 		insertField(result, name, fieldEntry{schema: fieldSchema, required: req, depth: depth})
 	}
 
@@ -241,7 +241,7 @@ func typeSchema(t reflect.Type, visiting map[reflect.Type]bool) (map[string]any,
 	}
 
 	switch t.Kind() {
-	case reflect.Ptr:
+	case reflect.Pointer:
 		return typeSchema(t.Elem(), visiting)
 
 	case reflect.String:
@@ -317,7 +317,7 @@ func applyJSONSchemaTag(f reflect.StructField, schema map[string]any) {
 	}
 
 	fieldType := f.Type
-	for fieldType.Kind() == reflect.Ptr {
+	for fieldType.Kind() == reflect.Pointer {
 		fieldType = fieldType.Elem()
 	}
 

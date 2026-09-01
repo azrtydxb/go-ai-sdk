@@ -156,14 +156,14 @@ var errTransportClosed = errors.New("mcp: transport closed")
 // there is not a rare edge case.
 func (t *httpTransport) readTrackedBody(b io.ReadCloser, limit int64) ([]byte, error) {
 	if !t.trackBody(b) {
-		b.Close()
+		_ = b.Close()
 		return nil, errTransportClosed
 	}
 	defer func() {
 		t.untrackBody(b)
 		t.drainWG.Done()
 	}()
-	defer b.Close()
+	defer func() { _ = b.Close() }()
 	return io.ReadAll(io.LimitReader(b, limit))
 }
 
@@ -459,7 +459,7 @@ func (t *httpTransport) sendOnce(ctx context.Context, msg json.RawMessage) error
 		// is closed here instead of being handed to a goroutine that would
 		// never see it swept.
 		if !t.trackBody(resp.Body) {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return errTransportClosed
 		}
 		go t.drainSSE(resp.Body)
@@ -558,7 +558,7 @@ func parseRetryAfter(v string) time.Duration {
 func (t *httpTransport) drainSSE(body io.ReadCloser) {
 	defer t.drainWG.Done()
 	defer t.untrackBody(body)
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 
 	for ev, err := range sse.Scan(body) {
 		if err != nil {

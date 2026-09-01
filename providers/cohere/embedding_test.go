@@ -33,7 +33,7 @@ func newEmbeddingFixtureServer(t *testing.T, capture *embeddingRequest) *httptes
 			}},
 			Meta: embeddingMeta{BilledUnits: embeddingBilledUnits{InputTokens: 9}},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -71,7 +71,7 @@ func TestEmbedCallRequestHeaders(t *testing.T) {
 		resp := embeddingResponse{
 			Embeddings: embeddingsWire{Float: [][]float64{{0.1, 0.1}}},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -110,7 +110,7 @@ func TestEmbedCallProviderOptionsMerge(t *testing.T) {
 			t.Fatalf("fixture: decode request: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(embeddingResponse{
+		_ = json.NewEncoder(w).Encode(embeddingResponse{
 			Embeddings: embeddingsWire{Float: [][]float64{{0.1, 0.1}}},
 		})
 	})
@@ -182,7 +182,7 @@ func TestEmbedResponseCountMismatchErrors(t *testing.T) {
 			}},
 			Meta: embeddingMeta{BilledUnits: embeddingBilledUnits{InputTokens: 9}},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -213,7 +213,7 @@ func TestEmbedErrorPropagatesAPICallError(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/embed", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(400)
-		w.Write([]byte(`{"message":"bad request"}`))
+		_, _ = w.Write([]byte(`{"message":"bad request"}`))
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)

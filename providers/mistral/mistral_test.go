@@ -70,7 +70,7 @@ func readBody(t *testing.T, r *http.Request) []byte {
 
 func writeSSE(w http.ResponseWriter, flusher http.Flusher, data any) {
 	b, _ := json.Marshal(data)
-	fmt.Fprintf(w, "data: %s\n\n", b)
+	_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
 	flusher.Flush()
 }
 
@@ -98,12 +98,12 @@ func newFixtureServer(t *testing.T) (*httptest.Server, *fixtureState) {
 		case "fail 429":
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(429)
-			w.Write([]byte(`{"message":"rate limited"}`))
+			_, _ = w.Write([]byte(`{"message":"rate limited"}`))
 			return
 		case "fail 400":
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(400)
-			w.Write([]byte(`{"message":"bad request"}`))
+			_, _ = w.Write([]byte(`{"message":"bad request"}`))
 			return
 		}
 
@@ -124,7 +124,7 @@ func newFixtureServer(t *testing.T) (*httptest.Server, *fixtureState) {
 					Choices: []chatStreamChoice{{FinishReason: &stop}},
 					Usage:   &wireUsage{PromptTokens: 5, CompletionTokens: 2, TotalTokens: 7},
 				})
-				fmt.Fprint(w, "data: [DONE]\n\n")
+				_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 				flusher.Flush()
 			case "stream tool":
 				writeSSE(w, flusher, chatStreamChunk{Choices: []chatStreamChoice{{Delta: chatStreamDelta{
@@ -141,7 +141,7 @@ func newFixtureServer(t *testing.T) (*httptest.Server, *fixtureState) {
 					Choices: []chatStreamChoice{{FinishReason: &toolCalls}},
 					Usage:   &wireUsage{PromptTokens: 6, CompletionTokens: 4, TotalTokens: 10},
 				})
-				fmt.Fprint(w, "data: [DONE]\n\n")
+				_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 				flusher.Flush()
 			default:
 				t.Fatalf("fixture: unknown streaming scenario %q", text)
@@ -161,7 +161,7 @@ func newFixtureServer(t *testing.T) (*httptest.Server, *fixtureState) {
 				}},
 				Usage: wireUsage{PromptTokens: 5, CompletionTokens: 3, TotalTokens: 8},
 			}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "tool":
 			resp := chatResponse{
 				Choices: []chatResponseChoice{{
@@ -176,7 +176,7 @@ func newFixtureServer(t *testing.T) (*httptest.Server, *fixtureState) {
 				}},
 				Usage: wireUsage{PromptTokens: 6, CompletionTokens: 4, TotalTokens: 10},
 			}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		default:
 			t.Fatalf("fixture: unknown scenario %q", text)
 		}
@@ -344,7 +344,7 @@ func TestRequestShapeHeaders(t *testing.T) {
 			Message:      chatResponseMessage{Content: &content},
 			FinishReason: "stop",
 		}}}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	t.Cleanup(hdrSrv.Close)
 	model := New(WithAPIKey("k"), WithBaseURL(hdrSrv.URL)).Model("mistral-test")
@@ -381,7 +381,7 @@ func TestRequestShapeToolChoiceRequiredIsAny(t *testing.T) {
 	}
 
 	var raw map[string]json.RawMessage
-	json.Unmarshal(fs.rawBody(), &raw)
+	_ = json.Unmarshal(fs.rawBody(), &raw)
 	var toolChoice string
 	if err := json.Unmarshal(raw["tool_choice"], &toolChoice); err != nil {
 		t.Fatalf("decode tool_choice: %v", err)
@@ -411,7 +411,7 @@ func TestRequestShapeToolChoiceModes(t *testing.T) {
 			t.Fatalf("Generate: %v", err)
 		}
 		var raw map[string]json.RawMessage
-		json.Unmarshal(fs.rawBody(), &raw)
+		_ = json.Unmarshal(fs.rawBody(), &raw)
 		if tc.mode == provider.ToolChoiceNone {
 			if _, ok := raw["tool_choice"]; ok {
 				t.Errorf("mode %v: request has tool_choice field, want omitted", tc.mode)
@@ -433,7 +433,7 @@ func TestRequestShapeToolChoiceModes(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 	var raw map[string]json.RawMessage
-	json.Unmarshal(fs.rawBody(), &raw)
+	_ = json.Unmarshal(fs.rawBody(), &raw)
 	var tc wireToolChoiceObj
 	if err := json.Unmarshal(raw["tool_choice"], &tc); err != nil {
 		t.Fatalf("decode tool_choice: %v", err)
@@ -460,13 +460,13 @@ func TestRequestShapeResponseFormatJSONObjectNoSchema(t *testing.T) {
 	}
 
 	var raw map[string]json.RawMessage
-	json.Unmarshal(fs.rawBody(), &raw)
+	_ = json.Unmarshal(fs.rawBody(), &raw)
 	var rf map[string]json.RawMessage
 	if err := json.Unmarshal(raw["response_format"], &rf); err != nil {
 		t.Fatalf("decode response_format: %v", err)
 	}
 	var typ string
-	json.Unmarshal(rf["type"], &typ)
+	_ = json.Unmarshal(rf["type"], &typ)
 	if typ != "json_object" {
 		t.Errorf("response_format.type = %q, want json_object", typ)
 	}
@@ -656,7 +656,7 @@ func rawSSEServer(t *testing.T, chunks []chatStreamChunk, sendDone bool) *httpte
 			writeSSE(w, flusher, c)
 		}
 		if sendDone {
-			fmt.Fprint(w, "data: [DONE]\n\n")
+			_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 			flusher.Flush()
 		}
 		// Otherwise: deliberately no [DONE] — the handler returns here,
@@ -685,7 +685,7 @@ func TestStreamEndsWithoutDoneButHasFinishReason(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer sr.Close()
+	defer func() { _ = sr.Close() }()
 
 	var finishes []provider.FinishPart
 	for part := range sr.Parts() {
@@ -724,7 +724,7 @@ func TestStreamTruncatedBeforeFinishReason(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer sr.Close()
+	defer func() { _ = sr.Close() }()
 
 	var finishes []provider.FinishPart
 	for part := range sr.Parts() {

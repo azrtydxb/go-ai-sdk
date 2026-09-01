@@ -71,7 +71,7 @@ func TestStreamPartsIsSingleUse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer sr.Close()
+	defer func() { _ = sr.Close() }()
 
 	var first, second int
 	for range sr.Parts() {

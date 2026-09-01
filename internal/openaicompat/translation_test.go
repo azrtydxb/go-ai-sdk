@@ -39,9 +39,9 @@ func newTranslationFixtureServer(t *testing.T) *translationFixtureServer {
 		s.lastBody = body
 		s.lastHeaders = r.Header.Clone()
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"text":"hello world","language":"french","duration":1.5}`))
+		_, _ = w.Write([]byte(`{"text":"hello world","language":"french","duration":1.5}`))
 	}))
-	t.Cleanup(s.Server.Close)
+	t.Cleanup(s.Close)
 	return s
 }
 
@@ -163,9 +163,9 @@ func TestTranslationEmptyBaseURLErrors(t *testing.T) {
 func TestTranslation401Error(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error":{"message":"invalid api key"}}`))
+		_, _ = w.Write([]byte(`{"error":{"message":"invalid api key"}}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	model := NewTranslationModel(Config{Name: "test", APIKey: "bad-key", BaseURL: srv.URL}, "whisper-1")
 	_, err := model.Translate(context.Background(), provider.TranslationCall{Audio: []byte("x"), MediaType: "audio/mpeg"})
@@ -187,9 +187,9 @@ func TestTranslation401Error(t *testing.T) {
 func TestTranslation429Error(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
-		w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+		_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	model := NewTranslationModel(Config{Name: "test", APIKey: "k", BaseURL: srv.URL}, "whisper-1")
 	_, err := model.Translate(context.Background(), provider.TranslationCall{Audio: []byte("x"), MediaType: "audio/mpeg"})

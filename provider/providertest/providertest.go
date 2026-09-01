@@ -114,7 +114,7 @@ func Run(t *testing.T, cfg Config) {
 		if err != nil {
 			t.Fatalf("Stream(%q): unexpected error: %v", "stream simple", err)
 		}
-		defer sr.Close()
+		defer func() { _ = sr.Close() }()
 
 		var text strings.Builder
 		textDeltas := 0
@@ -156,7 +156,7 @@ func Run(t *testing.T, cfg Config) {
 		if err != nil {
 			t.Fatalf("Stream(%q): unexpected error: %v", "stream tool", err)
 		}
-		defer sr.Close()
+		defer func() { _ = sr.Close() }()
 
 		var ends []provider.ToolCallEnd
 		for part := range sr.Parts() {

@@ -19,9 +19,9 @@ func TestFetchHappyPath(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "video/mp4; charset=binary")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("video-bytes"))
+		_, _ = w.Write([]byte("video-bytes"))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	data, mediaType, err := Fetch(context.Background(), nil, srv.URL, "test")
 	if err != nil {
@@ -38,9 +38,9 @@ func TestFetchHappyPath(t *testing.T) {
 func TestFetchErrorIsSinglePrefixed(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("not found"))
+		_, _ = w.Write([]byte("not found"))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	_, _, err := Fetch(context.Background(), nil, srv.URL, "luma")
 	if err == nil {
@@ -134,7 +134,7 @@ func TestFetchRedirectToLinkLocalRejected(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "http://169.254.169.254/secret", http.StatusFound)
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	_, _, err := Fetch(context.Background(), nil, srv.URL, "test")
 	if err == nil {
@@ -148,9 +148,9 @@ func TestFetchRedirectToLinkLocalRejected(t *testing.T) {
 func TestFetchBodyOverCapRejected(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("0123456789")) // 10 bytes
+		_, _ = w.Write([]byte("0123456789")) // 10 bytes
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	_, _, err := fetch(context.Background(), http.DefaultClient, srv.URL, 5)
 	if err == nil {
@@ -164,9 +164,9 @@ func TestFetchBodyOverCapRejected(t *testing.T) {
 func TestFetchBodyAtCapAllowed(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("01234")) // exactly 5 bytes
+		_, _ = w.Write([]byte("01234")) // exactly 5 bytes
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	data, _, err := fetch(context.Background(), http.DefaultClient, srv.URL, 5)
 	if err != nil {
@@ -221,7 +221,7 @@ func TestFetchHonorsRebindProtectionAcrossRedirects(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "http://rebind-hop.fetchmedia.test/next", http.StatusFound)
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	orig := lookupIPAddr
 	defer func() { lookupIPAddr = orig }()
@@ -253,14 +253,14 @@ func TestFetchHonorsRebindProtectionAcrossRedirects(t *testing.T) {
 func TestFetchChainsCallerCheckRedirect(t *testing.T) {
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("should not be reached"))
+		_, _ = w.Write([]byte("should not be reached"))
 	}))
-	defer target.Close()
+	defer func() { target.Close() }()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, target.URL, http.StatusFound)
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	var callerCheckRedirectCalled bool
 	client := &http.Client{
@@ -340,9 +340,9 @@ func TestSameRegistrableDomain(t *testing.T) {
 func TestPinnedTransportReusedAcrossFetches(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	client := &http.Client{}
 
@@ -367,9 +367,9 @@ func TestPinnedTransportReusedAcrossFetches(t *testing.T) {
 func TestPinnedTransportSharesConnectionPool(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	var dials int32
 	dialer := &net.Dialer{}
@@ -475,7 +475,7 @@ func TestPinnedDialContextFailsOverToNextVettedIP(t *testing.T) {
 			return nil, errors.New("connection refused")
 		}
 		clientConn, serverConn := net.Pipe()
-		serverConn.Close()
+		_ = serverConn.Close()
 		return clientConn, nil
 	})
 
@@ -483,7 +483,7 @@ func TestPinnedDialContextFailsOverToNextVettedIP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pinnedDialContext: %v, want success via failover to the second vetted IP", err)
 	}
-	conn.Close()
+	_ = conn.Close()
 
 	want := []string{"203.0.113.1:443", "203.0.113.2:443"}
 	if len(dialedAddrs) != len(want) {
@@ -625,9 +625,9 @@ func TestPinnedTransportFuncRoundTripperDoesNotPanic(t *testing.T) {
 func TestFetchWithFuncRoundTripperClientDoesNotPanic(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "video/mp4")
-		w.Write([]byte("data"))
+		_, _ = w.Write([]byte("data"))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	base := funcRoundTripper(func(req *http.Request) (*http.Response, error) {
 		return http.DefaultTransport.RoundTrip(req)

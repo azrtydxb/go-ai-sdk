@@ -30,7 +30,7 @@ func initializeWithCaps(t *testing.T, client, server *pipeTransport, c *Client, 
 func TestCompletePromptRef(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	initializeWithCaps(t, client, server, c, map[string]any{"completions": map[string]any{}})
 
@@ -91,7 +91,7 @@ func TestCompletePromptRef(t *testing.T) {
 func TestCompleteResourceRef(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	initializeWithCaps(t, client, server, c, map[string]any{"completions": map[string]any{}})
 
@@ -139,7 +139,7 @@ func TestCompleteResourceRef(t *testing.T) {
 func TestCompleteCapabilityGated(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	initializeWithCaps(t, client, server, c, map[string]any{})
 

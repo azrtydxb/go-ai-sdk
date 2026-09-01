@@ -31,7 +31,7 @@ func TestGenerateSpeech_HappyPath(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(speechResponseWire{
+		_ = json.NewEncoder(w).Encode(speechResponseWire{
 			Generations: []generationWire{{Audio: encoded}},
 		})
 	}))
@@ -79,9 +79,9 @@ func TestGenerateSpeech_DefaultsNoVoice(t *testing.T) {
 	encoded := base64.StdEncoding.EncodeToString([]byte("x"))
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &raw)
+		_ = json.Unmarshal(body, &raw)
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(speechResponseWire{Generations: []generationWire{{Audio: encoded}}})
+		_ = json.NewEncoder(w).Encode(speechResponseWire{Generations: []generationWire{{Audio: encoded}}})
 	}))
 	defer srv.Close()
 
@@ -115,9 +115,9 @@ func TestGenerateSpeech_Speed(t *testing.T) {
 	encoded := base64.StdEncoding.EncodeToString([]byte("x"))
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &raw)
+		_ = json.Unmarshal(body, &raw)
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(speechResponseWire{Generations: []generationWire{{Audio: encoded}}})
+		_ = json.NewEncoder(w).Encode(speechResponseWire{Generations: []generationWire{{Audio: encoded}}})
 	}))
 	defer srv.Close()
 
@@ -141,9 +141,9 @@ func TestGenerateSpeech_LanguageIgnored(t *testing.T) {
 	encoded := base64.StdEncoding.EncodeToString([]byte("x"))
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &raw)
+		_ = json.Unmarshal(body, &raw)
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(speechResponseWire{Generations: []generationWire{{Audio: encoded}}})
+		_ = json.NewEncoder(w).Encode(speechResponseWire{Generations: []generationWire{{Audio: encoded}}})
 	}))
 	defer srv.Close()
 
@@ -164,9 +164,9 @@ func TestGenerateSpeech_ProviderOptionsMerge(t *testing.T) {
 	encoded := base64.StdEncoding.EncodeToString([]byte("x"))
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &raw)
+		_ = json.Unmarshal(body, &raw)
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(speechResponseWire{Generations: []generationWire{{Audio: encoded}}})
+		_ = json.NewEncoder(w).Encode(speechResponseWire{Generations: []generationWire{{Audio: encoded}}})
 	}))
 	defer srv.Close()
 
@@ -192,9 +192,9 @@ func TestGenerateSpeech_VoiceProviderOption(t *testing.T) {
 	encoded := base64.StdEncoding.EncodeToString([]byte("x"))
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &raw)
+		_ = json.Unmarshal(body, &raw)
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(speechResponseWire{Generations: []generationWire{{Audio: encoded}}})
+		_ = json.NewEncoder(w).Encode(speechResponseWire{Generations: []generationWire{{Audio: encoded}}})
 	}))
 	defer srv.Close()
 
@@ -238,9 +238,9 @@ func TestGenerateSpeech_VoiceProviderOptionIgnoredWithoutVoice(t *testing.T) {
 	encoded := base64.StdEncoding.EncodeToString([]byte("x"))
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &raw)
+		_ = json.Unmarshal(body, &raw)
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(speechResponseWire{Generations: []generationWire{{Audio: encoded}}})
+		_ = json.NewEncoder(w).Encode(speechResponseWire{Generations: []generationWire{{Audio: encoded}}})
 	}))
 	defer srv.Close()
 
@@ -284,7 +284,7 @@ func TestMediaTypeForFormat(t *testing.T) {
 func TestGenerateSpeech_EmptyGenerationsError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(speechResponseWire{Generations: nil})
+		_ = json.NewEncoder(w).Encode(speechResponseWire{Generations: nil})
 	}))
 	defer srv.Close()
 
@@ -300,7 +300,7 @@ func TestGenerateSpeech_EmptyGenerationsError(t *testing.T) {
 func TestGenerateSpeech_EmptyAudioError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(speechResponseWire{Generations: []generationWire{{Audio: ""}}})
+		_ = json.NewEncoder(w).Encode(speechResponseWire{Generations: []generationWire{{Audio: ""}}})
 	}))
 	defer srv.Close()
 
@@ -316,7 +316,7 @@ func TestGenerateSpeech_EmptyAudioError(t *testing.T) {
 func TestGenerateSpeech_Unauthorized_MessageField(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"message":"invalid api key"}`))
+		_, _ = w.Write([]byte(`{"message":"invalid api key"}`))
 	}))
 	defer srv.Close()
 
@@ -342,7 +342,7 @@ func TestGenerateSpeech_Unauthorized_MessageField(t *testing.T) {
 func TestGenerateSpeech_Unauthorized_ErrorField(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error":"bad key"}`))
+		_, _ = w.Write([]byte(`{"error":"bad key"}`))
 	}))
 	defer srv.Close()
 
@@ -387,7 +387,7 @@ func TestGenerateSpeech_RequestHeaders(t *testing.T) {
 		gotCustom = r.Header.Get("X-Custom-Header")
 		gotAuth = r.Header.Get("X-Hume-Api-Key")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"generations":[{"audio":"` + base64.StdEncoding.EncodeToString([]byte("audio")) + `"}]}`))
+		_, _ = w.Write([]byte(`{"generations":[{"audio":"` + base64.StdEncoding.EncodeToString([]byte("audio")) + `"}]}`))
 	}))
 	defer srv.Close()
 

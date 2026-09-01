@@ -69,23 +69,23 @@ func newToolLoopFixture(t *testing.T) (*httptest.Server, *[][]byte) {
 		if streaming {
 			w.Header().Set("Content-Type", "text/event-stream")
 			if !hasToolMsg {
-				io.WriteString(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_s1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":"}}]},"finish_reason":null}]}`+"\n\n")
-				io.WriteString(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"Ghent\"}"}}]},"finish_reason":null}]}`+"\n\n")
-				io.WriteString(w, `data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":5,"completion_tokens":7,"total_tokens":12}}`+"\n\n")
+				_, _ = io.WriteString(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_s1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":"}}]},"finish_reason":null}]}`+"\n\n")
+				_, _ = io.WriteString(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"Ghent\"}"}}]},"finish_reason":null}]}`+"\n\n")
+				_, _ = io.WriteString(w, `data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":5,"completion_tokens":7,"total_tokens":12}}`+"\n\n")
 			} else {
-				io.WriteString(w, `data: {"choices":[{"delta":{"content":"It is "},"finish_reason":null}]}`+"\n\n")
-				io.WriteString(w, `data: {"choices":[{"delta":{"content":"sunny"},"finish_reason":null}]}`+"\n\n")
-				io.WriteString(w, `data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":3,"total_tokens":12}}`+"\n\n")
+				_, _ = io.WriteString(w, `data: {"choices":[{"delta":{"content":"It is "},"finish_reason":null}]}`+"\n\n")
+				_, _ = io.WriteString(w, `data: {"choices":[{"delta":{"content":"sunny"},"finish_reason":null}]}`+"\n\n")
+				_, _ = io.WriteString(w, `data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":3,"total_tokens":12}}`+"\n\n")
 			}
-			io.WriteString(w, "data: [DONE]\n\n")
+			_, _ = io.WriteString(w, "data: [DONE]\n\n")
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		if !hasToolMsg {
-			io.WriteString(w, `{"choices":[{"message":{"content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Ghent\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`)
+			_, _ = io.WriteString(w, `{"choices":[{"message":{"content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Ghent\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`)
 		} else {
-			io.WriteString(w, `{"choices":[{"message":{"content":"It is sunny","tool_calls":null},"finish_reason":"stop"}],"usage":{"prompt_tokens":20,"completion_tokens":4,"total_tokens":24}}`)
+			_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"It is sunny","tool_calls":null},"finish_reason":"stop"}],"usage":{"prompt_tokens":20,"completion_tokens":4,"total_tokens":24}}`)
 		}
 	}))
 	t.Cleanup(srv.Close)
@@ -210,7 +210,7 @@ func TestIntegrationStreamTextToolLoop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StreamText: %v", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	var text string
 	var finishes int

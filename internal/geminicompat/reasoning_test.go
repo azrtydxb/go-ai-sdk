@@ -34,9 +34,9 @@ func TestGenerateThoughtPartBecomesReasoningPart(t *testing.T) {
 	body, _ := json.Marshal(wr)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(body)
+		_, _ = w.Write(body)
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	model := NewLanguageModel(testConfig(srv.URL), "gemini-test")
 	resp, err := model.Generate(context.Background(), provider.Call{
@@ -99,7 +99,7 @@ func TestStreamThoughtPartBecomesReasoningDelta(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer sr.Close()
+	defer func() { _ = sr.Close() }()
 
 	var reasoningDeltas []provider.ReasoningDelta
 	var textDeltas []provider.TextDelta

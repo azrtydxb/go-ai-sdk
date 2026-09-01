@@ -154,9 +154,9 @@ func TestImageMediaTypeSniffsJPEG(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"data":[{"b64_json":%q}]}`, b64)
+		_, _ = fmt.Fprintf(w, `{"data":[{"b64_json":%q}]}`, b64)
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	model := NewImageModel(Config{Name: "test", APIKey: "k", BaseURL: srv.URL}, "grok-2-image")
 

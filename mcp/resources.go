@@ -72,7 +72,7 @@ func (c *Client) ListResources(ctx context.Context) ([]Resource, error) {
 		}
 		items := make([]Resource, len(res.Resources))
 		for i, r := range res.Resources {
-			items[i] = Resource{URI: r.URI, Name: r.Name, Title: r.Title, Description: r.Description, MimeType: r.MimeType}
+			items[i] = Resource(r)
 		}
 		return items, res.NextCursor, nil
 	})
@@ -108,7 +108,7 @@ func (c *Client) ListResourceTemplates(ctx context.Context) ([]ResourceTemplate,
 		}
 		items := make([]ResourceTemplate, len(res.ResourceTemplates))
 		for i, r := range res.ResourceTemplates {
-			items[i] = ResourceTemplate{URITemplate: r.URITemplate, Name: r.Name, Title: r.Title, Description: r.Description, MimeType: r.MimeType}
+			items[i] = ResourceTemplate(r)
 		}
 		return items, res.NextCursor, nil
 	})

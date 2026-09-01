@@ -14,7 +14,7 @@ import (
 
 func TestToolsSchemaPassthrough(t *testing.T) {
 	c, server := withCap("tools")
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	wantSchema := json.RawMessage(`{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}`)
 
@@ -59,7 +59,7 @@ func TestToolsSchemaPassthrough(t *testing.T) {
 
 func TestToolsExecuteHappyPath(t *testing.T) {
 	c, server := withCap("tools")
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	results := make(chan struct {
 		tools []ai.Tool
@@ -127,7 +127,7 @@ func TestToolsExecuteHappyPath(t *testing.T) {
 
 func TestToolsExecuteIsErrorBecomesGoError(t *testing.T) {
 	c, server := withCap("tools")
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	results := make(chan []ai.Tool, 1)
 	go func() {
@@ -179,7 +179,7 @@ func TestToolsExecuteIsErrorBecomesGoError(t *testing.T) {
 // with the result.
 func TestToolsIntegrationWithGenerateText(t *testing.T) {
 	c, server := withCap("tools")
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	// Serve tools/list once, then tools/call once, on a background
 	// goroutine, mirroring a real (if trivial) MCP server.

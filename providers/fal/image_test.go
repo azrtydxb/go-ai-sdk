@@ -23,12 +23,12 @@ func TestGenerateImages_RequestShape(t *testing.T) {
 		gotPath = r.URL.Path
 		gotAuth = r.Header.Get("Authorization")
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &gotBody)
+		_ = json.Unmarshal(body, &gotBody)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"images":[{"url":"data:image/png;base64,` + base64.StdEncoding.EncodeToString([]byte("d")) + `","content_type":"image/png"}]}`))
+		_, _ = w.Write([]byte(`{"images":[{"url":"data:image/png;base64,` + base64.StdEncoding.EncodeToString([]byte("d")) + `","content_type":"image/png"}]}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL))
 	m := p.ImageModel("fal-ai/flux/schnell")
@@ -69,12 +69,12 @@ func TestGenerateImages_OmitsZeroValues(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &gotBody)
+		_ = json.Unmarshal(body, &gotBody)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"images":[{"url":"data:image/png;base64,` + base64.StdEncoding.EncodeToString([]byte("pngdata")) + `"}]}`))
+		_, _ = w.Write([]byte(`{"images":[{"url":"data:image/png;base64,` + base64.StdEncoding.EncodeToString([]byte("pngdata")) + `"}]}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.ImageModel("fal-ai/flux/schnell")
@@ -100,12 +100,12 @@ func TestGenerateImages_SizeWxHTranslatesToObject(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &gotBody)
+		_ = json.Unmarshal(body, &gotBody)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"images":[{"url":"data:image/png;base64,` + base64.StdEncoding.EncodeToString([]byte("d")) + `"}]}`))
+		_, _ = w.Write([]byte(`{"images":[{"url":"data:image/png;base64,` + base64.StdEncoding.EncodeToString([]byte("d")) + `"}]}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.ImageModel("fal-ai/flux/schnell")
@@ -135,12 +135,12 @@ func TestGenerateImages_SizeEnumNamePassthrough(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &gotBody)
+		_ = json.Unmarshal(body, &gotBody)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"images":[{"url":"data:image/png;base64,` + base64.StdEncoding.EncodeToString([]byte("d")) + `"}]}`))
+		_, _ = w.Write([]byte(`{"images":[{"url":"data:image/png;base64,` + base64.StdEncoding.EncodeToString([]byte("d")) + `"}]}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.ImageModel("fal-ai/flux/schnell")
@@ -179,12 +179,12 @@ func TestGenerateImages_ProviderOptionsMergeTopLevel(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &gotBody)
+		_ = json.Unmarshal(body, &gotBody)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"images":[{"url":"data:image/png;base64,` + base64.StdEncoding.EncodeToString([]byte("d")) + `"}]}`))
+		_, _ = w.Write([]byte(`{"images":[{"url":"data:image/png;base64,` + base64.StdEncoding.EncodeToString([]byte("d")) + `"}]}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.ImageModel("fal-ai/flux/schnell")
@@ -225,15 +225,15 @@ func TestGenerateImages_URLFetchHappyPath(t *testing.T) {
 	mux.HandleFunc("/fal-ai/flux/schnell", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"images":[{"url":"` + srv.URL + `/generated/img.png","content_type":"image/png"}]}`))
+		_, _ = w.Write([]byte(`{"images":[{"url":"` + srv.URL + `/generated/img.png","content_type":"image/png"}]}`))
 	})
 	mux.HandleFunc("/generated/img.png", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		w.WriteHeader(http.StatusOK)
-		w.Write(pngBytes)
+		_, _ = w.Write(pngBytes)
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.ImageModel("fal-ai/flux/schnell")
@@ -260,9 +260,9 @@ func TestGenerateImages_DataURLPath(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"images":[{"url":"` + dataURL + `"}]}`))
+		_, _ = w.Write([]byte(`{"images":[{"url":"` + dataURL + `"}]}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.ImageModel("fal-ai/flux/schnell")
@@ -286,9 +286,9 @@ func TestGenerateImages_EmptyImagesError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"images":[]}`))
+		_, _ = w.Write([]byte(`{"images":[]}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.ImageModel("fal-ai/flux/schnell")
@@ -302,9 +302,9 @@ func TestGenerateImages_EmptyImagesError(t *testing.T) {
 func TestGenerateImages_401Error(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"detail":"invalid api key"}`))
+		_, _ = w.Write([]byte(`{"detail":"invalid api key"}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("bad-key"), WithBaseURL(srv.URL))
 	m := p.ImageModel("fal-ai/flux/schnell")
@@ -332,9 +332,9 @@ func TestGenerateImages_ContextCancellation(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"images":[]}`))
+		_, _ = w.Write([]byte(`{"images":[]}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.ImageModel("fal-ai/flux/schnell")
@@ -354,9 +354,9 @@ func TestGenerateImages_RequestHeaders(t *testing.T) {
 		gotCustom = r.Header.Get("X-Custom-Header")
 		gotAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"images":[]}`))
+		_, _ = w.Write([]byte(`{"images":[]}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL))
 	m := p.ImageModel("fal-ai/flux/schnell")

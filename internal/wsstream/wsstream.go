@@ -197,7 +197,7 @@ func (s *Stream[E]) readLoop() {
 	// down as soon as the stream logically ends. Conn.Close is idempotent,
 	// so this is a no-op on the paths that already shut the conn down
 	// themselves (a *websocket.CloseError or an abnormal closure).
-	defer s.conn.Close(websocket.CloseNormal, "")
+	defer func() { _ = s.conn.Close(websocket.CloseNormal, "") }()
 	for {
 		mt, data, err := s.conn.Read(s.ctx)
 		if err != nil {

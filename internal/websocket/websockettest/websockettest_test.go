@@ -12,10 +12,10 @@ import (
 // conn that has already reached EOF.
 func TestReadMessage_DropsCachedReaderOnEOF(t *testing.T) {
 	server, client := net.Pipe()
-	defer server.Close()
+	defer func() { _ = server.Close() }()
 
 	go func() {
-		client.Close() // no data ever written; the server side sees EOF
+		_ = client.Close() // no data ever written; the server side sees EOF
 	}()
 
 	if _, _, err := ReadMessage(server); err == nil {
@@ -33,8 +33,8 @@ func TestReadMessage_DropsCachedReaderOnEOF(t *testing.T) {
 // fixture can't OOM the test server by declaring an enormous frame length.
 func TestReadMessage_RejectsOversizedDeclaredLength(t *testing.T) {
 	server, client := net.Pipe()
-	defer server.Close()
-	defer client.Close()
+	defer func() { _ = server.Close() }()
+	defer func() { _ = client.Close() }()
 
 	go func() {
 		// fin=1, opcode=text (0x81); mask bit set + length=127 (extended
@@ -42,8 +42,8 @@ func TestReadMessage_RejectsOversizedDeclaredLength(t *testing.T) {
 		header := []byte{0x81, 0xFF}
 		var ext [8]byte
 		binary.BigEndian.PutUint64(ext[:], uint64(maxFrameLength)+1)
-		client.Write(header)
-		client.Write(ext[:])
+		_, _ = client.Write(header)
+		_, _ = client.Write(ext[:])
 		// The declared length must be rejected before ReadMessageBuf tries
 		// to read a mask key or payload, so no further bytes are written
 		// (and none are needed for the read to return).

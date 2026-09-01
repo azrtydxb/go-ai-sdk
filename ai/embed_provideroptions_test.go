@@ -23,7 +23,7 @@ type v2MockEmbedder struct {
 func (m *v2MockEmbedder) EmbedCall(ctx context.Context, call provider.EmbeddingCall) (*provider.EmbeddingResponse, error) {
 	m.calls++
 	m.lastProviderOptions = call.ProviderOptions
-	return m.MockEmbedder.Embed(ctx, call.Values)
+	return m.Embed(ctx, call.Values)
 }
 
 func TestEmbedThreadsProviderOptionsToV2Model(t *testing.T) {

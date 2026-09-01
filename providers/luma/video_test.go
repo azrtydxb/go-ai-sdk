@@ -27,23 +27,23 @@ func TestGenerateVideos_RequestShape(t *testing.T) {
 		gotMethod = r.Method
 		gotAuth = r.Header.Get("Authorization")
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &gotBody)
+		_ = json.Unmarshal(body, &gotBody)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1"}`))
 	})
 	mux.HandleFunc("/dream-machine/v1/generations/gen-1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1","state":"completed","assets":{"video":"` + srv.URL + `/vid.mp4"}}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","state":"completed","assets":{"video":"` + srv.URL + `/vid.mp4"}}`))
 	})
 	mux.HandleFunc("/vid.mp4", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "video/mp4")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("mp4data"))
+		_, _ = w.Write([]byte("mp4data"))
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.VideoModel("ray-2")
@@ -100,23 +100,23 @@ func TestGenerateVideos_OmitsFieldsWhenEmpty(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/dream-machine/v1/generations", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &gotBody)
+		_ = json.Unmarshal(body, &gotBody)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1"}`))
 	})
 	mux.HandleFunc("/dream-machine/v1/generations/gen-1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1","state":"completed","assets":{"video":"` + srv.URL + `/vid.mp4"}}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","state":"completed","assets":{"video":"` + srv.URL + `/vid.mp4"}}`))
 	})
 	mux.HandleFunc("/vid.mp4", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "video/mp4")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("mp4data"))
+		_, _ = w.Write([]byte("mp4data"))
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.VideoModel("ray-2")
@@ -145,25 +145,25 @@ func TestGenerateVideos_PollHappyPath(t *testing.T) {
 	mux.HandleFunc("/dream-machine/v1/generations", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1"}`))
 	})
 	mux.HandleFunc("/dream-machine/v1/generations/gen-1", func(w http.ResponseWriter, r *http.Request) {
 		n := atomic.AddInt32(&pollCount, 1)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		if n <= 2 {
-			w.Write([]byte(`{"id":"gen-1","state":"pending"}`))
+			_, _ = w.Write([]byte(`{"id":"gen-1","state":"pending"}`))
 			return
 		}
-		w.Write([]byte(`{"id":"gen-1","state":"completed","assets":{"video":"` + srv.URL + `/vid.mp4"}}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","state":"completed","assets":{"video":"` + srv.URL + `/vid.mp4"}}`))
 	})
 	mux.HandleFunc("/vid.mp4", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "video/mp4")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("mp4data"))
+		_, _ = w.Write([]byte("mp4data"))
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.VideoModel("ray-2")
@@ -185,15 +185,15 @@ func TestGenerateVideos_FailedState(t *testing.T) {
 	mux.HandleFunc("/dream-machine/v1/generations", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1"}`))
 	})
 	mux.HandleFunc("/dream-machine/v1/generations/gen-1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1","state":"failed","failure_reason":"content policy violation"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","state":"failed","failure_reason":"content policy violation"}`))
 	})
 	srv := httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.VideoModel("ray-2")
@@ -214,15 +214,15 @@ func TestGenerateVideos_PollNon2xxError(t *testing.T) {
 	mux.HandleFunc("/dream-machine/v1/generations", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1"}`))
 	})
 	mux.HandleFunc("/dream-machine/v1/generations/gen-1", func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&pollHit, 1)
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"detail":"internal error"}`))
+		_, _ = w.Write([]byte(`{"detail":"internal error"}`))
 	})
 	srv := httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.VideoModel("ray-2")
@@ -250,19 +250,19 @@ func TestGenerateVideos_ContextCancellationMidPoll(t *testing.T) {
 	mux.HandleFunc("/dream-machine/v1/generations", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1"}`))
 	})
 	mux.HandleFunc("/dream-machine/v1/generations/gen-1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1","state":"pending"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","state":"pending"}`))
 		select {
 		case pollHit <- struct{}{}:
 		default:
 		}
 	})
 	srv := httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(200*time.Millisecond))
 	m := p.VideoModel("ray-2")
@@ -290,23 +290,23 @@ func TestGenerateVideos_ProviderOptionsMergeTopLevel(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/dream-machine/v1/generations", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &gotBody)
+		_ = json.Unmarshal(body, &gotBody)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1"}`))
 	})
 	mux.HandleFunc("/dream-machine/v1/generations/gen-1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1","state":"completed","assets":{"video":"` + srv.URL + `/vid.mp4"}}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","state":"completed","assets":{"video":"` + srv.URL + `/vid.mp4"}}`))
 	})
 	mux.HandleFunc("/vid.mp4", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "video/mp4")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("mp4data"))
+		_, _ = w.Write([]byte("mp4data"))
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.VideoModel("ray-2")
@@ -339,9 +339,9 @@ func TestGenerateVideos_ProviderOptionsMergeTopLevel(t *testing.T) {
 func TestGenerateVideos_401Error(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"detail":"invalid api key"}`))
+		_, _ = w.Write([]byte(`{"detail":"invalid api key"}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("bad-key"), WithBaseURL(srv.URL))
 	m := p.VideoModel("ray-2")
@@ -365,9 +365,9 @@ func TestGenerateVideos_401Error(t *testing.T) {
 func TestGenerateVideos_429Retryable(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
-		w.Write([]byte(`{"detail":"rate limited"}`))
+		_, _ = w.Write([]byte(`{"detail":"rate limited"}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.VideoModel("ray-2")
@@ -391,19 +391,19 @@ func TestGenerateVideos_FetchVideoErrorIsSinglePrefixed(t *testing.T) {
 	mux.HandleFunc("/dream-machine/v1/generations", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1"}`))
 	})
 	mux.HandleFunc("/dream-machine/v1/generations/gen-1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"gen-1","state":"completed","assets":{"video":"` + srv.URL + `/missing.mp4"}}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","state":"completed","assets":{"video":"` + srv.URL + `/missing.mp4"}}`))
 	})
 	mux.HandleFunc("/missing.mp4", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("not found"))
+		_, _ = w.Write([]byte("not found"))
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.VideoModel("ray-2")
@@ -426,10 +426,10 @@ func TestGenerateVideos_EmptyCreateIDError(t *testing.T) {
 	mux.HandleFunc("/dream-machine/v1/generations", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":""}`))
+		_, _ = w.Write([]byte(`{"id":""}`))
 	})
 	srv := httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.VideoModel("ray-2")
@@ -454,20 +454,20 @@ func TestGenerateVideos_RequestHeaders(t *testing.T) {
 		createCustom = r.Header.Get("X-Custom-Header")
 		createAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"id":"gen-1"}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1"}`))
 	})
 	mux.HandleFunc("/dream-machine/v1/generations/gen-1", func(w http.ResponseWriter, r *http.Request) {
 		pollCustom = r.Header.Get("X-Custom-Header")
 		pollAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"id":"gen-1","state":"completed","assets":{"video":"` + srv.URL + `/vid.mp4"}}`))
+		_, _ = w.Write([]byte(`{"id":"gen-1","state":"completed","assets":{"video":"` + srv.URL + `/vid.mp4"}}`))
 	})
 	mux.HandleFunc("/vid.mp4", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "video/mp4")
-		w.Write([]byte("mp4data"))
+		_, _ = w.Write([]byte("mp4data"))
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL), WithPollInterval(time.Millisecond))
 	m := p.VideoModel("ray-2")

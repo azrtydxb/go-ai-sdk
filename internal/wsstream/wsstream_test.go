@@ -25,7 +25,7 @@ func listenerBaseURL(t *testing.T) (net.Listener, string) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	t.Cleanup(func() { l.Close() })
+	t.Cleanup(func() { _ = l.Close() })
 	return l, "http://" + l.Addr().String()
 }
 
@@ -76,7 +76,7 @@ func TestSend_TextAndBinaryRouting(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		if err := websockettest.Upgrade(conn); err != nil {
 			return
 		}
@@ -90,12 +90,12 @@ func TestSend_TextAndBinaryRouting(t *testing.T) {
 				payload []byte
 			}{opcode, payload}
 		}
-		websockettest.WriteClose(conn, 1000, "")
+		_ = websockettest.WriteClose(conn, 1000, "")
 	}()
 
 	conn := dialClient(t, baseURL)
 	s := New(Config[testEvent]{Ctx: context.Background(), Conn: conn, Decode: echoDecode})
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	if err := s.Send(context.Background(), websocket.TextMessage, []byte("hello")); err != nil {
 		t.Fatalf("Send text: %v", err)
@@ -134,20 +134,20 @@ func TestDecodeRouting_EventsDelivered(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		if err := websockettest.Upgrade(conn); err != nil {
 			return
 		}
-		websockettest.WriteMessage(conn, websockettest.OpText, []byte("one"))
-		websockettest.WriteMessage(conn, websockettest.OpText, []byte("")) // skipped
-		websockettest.WriteMessage(conn, websockettest.OpBinary, []byte("ignored-binary"))
-		websockettest.WriteMessage(conn, websockettest.OpText, []byte("two"))
-		websockettest.WriteClose(conn, 1000, "")
+		_ = websockettest.WriteMessage(conn, websockettest.OpText, []byte("one"))
+		_ = websockettest.WriteMessage(conn, websockettest.OpText, []byte("")) // skipped
+		_ = websockettest.WriteMessage(conn, websockettest.OpBinary, []byte("ignored-binary"))
+		_ = websockettest.WriteMessage(conn, websockettest.OpText, []byte("two"))
+		_ = websockettest.WriteClose(conn, 1000, "")
 	}()
 
 	conn := dialClient(t, baseURL)
 	s := New(Config[testEvent]{Ctx: context.Background(), Conn: conn, Decode: echoDecode})
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	var got []testEvent
 	for e := range s.Events() {
@@ -169,20 +169,20 @@ func TestTerminalFlag_EndsCleanly(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		if err := websockettest.Upgrade(conn); err != nil {
 			return
 		}
-		websockettest.WriteMessage(conn, websockettest.OpText, []byte("one"))
-		websockettest.WriteMessage(conn, websockettest.OpText, []byte("TERMINAL"))
+		_ = websockettest.WriteMessage(conn, websockettest.OpText, []byte("one"))
+		_ = websockettest.WriteMessage(conn, websockettest.OpText, []byte("TERMINAL"))
 		// A message after the terminal one must never be observed — the
 		// readLoop must have already returned.
-		websockettest.WriteMessage(conn, websockettest.OpText, []byte("should-not-arrive"))
+		_ = websockettest.WriteMessage(conn, websockettest.OpText, []byte("should-not-arrive"))
 	}()
 
 	conn := dialClient(t, baseURL)
 	s := New(Config[testEvent]{Ctx: context.Background(), Conn: conn, Decode: echoDecode})
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	var got []testEvent
 	for e := range s.Events() {
@@ -204,16 +204,16 @@ func TestDecodeError_EndsWithThatErr(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		if err := websockettest.Upgrade(conn); err != nil {
 			return
 		}
-		websockettest.WriteMessage(conn, websockettest.OpText, []byte("ERROR"))
+		_ = websockettest.WriteMessage(conn, websockettest.OpText, []byte("ERROR"))
 	}()
 
 	conn := dialClient(t, baseURL)
 	s := New(Config[testEvent]{Ctx: context.Background(), Conn: conn, Decode: echoDecode})
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	for range s.Events() {
 	}
@@ -230,9 +230,9 @@ func TestClose_Idempotent(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
-		websockettest.Upgrade(conn)
-		websockettest.ReadMessage(conn)
+		defer func() { _ = conn.Close() }()
+		_ = websockettest.Upgrade(conn)
+		_, _, _ = websockettest.ReadMessage(conn)
 	}()
 
 	conn := dialClient(t, baseURL)
@@ -263,9 +263,9 @@ func TestSend_AfterClose(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
-		websockettest.Upgrade(conn)
-		websockettest.ReadMessage(conn)
+		defer func() { _ = conn.Close() }()
+		_ = websockettest.Upgrade(conn)
+		_, _, _ = websockettest.ReadMessage(conn)
 	}()
 
 	conn := dialClient(t, baseURL)
@@ -295,7 +295,7 @@ func TestAbandonedEventsThenCloseUnblocksReadLoop(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		if err := websockettest.Upgrade(conn); err != nil {
 			return
 		}
@@ -303,10 +303,10 @@ func TestAbandonedEventsThenCloseUnblocksReadLoop(t *testing.T) {
 		// the reader goroutine is guaranteed to still be blocked trying to
 		// deliver one when the consumer below abandons Events().
 		for i := 0; i < 200; i++ {
-			websockettest.WriteMessage(conn, websockettest.OpText, []byte(fmt.Sprintf("msg-%d", i)))
+			_ = websockettest.WriteMessage(conn, websockettest.OpText, []byte(fmt.Sprintf("msg-%d", i)))
 		}
 		// Keep the connection open; the client side closes it via Close().
-		websockettest.ReadMessage(conn)
+		_, _, _ = websockettest.ReadMessage(conn)
 	}()
 
 	conn := dialClient(t, baseURL)
@@ -340,19 +340,19 @@ func TestReadLoop_ClosesUnderlyingConnOnTerminal(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		if err := websockettest.Upgrade(conn); err != nil {
 			return
 		}
-		websockettest.WriteMessage(conn, websockettest.OpText, []byte("TERMINAL"))
+		_ = websockettest.WriteMessage(conn, websockettest.OpText, []byte("TERMINAL"))
 
 		// The stream's own Close() (via readLoop's teardown defer) sends a
 		// close frame before tearing down the socket; drain it first so the
 		// raw Read below can't spuriously observe those buffered bytes
 		// instead of the eventual EOF/reset.
-		websockettest.ReadMessage(conn)
+		_, _, _ = websockettest.ReadMessage(conn)
 
-		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 		var b [1]byte
 		_, rerr := conn.Read(b[:])
 		var netErr net.Error
@@ -386,17 +386,17 @@ func TestCtxCancelMidStream(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		if err := websockettest.Upgrade(conn); err != nil {
 			return
 		}
-		websockettest.ReadMessage(conn) // block until client disconnects
+		_, _, _ = websockettest.ReadMessage(conn) // block until client disconnects
 	}()
 
 	conn := dialClient(t, baseURL)
 	ctx, cancel := context.WithCancel(context.Background())
 	s := New(Config[testEvent]{Ctx: ctx, Conn: conn, Decode: echoDecode})
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	cancel()
 
@@ -415,16 +415,16 @@ func TestServerCloseIsCleanEnd(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		if err := websockettest.Upgrade(conn); err != nil {
 			return
 		}
-		websockettest.WriteClose(conn, 1000, "done")
+		_ = websockettest.WriteClose(conn, 1000, "done")
 	}()
 
 	conn := dialClient(t, baseURL)
 	s := New(Config[testEvent]{Ctx: context.Background(), Conn: conn, Decode: echoDecode})
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	for range s.Events() {
 	}

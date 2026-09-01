@@ -55,7 +55,7 @@ func newRerankFixtureServer(t *testing.T, capture *capturedRerankRequest) *httpt
 			},
 			Usage: rerankUsageWire{TotalTokens: 12},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -184,7 +184,7 @@ func TestRerankErrorPropagatesAPICallError401(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/rerank", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(401)
-		w.Write([]byte(`{"detail":"unauthorized"}`))
+		_, _ = w.Write([]byte(`{"detail":"unauthorized"}`))
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -210,7 +210,7 @@ func TestRerankErrorPropagatesAPICallError429Retryable(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/rerank", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(429)
-		w.Write([]byte(`{"detail":"rate limited"}`))
+		_, _ = w.Write([]byte(`{"detail":"rate limited"}`))
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -236,7 +236,7 @@ func TestRerankContextCancel(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/rerank", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(rerankResponse{})
+		_ = json.NewEncoder(w).Encode(rerankResponse{})
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -291,7 +291,7 @@ func TestRerankRequestHeaders(t *testing.T) {
 		gotCustom = r.Header.Get("X-Custom-Header")
 		gotAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(rerankResponse{})
+		_ = json.NewEncoder(w).Encode(rerankResponse{})
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)

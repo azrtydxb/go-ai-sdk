@@ -60,11 +60,11 @@ func (m *streamingTranscriptionModel) StreamTranscribe(ctx context.Context, call
 
 	sessionUpdate, err := buildSessionUpdate(m.modelID, call)
 	if err != nil {
-		conn.Close(websocket.CloseNormal, "")
+		_ = conn.Close(websocket.CloseNormal, "")
 		return nil, err
 	}
 	if err := conn.WriteText(ctx, sessionUpdate); err != nil {
-		conn.Close(websocket.CloseNormal, "")
+		_ = conn.Close(websocket.CloseNormal, "")
 		return nil, fmt.Errorf("openai: send transcription_session.update: %w", err)
 	}
 

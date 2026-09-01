@@ -453,7 +453,7 @@ func (m *simulateStreamingModel) Stream(ctx context.Context, call provider.Call)
 	}
 	for _, part := range resp.Content {
 		if tp, ok := part.(provider.TextPart); ok {
-			parts = append(parts, provider.TextDelta{Text: tp.Text})
+			parts = append(parts, provider.TextDelta(tp))
 		}
 	}
 	for _, part := range resp.Content {

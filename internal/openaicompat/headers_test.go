@@ -21,7 +21,7 @@ func TestEmbedding_HeadersApplied(t *testing.T) {
 		gotExtra = r.Header.Get("X-Test")
 		gotAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"data":[{"index":0,"embedding":[0.1]}]}`))
+		_, _ = w.Write([]byte(`{"data":[{"index":0,"embedding":[0.1]}]}`))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -52,7 +52,7 @@ func TestImage_HeadersApplied(t *testing.T) {
 		gotExtra = r.Header.Get("X-Test")
 		gotAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"data":[]}`))
+		_, _ = w.Write([]byte(`{"data":[]}`))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -77,7 +77,7 @@ func TestSpeech_HeadersApplied(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotExtra = r.Header.Get("X-Test")
 		gotAuth = r.Header.Get("Authorization")
-		w.Write([]byte("audio-bytes"))
+		_, _ = w.Write([]byte("audio-bytes"))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -104,7 +104,7 @@ func TestTranscription_HeadersApplied(t *testing.T) {
 		gotAuth = r.Header.Get("Authorization")
 		gotContentType = r.Header.Get("Content-Type")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"text":"hi"}`))
+		_, _ = w.Write([]byte(`{"text":"hi"}`))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -135,7 +135,7 @@ func TestTranslation_HeadersApplied(t *testing.T) {
 		gotAuth = r.Header.Get("Authorization")
 		gotContentType = r.Header.Get("Content-Type")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"text":"hi"}`))
+		_, _ = w.Write([]byte(`{"text":"hi"}`))
 	}))
 	t.Cleanup(srv.Close)
 

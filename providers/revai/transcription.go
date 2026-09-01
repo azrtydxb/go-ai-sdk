@@ -181,7 +181,7 @@ func (m *transcriptionModel) createJob(ctx context.Context, call provider.Transc
 		return "", err
 	}
 	body, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if err != nil {
 		return "", fmt.Errorf("revai: read job response: %w", err)
 	}
@@ -241,7 +241,7 @@ func (m *transcriptionModel) pollJob(ctx context.Context, id string, headers map
 			return err
 		}
 		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if err != nil {
 			return fmt.Errorf("revai: read poll response: %w", err)
 		}
@@ -293,7 +293,7 @@ func (m *transcriptionModel) fetchTranscript(ctx context.Context, id string, hea
 		return nil, nil, err
 	}
 	body, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if err != nil {
 		return nil, nil, fmt.Errorf("revai: read transcript response: %w", err)
 	}

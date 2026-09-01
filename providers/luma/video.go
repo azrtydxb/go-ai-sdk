@@ -89,7 +89,7 @@ func (m *videoModel) GenerateVideos(ctx context.Context, call provider.VideoCall
 		return nil, err
 	}
 	body, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if err != nil {
 		return nil, fmt.Errorf("luma: read video response: %w", err)
 	}
@@ -149,7 +149,7 @@ func (m *videoModel) poll(ctx context.Context, id string, headers map[string]str
 			return nil, nil, err
 		}
 		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if err != nil {
 			return nil, nil, fmt.Errorf("luma: read poll response: %w", err)
 		}

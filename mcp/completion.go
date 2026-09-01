@@ -58,7 +58,7 @@ func (c *Client) Complete(ctx context.Context, ref CompletionRef, argName, argVa
 		return nil, &CapabilityError{Capability: "completions"}
 	}
 	params := completionCompleteParams{
-		Ref:      completionRefWire{Type: ref.Type, Name: ref.Name, URI: ref.URI},
+		Ref:      completionRefWire(ref),
 		Argument: completionArgumentWire{Name: argName, Value: argValue},
 	}
 	raw, err := c.call(ctx, "completion/complete", params)

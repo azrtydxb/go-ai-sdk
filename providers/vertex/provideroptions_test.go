@@ -19,10 +19,10 @@ func TestEmbeddingProviderOptionsOverridesAndPassthrough(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body := make([]byte, r.ContentLength)
-		r.Body.Read(body)
+		_, _ = r.Body.Read(body)
 		gotBody = body
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"predictions":[{"embeddings":{"values":[0.1,0.2],"statistics":{"token_count":1}}}]}`))
+		_, _ = w.Write([]byte(`{"predictions":[{"embeddings":{"values":[0.1,0.2],"statistics":{"token_count":1}}}]}`))
 	}))
 	t.Cleanup(srv.Close)
 

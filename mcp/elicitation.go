@@ -116,16 +116,10 @@ func (c *Client) handleElicitationCreate(req serverRequest) {
 		return
 	}
 
-	result, err := h(c.ctx, ElicitationRequest{
-		Message:         params.Message,
-		RequestedSchema: params.RequestedSchema,
-	})
+	result, err := h(c.ctx, ElicitationRequest(params))
 	if err != nil {
 		c.respondServerError(req.ID, rpcInternalError, "Internal error")
 		return
 	}
-	c.respondServerResult(req.ID, elicitationCreateResultWire{
-		Action:  result.Action,
-		Content: result.Content,
-	})
+	c.respondServerResult(req.ID, elicitationCreateResultWire(result))
 }

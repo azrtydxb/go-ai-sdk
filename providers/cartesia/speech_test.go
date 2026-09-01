@@ -29,9 +29,9 @@ func TestGenerateSpeech_HappyPath(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write(audio)
+		_, _ = w.Write(audio)
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL))
 	m := p.SpeechModel("sonic-2")
@@ -100,10 +100,10 @@ func TestGenerateSpeech_LanguageOmittedWhenEmpty(t *testing.T) {
 	var raw map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &raw)
+		_ = json.Unmarshal(body, &raw)
 		w.WriteHeader(http.StatusOK)
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.SpeechModel("sonic-2")
@@ -142,14 +142,14 @@ func TestGenerateSpeech_OutputFormatWav(t *testing.T) {
 	var gotRaw map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &gotBody)
+		_ = json.Unmarshal(body, &gotBody)
 		var raw map[string]any
-		json.Unmarshal(body, &raw)
+		_ = json.Unmarshal(body, &raw)
 		gotRaw = raw
 		w.WriteHeader(http.StatusOK)
-		w.Write(audio)
+		_, _ = w.Write(audio)
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.SpeechModel("sonic-2")
@@ -191,11 +191,11 @@ func TestGenerateSpeech_OutputFormatMP3Shape(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		var raw map[string]any
-		json.Unmarshal(body, &raw)
+		_ = json.Unmarshal(body, &raw)
 		gotRaw = raw
 		w.WriteHeader(http.StatusOK)
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.SpeechModel("sonic-2")
@@ -224,11 +224,11 @@ func TestGenerateSpeech_OutputFormatRawShape(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		var raw map[string]any
-		json.Unmarshal(body, &raw)
+		_ = json.Unmarshal(body, &raw)
 		gotRaw = raw
 		w.WriteHeader(http.StatusOK)
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.SpeechModel("sonic-2")
@@ -253,10 +253,10 @@ func TestGenerateSpeech_ProviderOptionsMerge(t *testing.T) {
 	var raw map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &raw)
+		_ = json.Unmarshal(body, &raw)
 		w.WriteHeader(http.StatusOK)
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.SpeechModel("sonic-2")
@@ -279,9 +279,9 @@ func TestGenerateSpeech_ProviderOptionsMerge(t *testing.T) {
 func TestGenerateSpeech_Unauthorized(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error":"invalid api key"}`))
+		_, _ = w.Write([]byte(`{"error":"invalid api key"}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("bad-key"), WithBaseURL(srv.URL))
 	m := p.SpeechModel("sonic-2")
@@ -307,7 +307,7 @@ func TestGenerateSpeech_ContextCancellation(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.SpeechModel("sonic-2")
@@ -327,9 +327,9 @@ func TestGenerateSpeech_RequestHeaders(t *testing.T) {
 		gotCustom = r.Header.Get("X-Custom-Header")
 		gotAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "audio/mpeg")
-		w.Write([]byte("audio"))
+		_, _ = w.Write([]byte("audio"))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL))
 	m := p.SpeechModel("sonic-2")

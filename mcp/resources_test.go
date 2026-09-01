@@ -25,7 +25,7 @@ func withCap(caps ...string) (c *Client, server *pipeTransport) {
 
 func TestListResourcesPagination(t *testing.T) {
 	c, server := withCap("resources")
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	type wireResource struct {
 		URI         string `json:"uri"`
@@ -93,7 +93,7 @@ func TestListResourcesPagination(t *testing.T) {
 
 func TestListResourceTemplates(t *testing.T) {
 	c, server := withCap("resources")
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	type outcome struct {
 		res []ResourceTemplate
@@ -129,7 +129,7 @@ func TestListResourceTemplates(t *testing.T) {
 
 func TestReadResourceTextAndBlob(t *testing.T) {
 	c, server := withCap("resources")
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	type outcome struct {
 		res []ResourceContents
@@ -187,7 +187,7 @@ func TestReadResourceTextAndBlob(t *testing.T) {
 func TestResourcesCapabilityAbsent(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	// serverCaps left nil: as if Initialize's server never advertised
 	// "resources".
 
@@ -210,7 +210,7 @@ func TestResourcesCapabilityAbsent(t *testing.T) {
 
 func TestReadResourceRPCErrorSurfaces(t *testing.T) {
 	c, server := withCap("resources")
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	results := make(chan error, 1)
 	go func() {

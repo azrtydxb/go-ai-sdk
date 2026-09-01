@@ -30,9 +30,9 @@ func TestGenerateSpeech_HappyPath(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "audio/mpeg")
 		w.WriteHeader(http.StatusOK)
-		w.Write(audio)
+		_, _ = w.Write(audio)
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL))
 	m := p.SpeechModel("eleven_multilingual_v2")
@@ -79,10 +79,10 @@ func TestGenerateSpeech_DefaultVoiceAndNoLanguage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &raw)
+		_ = json.Unmarshal(body, &raw)
 		w.WriteHeader(http.StatusOK)
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.SpeechModel("eleven_multilingual_v2")
@@ -124,7 +124,7 @@ func TestGenerateSpeech_FormatMappingInQuery(t *testing.T) {
 		gotQuery = r.URL.RawQuery
 		w.WriteHeader(http.StatusOK)
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.SpeechModel("eleven_multilingual_v2")
@@ -149,7 +149,7 @@ func TestGenerateSpeech_Speed(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.SpeechModel("eleven_multilingual_v2")
@@ -180,7 +180,7 @@ func TestGenerateSpeech_NoSpeedOmitsVoiceSettings(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.SpeechModel("eleven_multilingual_v2")
@@ -198,9 +198,9 @@ func TestGenerateSpeech_NoSpeedOmitsVoiceSettings(t *testing.T) {
 func TestGenerateSpeech_Unauthorized(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"detail":{"message":"invalid api key"}}`))
+		_, _ = w.Write([]byte(`{"detail":{"message":"invalid api key"}}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("bad-key"), WithBaseURL(srv.URL))
 	m := p.SpeechModel("eleven_multilingual_v2")
@@ -226,7 +226,7 @@ func TestGenerateSpeech_ContextCancellation(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.SpeechModel("eleven_multilingual_v2")
@@ -246,9 +246,9 @@ func TestGenerateSpeech_RequestHeaders(t *testing.T) {
 		gotCustom = r.Header.Get("X-Custom-Header")
 		gotAuth = r.Header.Get("xi-api-key")
 		w.Header().Set("Content-Type", "audio/mpeg")
-		w.Write([]byte("audio"))
+		_, _ = w.Write([]byte("audio"))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("test-key"), WithBaseURL(srv.URL))
 	m := p.SpeechModel("eleven_multilingual_v2")

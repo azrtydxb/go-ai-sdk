@@ -38,7 +38,7 @@ func streamSSEServer(t *testing.T, chunks ...string) *httptest.Server {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		for _, c := range chunks {
-			fmt.Fprintf(w, "data: %s\n\n", c)
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", c)
 			flusher.Flush()
 		}
 		// Deliberately no "data: [DONE]" — the handler returns here,
@@ -68,7 +68,7 @@ func TestStreamEndsWithoutDoneButHasFinishReason(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer sr.Close()
+	defer func() { _ = sr.Close() }()
 
 	var finishes []provider.FinishPart
 	for part := range sr.Parts() {
@@ -107,7 +107,7 @@ func TestStreamTruncatedBeforeFinishReason(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer sr.Close()
+	defer func() { _ = sr.Close() }()
 
 	var finishes []provider.FinishPart
 	for part := range sr.Parts() {

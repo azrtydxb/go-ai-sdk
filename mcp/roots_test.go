@@ -9,7 +9,7 @@ import (
 func TestRootsListReturnsConfiguredRoots(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	c.SetRoots([]Root{{URI: "file:///tmp/p", Name: "p"}})
 
@@ -41,7 +41,7 @@ func TestRootsListReturnsConfiguredRoots(t *testing.T) {
 func TestRootsListWithoutSetRootsRespondsMethodNotFound(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	initializeWithCaps(t, client, server, c, map[string]any{})
 
@@ -62,7 +62,7 @@ func TestRootsListWithoutSetRootsRespondsMethodNotFound(t *testing.T) {
 func TestInitializeDeclaresRootsWithListChangedFalseWhenSet(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	c.SetRoots([]Root{{URI: "file:///tmp/p", Name: "p"}})
 
@@ -102,7 +102,7 @@ func TestInitializeDeclaresRootsWithListChangedFalseWhenSet(t *testing.T) {
 func TestInitializeDoesNotDeclareRootsWithoutSetRoots(t *testing.T) {
 	client, server := newPipePair()
 	c := NewClient(client)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	done := make(chan error, 1)
 	go func() { done <- c.Initialize(context.Background()) }()

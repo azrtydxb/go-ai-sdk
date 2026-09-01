@@ -165,7 +165,7 @@ func lastUserText(req generateContentRequest) string {
 
 func writeSSE(w http.ResponseWriter, flusher http.Flusher, v any) {
 	b, _ := json.Marshal(v)
-	fmt.Fprintf(w, "data: %s\n\n", b)
+	_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
 	flusher.Flush()
 }
 
@@ -229,12 +229,12 @@ func handleGenerate(t *testing.T, s *Server, w http.ResponseWriter, r *http.Requ
 	case "fail 429":
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(429)
-		w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+		_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
 		return
 	case "fail 400":
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(400)
-		w.Write([]byte(`{"error":{"message":"bad request"}}`))
+		_, _ = w.Write([]byte(`{"error":{"message":"bad request"}}`))
 		return
 	}
 
@@ -279,7 +279,7 @@ func handleGenerate(t *testing.T, s *Server, w http.ResponseWriter, r *http.Requ
 			// report the failure and write an SSE comment so the client
 			// gets a deterministic (if wrong) response instead of a hang.
 			t.Errorf("compattest: unknown streaming scenario %q", text)
-			fmt.Fprintf(w, ": compattest: unknown streaming scenario %q\n\n", text)
+			_, _ = fmt.Fprintf(w, ": compattest: unknown streaming scenario %q\n\n", text)
 			flusher.Flush()
 		}
 		return
@@ -296,7 +296,7 @@ func handleGenerate(t *testing.T, s *Server, w http.ResponseWriter, r *http.Requ
 			}},
 			UsageMetadata: &wireUsageMetadata{PromptTokenCount: 5, CandidatesTokenCount: 3, TotalTokenCount: 8},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	case "tool":
 		resp := generateContentResponse{
 			Candidates: []wireCandidate{{
@@ -307,7 +307,7 @@ func handleGenerate(t *testing.T, s *Server, w http.ResponseWriter, r *http.Requ
 			}},
 			UsageMetadata: &wireUsageMetadata{PromptTokenCount: 6, CandidatesTokenCount: 4, TotalTokenCount: 10},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	default:
 		msg := fmt.Sprintf("compattest: unknown scenario %q", text)
 		t.Errorf("%s", msg)
@@ -341,5 +341,5 @@ func handleEmbed(t *testing.T, s *Server, w http.ResponseWriter, r *http.Request
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(batchEmbedResponse{Embeddings: embeddings})
+	_ = json.NewEncoder(w).Encode(batchEmbedResponse{Embeddings: embeddings})
 }

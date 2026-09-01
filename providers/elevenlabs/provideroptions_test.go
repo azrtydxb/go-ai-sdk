@@ -24,9 +24,9 @@ func TestSpeechProviderOptionsOverridesAndPassthrough(t *testing.T) {
 		gotBody = body
 		w.Header().Set("Content-Type", "audio/mpeg")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("fake-audio"))
+		_, _ = w.Write([]byte("fake-audio"))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.SpeechModel("eleven_multilingual_v2")
@@ -102,9 +102,9 @@ func TestTranscriptionProviderOptionsExtraFormField(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"text":"hi","language_code":"en","words":[]}`))
+		_, _ = w.Write([]byte(`{"text":"hi","language_code":"en","words":[]}`))
 	}))
-	defer srv.Close()
+	defer func() { srv.Close() }()
 
 	p := New(WithAPIKey("k"), WithBaseURL(srv.URL))
 	m := p.TranscriptionModel("scribe_v1")

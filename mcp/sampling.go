@@ -107,7 +107,7 @@ func (c *Client) handleSamplingCreateMessage(req serverRequest) {
 
 	messages := make([]SamplingMessage, len(params.Messages))
 	for i, m := range params.Messages {
-		messages[i] = SamplingMessage{Role: m.Role, Content: m.Content}
+		messages[i] = SamplingMessage(m)
 	}
 	result, err := h(c.ctx, CreateMessageRequest{
 		Messages:         messages,
@@ -119,10 +119,5 @@ func (c *Client) handleSamplingCreateMessage(req serverRequest) {
 		c.respondServerError(req.ID, rpcInternalError, "Internal error")
 		return
 	}
-	c.respondServerResult(req.ID, createMessageResultWire{
-		Role:       result.Role,
-		Content:    result.Content,
-		Model:      result.Model,
-		StopReason: result.StopReason,
-	})
+	c.respondServerResult(req.ID, createMessageResultWire(result))
 }

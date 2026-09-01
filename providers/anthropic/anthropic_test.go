@@ -57,7 +57,7 @@ func lastUserText(req messagesRequest) string {
 
 func writeNamedSSE(w http.ResponseWriter, flusher http.Flusher, event string, v any) {
 	b, _ := json.Marshal(v)
-	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b)
+	_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b)
 	flusher.Flush()
 }
 
@@ -97,12 +97,12 @@ func newFixtureServer(t *testing.T) (*httptest.Server, *fixtureState) {
 		case "fail 429":
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(429)
-			w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+			_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
 			return
 		case "fail 400":
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(400)
-			w.Write([]byte(`{"error":{"message":"bad request"}}`))
+			_, _ = w.Write([]byte(`{"error":{"message":"bad request"}}`))
 			return
 		}
 
@@ -165,7 +165,7 @@ func newFixtureServer(t *testing.T) (*httptest.Server, *fixtureState) {
 				StopReason: "end_turn",
 				Usage:      wireUsage{InputTokens: 5, OutputTokens: 3},
 			}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		case "tool":
 			resp := messageResponse{
 				Content: []wireContentBlock{{
@@ -175,7 +175,7 @@ func newFixtureServer(t *testing.T) (*httptest.Server, *fixtureState) {
 				StopReason: "tool_use",
 				Usage:      wireUsage{InputTokens: 6, OutputTokens: 4},
 			}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		default:
 			t.Fatalf("fixture: unknown scenario %q", text)
 		}
@@ -334,7 +334,7 @@ func TestRequestShapeHeaders(t *testing.T) {
 			Content:    []wireContentBlock{{Type: "text", Text: "hi"}},
 			StopReason: "end_turn",
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	t.Cleanup(srv.Close)
 	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
@@ -382,7 +382,9 @@ func TestRequestShapeToolsAndSchema(t *testing.T) {
 		t.Errorf("tool missing input_schema field: %v", tools[0])
 	}
 	var name string
-	json.Unmarshal(tools[0]["name"], &name)
+	if err := json.Unmarshal(tools[0]["name"], &name); err != nil {
+		t.Fatalf("unmarshal tool name: %v", err)
+	}
 	if name != "get_weather" {
 		t.Errorf("tool name = %q, want get_weather", name)
 	}
@@ -401,7 +403,7 @@ func TestRequestShapeInputExamplesBetaHeader(t *testing.T) {
 			Content:    []wireContentBlock{{Type: "text", Text: "hi"}},
 			StopReason: "end_turn",
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	t.Cleanup(srv.Close)
 	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
@@ -435,7 +437,7 @@ func TestRequestShapeNoInputExamplesNoBetaHeader(t *testing.T) {
 			Content:    []wireContentBlock{{Type: "text", Text: "hi"}},
 			StopReason: "end_turn",
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	t.Cleanup(srv.Close)
 	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
@@ -468,7 +470,7 @@ func TestRequestShapeInputExamplesBetaHeaderRespectsCallerOverride(t *testing.T)
 			Content:    []wireContentBlock{{Type: "text", Text: "hi"}},
 			StopReason: "end_turn",
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	t.Cleanup(srv.Close)
 	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
@@ -513,10 +515,16 @@ func TestRequestShapeToolChoiceModes(t *testing.T) {
 			t.Fatalf("Generate: %v", err)
 		}
 		var raw map[string]json.RawMessage
-		json.Unmarshal(fs.rawBody(), &raw)
+		if err := json.Unmarshal(fs.rawBody(), &raw); err != nil {
+			t.Fatalf("unmarshal request body: %v", err)
+		}
 		var got, want map[string]string
-		json.Unmarshal(raw["tool_choice"], &got)
-		json.Unmarshal([]byte(tc.want), &want)
+		if err := json.Unmarshal(raw["tool_choice"], &got); err != nil {
+			t.Fatalf("unmarshal tool_choice: %v", err)
+		}
+		if err := json.Unmarshal([]byte(tc.want), &want); err != nil {
+			t.Fatalf("unmarshal want: %v", err)
+		}
 		if got["type"] != want["type"] {
 			t.Errorf("mode %v: tool_choice = %v, want %v", tc.mode, got, want)
 		}
@@ -532,9 +540,13 @@ func TestRequestShapeToolChoiceModes(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 	var raw map[string]json.RawMessage
-	json.Unmarshal(fs.rawBody(), &raw)
+	if err := json.Unmarshal(fs.rawBody(), &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	var tc map[string]string
-	json.Unmarshal(raw["tool_choice"], &tc)
+	if err := json.Unmarshal(raw["tool_choice"], &tc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if tc["type"] != "tool" || tc["name"] != "get_weather" {
 		t.Errorf("tool_choice = %v, want {type:tool, name:get_weather}", tc)
 	}
@@ -549,7 +561,9 @@ func TestRequestShapeToolChoiceModes(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 	raw = nil
-	json.Unmarshal(fs.rawBody(), &raw)
+	if err := json.Unmarshal(fs.rawBody(), &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if _, ok := raw["tools"]; ok {
 		t.Errorf("request has tools field with ToolChoiceNone, want omitted: %s", fs.rawBody())
 	}
@@ -604,13 +618,21 @@ func TestRequestShapeToolResultBlock(t *testing.T) {
 	// Confirm is_error is present in the raw JSON (not merely a Go zero
 	// value that happens to match).
 	var raw map[string]json.RawMessage
-	json.Unmarshal(fs.rawBody(), &raw)
+	if err := json.Unmarshal(fs.rawBody(), &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	var msgs []json.RawMessage
-	json.Unmarshal(raw["messages"], &msgs)
+	if err := json.Unmarshal(raw["messages"], &msgs); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	var lastMsg map[string]json.RawMessage
-	json.Unmarshal(msgs[len(msgs)-1], &lastMsg)
+	if err := json.Unmarshal(msgs[len(msgs)-1], &lastMsg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	var blocks []map[string]json.RawMessage
-	json.Unmarshal(lastMsg["content"], &blocks)
+	if err := json.Unmarshal(lastMsg["content"], &blocks); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if _, ok := blocks[0]["is_error"]; !ok {
 		t.Errorf("raw tool_result block missing is_error key: %s", blocks[0])
 	}
@@ -650,9 +672,13 @@ func TestRequestShapeToolResultMultiModal(t *testing.T) {
 		t.Fatal(err)
 	}
 	var msgs []json.RawMessage
-	json.Unmarshal(raw["messages"], &msgs)
+	if err := json.Unmarshal(raw["messages"], &msgs); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	var lastMsg map[string]json.RawMessage
-	json.Unmarshal(msgs[len(msgs)-1], &lastMsg)
+	if err := json.Unmarshal(msgs[len(msgs)-1], &lastMsg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	var blocks []map[string]json.RawMessage
 	if err := json.Unmarshal(lastMsg["content"], &blocks); err != nil {
 		t.Fatal(err)
@@ -660,7 +686,9 @@ func TestRequestShapeToolResultMultiModal(t *testing.T) {
 	var toolResultBlock map[string]json.RawMessage
 	for _, b := range blocks {
 		var typ string
-		json.Unmarshal(b["type"], &typ)
+		if err := json.Unmarshal(b["type"], &typ); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
 		if typ == "tool_result" {
 			toolResultBlock = b
 			break
@@ -679,8 +707,12 @@ func TestRequestShapeToolResultMultiModal(t *testing.T) {
 	}
 
 	var textType, imageType string
-	json.Unmarshal(contentBlocks[0]["type"], &textType)
-	json.Unmarshal(contentBlocks[1]["type"], &imageType)
+	if err := json.Unmarshal(contentBlocks[0]["type"], &textType); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if err := json.Unmarshal(contentBlocks[1]["type"], &imageType); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if textType != "text" {
 		t.Errorf("contentBlocks[0].type = %q, want text", textType)
 	}
@@ -689,17 +721,27 @@ func TestRequestShapeToolResultMultiModal(t *testing.T) {
 	}
 
 	var text string
-	json.Unmarshal(contentBlocks[0]["text"], &text)
+	if err := json.Unmarshal(contentBlocks[0]["text"], &text); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if text != "here's a chart" {
 		t.Errorf("contentBlocks[0].text = %q", text)
 	}
 
 	var source map[string]json.RawMessage
-	json.Unmarshal(contentBlocks[1]["source"], &source)
+	if err := json.Unmarshal(contentBlocks[1]["source"], &source); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	var srcType, mediaType, data string
-	json.Unmarshal(source["type"], &srcType)
-	json.Unmarshal(source["media_type"], &mediaType)
-	json.Unmarshal(source["data"], &data)
+	if err := json.Unmarshal(source["type"], &srcType); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if err := json.Unmarshal(source["media_type"], &mediaType); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if err := json.Unmarshal(source["data"], &data); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if srcType != "base64" {
 		t.Errorf("source.type = %q, want base64", srcType)
 	}
@@ -1120,7 +1162,7 @@ func TestStreamEndsWithoutMessageStopButHasStopReason(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer sr.Close()
+	defer func() { _ = sr.Close() }()
 
 	var finishes []provider.FinishPart
 	for part := range sr.Parts() {
@@ -1160,7 +1202,7 @@ func TestStreamTruncatedBeforeStopReason(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer sr.Close()
+	defer func() { _ = sr.Close() }()
 
 	var finishes []provider.FinishPart
 	for part := range sr.Parts() {
@@ -1210,7 +1252,7 @@ func TestGenerateThinkingBlock(t *testing.T) {
 			Usage:      wireUsage{InputTokens: 10, OutputTokens: 5, CacheReadInputTokens: 3},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	t.Cleanup(srv.Close)
 	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
@@ -1254,7 +1296,7 @@ func TestGenerateRedactedThinkingBlock(t *testing.T) {
 			Usage:      wireUsage{InputTokens: 10, OutputTokens: 5},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	t.Cleanup(srv.Close)
 	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
@@ -1454,7 +1496,7 @@ func TestStreamThinkingBlock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer sr.Close()
+	defer func() { _ = sr.Close() }()
 
 	var deltas []provider.ReasoningDelta
 	var ends []provider.ReasoningEnd
