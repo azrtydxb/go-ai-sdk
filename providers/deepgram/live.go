@@ -68,6 +68,9 @@ func (m *streamingTranscriptionModel) StreamTranscribe(ctx context.Context, call
 	return &liveStream{stream: ws, readLoopDone: ws.Done()}, nil
 }
 
+// — the plain-text scheme is for test fixtures only; production dial URLs
+// use the TLS scheme.
+// nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket — test fixtures only
 // buildDialURL derives the wss:// (or ws://, for test fixtures) URL for
 // Deepgram's live-transcription endpoint from baseURL, deriving
 // encoding/sample_rate query params from call.MediaType/call.SampleRate and
