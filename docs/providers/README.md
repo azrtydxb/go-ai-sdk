@@ -4,13 +4,13 @@
 / `provider.EmbeddingModel` / `provider.ImageModel` / `provider.SpeechModel`
 / `provider.TranscriptionModel` / `provider.RerankingModel` interfaces,
 constructed from a per-provider package under [`providers/`](../../providers),
-39 in total. Eighteen of them (OpenAI, Azure, Groq, xAI, DeepSeek, Cerebras,
+40 in total. Eighteen of them (OpenAI, Azure, Groq, xAI, DeepSeek, Cerebras,
 Together, Fireworks, Perplexity, Moonshot, Qwen, MiniMax, DeepInfra, Hugging
 Face, Baseten, LM Studio, NVIDIA NIM, Vercel AI Gateway) share one
 implementation, [`internal/openaicompat`](../../internal/openaicompat),
 configured per provider by a `Config` preset; Google and Vertex AI share
-[`internal/geminicompat`](../../internal/geminicompat); Anthropic, Bedrock,
-Mistral, Cohere, ElevenLabs, fal, Replicate, Luma, Deepgram, LMNT, Hume,
+[`internal/geminicompat`](../../internal/geminicompat); OpenAI Codex,
+Anthropic, Bedrock, Mistral, Cohere, ElevenLabs, fal, Replicate, Luma, Deepgram, LMNT, Hume,
 AssemblyAI, Gladia, Rev.ai, Voyage, Mixedbread, Cartesia, Prodia, and Black
 Forest Labs are standalone implementations because their wire formats
 diverge too far from either shared base (or, for the media/rerank-only
@@ -34,6 +34,7 @@ caveat, see that provider's page
 | Provider                        | Chat & streaming | Tool calling     | Structured output     | Embeddings | Reranking | Images | Video | Speech (TTS) | Transcription (STT) |
 | ------------------------------- | ---------------- | ---------------- | --------------------- | ---------- | --------- | ------ | ----- | ------------ | ------------------- |
 | [OpenAI](openai.md)             | ✓                | ✓                | ✓ native              | ✓          | ✗         | ✓      | ✗     | ✓            | ✓ ⚠⁶ live           |
+| [OpenAI Codex](codex.md)        | ✓                | ✓                | ⚠⁵ tool-mode          | ✗          | ✗         | ✗      | ✗     | ✗            | ✗                   |
 | [Azure OpenAI](azure.md)        | ✓                | ✓                | ✓ native              | ✓          | ✗         | ✗      | ✗     | ✗            | ✗                   |
 | [Groq](groq.md)                 | ✓                | ✓                | ✓ native              | ✗          | ✗         | ✗      | ✗     | ✗            | ✓                   |
 | [xAI](xai.md)                   | ✓                | ✓                | ✓ native              | ✗          | ✗         | ✓ ⚠¹   | ✗     | ✗            | ✗                   |
@@ -138,6 +139,7 @@ for the full per-provider mapping table.
 | Provider                        | Env var                                                                               | Default base URL                                         | Auth                                                 |
 | ------------------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------------------- | ---------------------------------------------------- |
 | [OpenAI](openai.md)             | `OPENAI_API_KEY`                                                                      | `https://api.openai.com/v1`                              | `Authorization: Bearer`                              |
+| [OpenAI Codex](codex.md)        | OAuth credential (`codexauth.Credential`)                                             | `https://chatgpt.com/backend-api`                        | ChatGPT subscription `Authorization: Bearer`         |
 | [Azure OpenAI](azure.md)        | `AZURE_API_KEY` (+ `AZURE_RESOURCE_NAME`)                                             | derived from resource name                               | `api-key` header                                     |
 | [Groq](groq.md)                 | `GROQ_API_KEY`                                                                        | `https://api.groq.com/openai/v1`                         | `Authorization: Bearer`                              |
 | [xAI](xai.md)                   | `XAI_API_KEY`                                                                         | `https://api.x.ai/v1`                                    | `Authorization: Bearer`                              |
@@ -180,6 +182,7 @@ for the full per-provider mapping table.
 ## Provider pages
 
 - [OpenAI](openai.md) — the full preset: chat, embeddings, images, speech, transcription
+- [OpenAI Codex](codex.md) — ChatGPT Plus/Pro OAuth against the Codex backend
 - [Azure OpenAI](azure.md) — deployment names, `api-key` header, derived base URL
 - [Groq](groq.md) — chat + Whisper transcription, no embeddings/images
 - [xAI](xai.md) — chat + image generation; `size` rejected on images
@@ -221,7 +224,7 @@ for the full per-provider mapping table.
 
 ## Live-testing status
 
-Every provider in this SDK — all 39, including the nine media-only
+Every provider in this SDK — all 40, including the nine media-only
 providers added in wave 12 (fal, Replicate, Luma, Deepgram, LMNT, Hume,
 AssemblyAI, Gladia, Rev.ai) and the fourteen added in wave 13 (Moonshot,
 Qwen, MiniMax, DeepInfra, Hugging Face, Baseten, LM Studio, NVIDIA NIM,
@@ -229,7 +232,7 @@ Voyage, Mixedbread, Cartesia, Prodia, Black Forest Labs, Vercel AI Gateway)
 — is verified only against recorded, documented wire formats: unit tests
 run each provider's HTTP client against an `httptest` server that replays
 fixture request/response bodies shaped to match that provider's published
-API docs. **None of the 39 providers have been smoke-tested against a live
+API docs. **None of the 40 providers have been smoke-tested against a live
 upstream API yet.**
 
 The nine wave-12 media-only providers (fal, Replicate, Luma, Deepgram, LMNT,

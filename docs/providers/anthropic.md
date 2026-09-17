@@ -16,9 +16,44 @@ p := anthropic.New(
 model := p.Model("claude-sonnet-5")
 ```
 
-Every request is sent with two headers, not an `Authorization: Bearer`
-header: `x-api-key: <key>` and `anthropic-version: 2023-06-01` (a constant
-baked into the package, not configurable via an `Option`).
+By default, every request is sent with two headers, not an
+`Authorization: Bearer` header: `x-api-key: <key>` and
+`anthropic-version: 2023-06-01` (a constant baked into the package, not
+configurable via an `Option`).
+
+## Authentication
+
+`providers/anthropic` supports two distinct authentication modes:
+
+- **API key mode** — `anthropic.WithAPIKey`, defaulting to
+  `ANTHROPIC_API_KEY`, sends `x-api-key: <key>`.
+- **Claude Pro/Max OAuth mode** — `anthropic.WithOAuthTokenSource` sends
+  `Authorization: Bearer <access-token>` from a Claude subscription OAuth
+  token source and does not send `x-api-key`. OAuth requests also include the
+  Claude Code identity headers/betas (`x-app: cli`, `claude-code-20250219`,
+  `oauth-2025-04-20`) and prepend the Claude Code system identity, matching
+  Pi's direct Claude Pro/Max transport.
+
+`p.AuthMode()` returns `"api-key"` or `"oauth"` so diagnostics can clearly
+separate Anthropic API-key usage from Claude Pro/Max subscription OAuth usage.
+The OAuth helpers in `internal/anthropicauth` implement a PKCE browser flow
+against `https://claude.ai/oauth/authorize` and exchange/refresh tokens at
+`https://platform.claude.com/v1/oauth/token` using the Claude subscription
+scopes required for inference. They also expose `SaveCredentials` and
+`LoadCredentials` for JSON persistence with 0600 credential files and 0700
+created parent directories.
+
+```go
+import (
+	"github.com/azrtydxb/go-ai-sdk/internal/anthropicauth"
+	"github.com/azrtydxb/go-ai-sdk/providers/anthropic"
+)
+
+ts := anthropicauth.NewOAuthTokenSource()
+// Complete ts.CompletePKCE(ctx, prompter) in an interactive setup step.
+p := anthropic.New(anthropic.WithOAuthTokenSource(ts))
+model := p.Model("claude-sonnet-5")
+```
 
 ## Supported capabilities
 

@@ -63,6 +63,15 @@ func headerIsSet(headers map[string]string, key string) bool {
 }
 
 func (m *languageModel) doRequest(ctx context.Context, req messagesRequest, providerOptions map[string]any, headers map[string]string, tools []provider.ToolDef) (*http.Response, error) {
+	if m.provider.oauthTokenSource != nil {
+		const claudeCodeSystem = "You are Claude Code, Anthropic's official CLI for Claude."
+		if req.System == "" {
+			req.System = claudeCodeSystem
+		} else {
+			req.System = claudeCodeSystem + "\n\n" + req.System
+		}
+	}
+
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: marshal request: %w", err)
@@ -78,17 +87,43 @@ func (m *languageModel) doRequest(ctx context.Context, req messagesRequest, prov
 		return nil, fmt.Errorf("anthropic: build request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set(anthropicAuthHeader, m.provider.apiKey)
-	httpReq.Header.Set("anthropic-version", anthropicVersion)
-	// Auto-send the advanced-tool-use beta header when any tool carries
-	// InputExamples, so the wire.go-serialized "input_examples" field is
-	// accepted instead of 400ing. Only set when the caller hasn't already
-	// supplied their own anthropic-beta value via Call.Headers, so the
-	// override loop below always wins.
-	if callToolsNeedInputExamplesBeta(tools) && !headerIsSet(headers, "anthropic-beta") {
-		httpReq.Header.Set("anthropic-beta", toolInputExamplesBetaHeader)
+
+	// Choose auth method: OAuth Bearer token or API key.
+	if m.provider.oauthTokenSource != nil {
+		token, err := m.provider.oauthTokenSource.Token(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("anthropic: oauth token: %w", err)
+		}
+		httpReq.Header.Set("Authorization", "Bearer "+token)
+		httpReq.Header.Set("Accept", "application/json")
+		httpReq.Header.Set("User-Agent", "claude-cli/go-ai-sdk")
+		httpReq.Header.Set("x-app", "cli")
+	} else {
+		httpReq.Header.Set(anthropicAuthHeader, m.provider.apiKey)
 	}
-	httpheader.Apply(httpReq, headers, anthropicAuthHeader)
+	httpReq.Header.Set("anthropic-version", anthropicVersion)
+	// Auto-send beta headers when required. OAuth tokens need Claude Code
+	// identity betas; tools with InputExamples need the advanced-tool-use beta.
+	// Only set when the caller hasn't already supplied anthropic-beta via
+	// Call.Headers, so the override loop below always wins.
+	if !headerIsSet(headers, "anthropic-beta") {
+		var betas []string
+		if m.provider.oauthTokenSource != nil {
+			betas = append(betas, "claude-code-20250219", "oauth-2025-04-20")
+		}
+		if callToolsNeedInputExamplesBeta(tools) {
+			betas = append(betas, toolInputExamplesBetaHeader)
+		}
+		if len(betas) > 0 {
+			httpReq.Header.Set("anthropic-beta", strings.Join(betas, ","))
+		}
+	}
+	// For OAuth mode, also protect the Authorization header from override.
+	authHeader := anthropicAuthHeader
+	if m.provider.oauthTokenSource != nil {
+		authHeader = "Authorization"
+	}
+	httpheader.Apply(httpReq, headers, authHeader)
 
 	return m.provider.client().Do(httpReq)
 }

@@ -7,8 +7,8 @@
 An idiomatic Go port of the [Vercel AI SDK](https://sdk.vercel.ai): a single,
 provider-agnostic API for generating text, streaming text, generating
 structured objects, calling tools, computing embeddings, and generating
-images/speech/transcriptions across **39 providers** — OpenAI, Anthropic,
-Google (Gemini), Mistral, Cohere, Azure OpenAI, Vertex AI, Amazon Bedrock,
+images/speech/transcriptions across **40 providers** — OpenAI, OpenAI Codex,
+Anthropic, Google (Gemini), Mistral, Cohere, Azure OpenAI, Vertex AI, Amazon Bedrock,
 Groq, xAI, DeepSeek, ElevenLabs, Replicate, and the rest of the
 [full roster](docs/providers/README.md) — with the same concepts and naming
 as the TypeScript original, expressed in native Go (`context.Context`,
@@ -90,7 +90,7 @@ in [`examples/`](examples/), each compiled by CI.
 
 ## Status
 
-**v0.4.** The public API has reached **full parity with the AI SDK 6 core**
+**v0.5.** The public API has reached **full parity with the AI SDK 6 core**
 (see the migration guide's
 [AI SDK 6 delta](docs/migrating-from-vercel-ai-sdk.md#ai-sdk-6-delta) for
 the feature-by-feature record, and the
@@ -245,13 +245,14 @@ gained a leading `ctx context.Context` parameter and `ai.SpanInfo` gained
 
 <!-- Summarizes docs/providers/README.md's canonical capability matrix. Update all three together (README.md, docs/providers/README.md, docs/core/media.md). -->
 
-All 39 supported providers, by capability (✅ = supported · — = not exposed
+All 40 supported providers, by capability (✅ = supported · — = not exposed
 by this package · ⚠ = supported with a caveat, see that provider's page in
 [`docs/providers/`](docs/providers/)):
 
 | Provider                                       | Chat & streaming | Tool calling    | Structured output    | Embeddings | Reranking | Images | Video | Speech (TTS) | Transcription (STT) |
 | ---------------------------------------------- | ---------------- | --------------- | -------------------- | ---------- | --------- | ------ | ----- | ------------ | ------------------- |
 | [OpenAI](docs/providers/openai.md)             | ✅               | ✅              | ✅ native            | ✅         | —         | ✅     | —     | ✅           | ✅ ⚠ live           |
+| [OpenAI Codex](docs/providers/codex.md)        | ✅               | ✅              | ⚠ tool-mode          | —          | —         | —      | —     | —            | —                   |
 | [Azure OpenAI](docs/providers/azure.md)        | ✅               | ✅              | ✅ native            | ✅         | —         | —      | —     | —            | —                   |
 | [Groq](docs/providers/groq.md)                 | ✅               | ✅              | ✅ native            | —          | —         | —      | —     | —            | ✅                  |
 | [xAI](docs/providers/xai.md)                   | ✅               | ✅              | ✅ native            | —          | —         | ✅ ⚠   | —     | —            | —                   |
@@ -311,7 +312,7 @@ each provider's own page for the full detail.
 
 | Providers                                                                                                                                                                                | Notes                                                                                                                                                   |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OpenAI, Anthropic, Google (Gemini)                                                                                                                                                       | Three distinct wire formats prove the abstraction                                                                                                       |
+| OpenAI, OpenAI Codex, Anthropic, Google (Gemini)                                                                                                                                         | Direct API-key, subscription-OAuth, and Gemini/Claude wire formats prove the abstraction                                                                |
 | Groq, xAI, DeepSeek, Together, Fireworks, Cerebras, Perplexity, Moonshot, Qwen, MiniMax, DeepInfra, Hugging Face, Baseten, LM Studio, NVIDIA NIM, Vercel AI Gateway                      | Thin presets over the OpenAI-compatible base                                                                                                            |
 | Mistral, Cohere, Voyage, Mixedbread                                                                                                                                                      | Own APIs, full provider implementations (Voyage: embeddings + reranking; Mixedbread: reranking only)                                                    |
 | Azure OpenAI, Vertex AI, Amazon Bedrock                                                                                                                                                  | Platform auth: Azure (API-key preset over the OpenAI-compatible base), Vertex AI (Google service-account/ADC auth), Bedrock (AWS SigV4 request signing) |

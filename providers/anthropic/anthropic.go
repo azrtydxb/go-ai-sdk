@@ -19,12 +19,29 @@
 // ReasoningParts is sent back to the API on a later turn, this package
 // automatically reorders them to lead the message content, as the Messages
 // API requires.
+//
+// # Authentication
+//
+// This provider supports two mutually exclusive authentication modes:
+//
+//   - API key auth (default): uses the x-api-key header. Set via WithAPIKey
+//     or the AHTHROPIC_API_KEY environment variable. This is the standard
+//     pay-per-token Anthropic API access.
+//
+//   - Claude Pro/Max subscription OAuth: uses the Authorization: Bearer
+//     header with an access token obtained via PKCE OAuth from
+//     claude.ai. Set via WithOAuthTokenSource. This grants access using the
+//     user's Claude subscription, not a paid API key.
+//
+// The provider's AuthMode() method returns "api-key" or "oauth" to let
+// diagnostics and tooling distinguish between the two.
 package anthropic
 
 import (
 	"net/http"
 	"os"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/anthropicauth"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -39,6 +56,10 @@ type Provider struct {
 	apiKey     string
 	baseURL    string
 	httpClient *http.Client
+
+	// oauthTokenSource, when non-nil, is used instead of apiKey for
+	// authentication. It supplies Bearer tokens via PKCE OAuth.
+	oauthTokenSource anthropicauth.TokenSource
 }
 
 // Option configures a Provider.
@@ -59,6 +80,25 @@ func WithBaseURL(u string) Option {
 // WithHTTPClient overrides the *http.Client used for requests.
 func WithHTTPClient(c *http.Client) Option {
 	return func(p *Provider) { p.httpClient = c }
+}
+
+// WithOAuthTokenSource configures this Provider to use the given
+// anthropicauth.TokenSource for authentication instead of an API key.
+// When set, requests are sent with an Authorization: Bearer header
+// rather than an x-api-key header. Use this for Claude Pro/Max
+// subscription access obtained via PKCE OAuth from claude.ai.
+func WithOAuthTokenSource(ts anthropicauth.TokenSource) Option {
+	return func(p *Provider) { p.oauthTokenSource = ts }
+}
+
+// AuthMode returns the authentication mode used by this provider:
+// "api-key" when configured with an API key, "oauth" when configured
+// with a TokenSource.
+func (p *Provider) AuthMode() string {
+	if p.oauthTokenSource != nil {
+		return "oauth"
+	}
+	return "api-key"
 }
 
 // New creates a new Anthropic Provider.

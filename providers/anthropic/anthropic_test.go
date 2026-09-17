@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
+	"github.com/azrtydxb/go-ai-sdk/internal/anthropicauth"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 	"github.com/azrtydxb/go-ai-sdk/provider/providertest"
 )
@@ -1592,5 +1593,157 @@ func TestRequestShapeReasoningNeitherResolvesOmitsThinking(t *testing.T) {
 	}
 	if fs.lastRequest.Thinking != nil {
 		t.Errorf("Thinking = %+v, want nil", fs.lastRequest.Thinking)
+	}
+}
+
+// TestOAuthAuth_SendsBearerToken verifies that a Provider created with
+// WithOAuthTokenSource sends an Authorization: Bearer header instead of
+// x-api-key, and the token value is correct.
+func TestOAuthAuth_SendsBearerToken(t *testing.T) {
+	authSeen := ""
+	xApiKeySeen := ""
+	betaSeen := ""
+	userAgentSeen := ""
+	xAppSeen := ""
+	var reqBody messagesRequest
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authSeen = r.Header.Get("Authorization")
+		xApiKeySeen = r.Header.Get("x-api-key")
+		betaSeen = r.Header.Get("anthropic-beta")
+		userAgentSeen = r.Header.Get("User-Agent")
+		xAppSeen = r.Header.Get("x-app")
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		if err := json.Unmarshal(body, &reqBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+
+		// Return a minimal successful response.
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"msg-1","type":"message","role":"assistant",
+			"content":[{"type":"text","text":"ok"}],
+			"model":"claude-test","stop_reason":"end_turn","stop_sequence":null,
+			"usage":{"input_tokens":5,"output_tokens":3}
+		}`))
+	}))
+	defer srv.Close()
+
+	// Use a static token source so no real OAuth flow is needed.
+	ts := anthropicauth.StaticTokenSource("test-bearer-token")
+	model := New(WithOAuthTokenSource(ts), WithBaseURL(srv.URL)).Model("claude-test")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{provider.UserText("hello")},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	if authSeen == "" {
+		t.Fatal("fixture: missing Authorization header")
+	}
+	if authSeen != "Bearer test-bearer-token" {
+		t.Errorf("Authorization = %q, want Bearer test-bearer-token", authSeen)
+	}
+	if xApiKeySeen != "" {
+		t.Errorf("unexpected x-api-key = %q (OAuth should not send it)", xApiKeySeen)
+	}
+	if !strings.Contains(betaSeen, "claude-code-20250219") || !strings.Contains(betaSeen, "oauth-2025-04-20") {
+		t.Errorf("anthropic-beta = %q, want Claude Code OAuth betas", betaSeen)
+	}
+	if !strings.HasPrefix(userAgentSeen, "claude-cli/") {
+		t.Errorf("User-Agent = %q, want claude-cli/*", userAgentSeen)
+	}
+	if xAppSeen != "cli" {
+		t.Errorf("x-app = %q, want cli", xAppSeen)
+	}
+	if !strings.Contains(reqBody.System, "You are Claude Code") {
+		t.Errorf("system = %q, want Claude Code identity", reqBody.System)
+	}
+}
+
+// refreshingTokenSource is a TokenSource that returns a configurable token
+// on each call, allowing tests to verify that the provider calls Token()
+// every time it makes a request.
+type refreshingTokenSource struct {
+	mu        sync.Mutex
+	nextToken string
+}
+
+// Token returns the next token, calling the underlying provider's
+// Token method. It does not cache — every call returns whatever was set
+// via SetNextToken.
+func (s *refreshingTokenSource) Token(context.Context) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.nextToken, nil
+}
+
+// SetNextToken sets the value that the next Token() call will return.
+func (s *refreshingTokenSource) SetNextToken(tok string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.nextToken = tok
+}
+
+// TestOAuthAuth_TokenRefreshOnExpiry verifies that the provider calls
+// TokenSource.Token() on every API request, so a refreshed token is always
+// used.
+func TestOAuthAuth_TokenRefreshOnExpiry(t *testing.T) {
+	ts := &refreshingTokenSource{}
+	var lastToken string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lastToken = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		_, _ = w.Write([]byte(`{
+			"id":"msg-1","type":"message","role":"assistant",
+			"content":[{"type":"text","text":"ok"}],
+			"model":"claude-test","stop_reason":"end_turn","stop_sequence":null,
+			"usage":{"input_tokens":5,"output_tokens":3}
+		}`))
+	}))
+	defer srv.Close()
+
+	model := New(WithOAuthTokenSource(ts), WithBaseURL(srv.URL)).Model("claude-test")
+
+	// First call uses token1.
+	ts.SetNextToken("token1")
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{provider.UserText("hello")},
+	})
+	if err != nil {
+		t.Fatalf("Generate #1: %v", err)
+	}
+	if lastToken != "token1" {
+		t.Errorf("first call: last token = %q, want token1", lastToken)
+	}
+
+	// Second call uses token2.
+	ts.SetNextToken("token2")
+	_, err = model.Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{provider.UserText("world")},
+	})
+	if err != nil {
+		t.Fatalf("Generate #2: %v", err)
+	}
+	if lastToken != "token2" {
+		t.Errorf("second call: last token = %q, want token2", lastToken)
+	}
+}
+
+// TestAuthProviderMode verifies the AuthMode diagnostics method.
+func TestAuthProviderMode(t *testing.T) {
+	p1 := New(WithAPIKey("k"))
+	if got := p1.AuthMode(); got != "api-key" {
+		t.Errorf("AuthMode with API key = %q, want api-key", got)
+	}
+
+	p2 := New(WithOAuthTokenSource(anthropicauth.StaticTokenSource("tok")))
+	if got := p2.AuthMode(); got != "oauth" {
+		t.Errorf("AuthMode with OAuth = %q, want oauth", got)
 	}
 }

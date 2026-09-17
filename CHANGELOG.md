@@ -8,6 +8,42 @@ once it reaches 1.0.
 
 ## [Unreleased]
 
+## v0.5.0 (2026-09-17)
+
+Adds direct subscription-auth providers for OpenAI Codex/ChatGPT Plus-Pro
+and Claude Pro/Max, implemented against the same OAuth and backend transport
+shapes used by Pi rather than delegating to the `codex` or `claude` CLIs.
+
+### Added
+
+- **OpenAI Codex / ChatGPT subscription provider.** New `providers/codex`,
+  `internal/codexauth`, and `internal/codextransport` implement PKCE browser
+  login, device-code login, token refresh, restrictive credential persistence,
+  and direct `POST https://chatgpt.com/backend-api/codex/responses` requests
+  with the required `Authorization`, `chatgpt-account-id`, `originator`,
+  `OpenAI-Beta`, and `User-Agent` headers.
+- **Claude Pro/Max OAuth for Anthropic.** New `internal/anthropicauth` and
+  `anthropic.WithOAuthTokenSource` support direct PKCE login and refresh
+  against `claude.ai` / `platform.claude.com`, keeping subscription OAuth
+  credentials separate from Anthropic API-key credentials and exposing
+  `Provider.AuthMode()` diagnostics.
+- Provider docs for `providers/codex`, plus Anthropic docs for the new OAuth
+  mode and 0600/0700 credential persistence helpers.
+
+### Changed
+
+- Anthropic OAuth requests now use Claude Code OAuth identity headers/betas and
+  system identity, matching Pi's direct Claude Pro/Max transport.
+- Codex streaming now accepts Pi/OpenAI Responses event shapes such as
+  `response.output_text.delta`, `response.function_call_arguments.*`, and
+  nested `response.completed.response` usage/status payloads.
+
+### Security
+
+- OAuth credential stores write files with mode `0600` and create parent
+  directories with mode `0700`; no implementation shells out to `codex` or
+  `claude`, reads `~/.codex` / `~/.claude`, or scrapes browser cookies.
+
 ## v0.4.1 (2026-08-14)
 
 A repo-wide de-duplication and simplification pass (ponytail audit):
@@ -891,13 +927,12 @@ OnInputDelta, OnInputAvailable})`, mirroring the Vercel AI SDK v6's
 
 **Wave 9**
 
-- `GenerateTextOpts`/`provider.Call`: first-class `TopK`, `PresencePenalty`,
-  `FrequencyPenalty`, and `Seed` sampling settings, threaded through to
-  every language-model request path (per-provider support and wire-name
-  mapping documented on each field), plus `Headers` for per-call extra HTTP
+- GenerateTextOpts / provider.Call: first-class TopK, PresencePenalty,
+  FrequencyPenalty, and Seed sampling settings, threaded through to every
+  language-model request path (per-provider support and wire-name mapping
+  documented on each field), plus Headers for per-call extra HTTP
   headers (applied after — and never overriding — each provider's own
-  auth header(s); SigV4-signed for Bedrock when the key starts with
-  `x-amz-`).
+  auth header(s); SigV4-signed for Bedrock when the key starts with x-amz-).
 - `ai.HasToolCall(names ...string)` and `ai.LoopFinished()`: two more
   ready-made `StopWhen` helpers alongside `ai.StepCountIs`.
 - `GenerateTextOpts.OnAbort`: fires exactly once per `TextStream` when the
@@ -908,8 +943,8 @@ OnInputDelta, OnInputAvailable})`, mirroring the Vercel AI SDK v6's
   return text plus one or more `provider.GeneratedImage`s. Serialized
   natively by anthropic and bedrock; text-projected (images dropped) by
   openaicompat-based providers, geminicompat, cohere, and mistral.
-- `ai.ExtractJSONMiddleware`: strips markdown code fences (` ```json `)
-  from a model's text output, both `Generate` and incrementally in
+- `ai.ExtractJSONMiddleware`: strips markdown JSON code fences from a
+  model's text output, both `Generate` and incrementally in
   `Stream`, reusing `GenerateObject`'s fence-stripping rule.
 - `ai.WrapImageModel`: the `provider.ImageModel` counterpart to
   `ai.WrapModel` — a one-line naming hook for image-model middleware.
