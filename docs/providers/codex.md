@@ -10,13 +10,12 @@ import (
 	"context"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
-	"github.com/azrtydxb/go-ai-sdk/internal/codexauth"
 	"github.com/azrtydxb/go-ai-sdk/providers/codex"
 )
 
-// Complete login out-of-band with codexauth.StartBrowserLogin or
-// codexauth.LoginDevice, then pass the resulting credential to the provider.
-cred := codexauth.Credential{
+// Complete auth.Login(ctx, "codex", client, interaction) during setup,
+// securely persist the result, then load the credential for requests.
+cred := codex.Credential{
 	Access:    "eyJ...",
 	Refresh:   "...",
 	AccountID: "acct_...",
@@ -33,23 +32,35 @@ result, err := ai.GenerateText(context.Background(), ai.GenerateTextOpts{
 
 ## Authentication
 
-The auth helpers live in `internal/codexauth` because token acquisition and
-refresh are SDK internals, not OpenAI API-key auth:
+Import `github.com/azrtydxb/go-ai-sdk/auth` for the public browser-login API:
 
-- `StartBrowserLogin` builds a PKCE authorization URL for
-  `https://auth.openai.com/oauth/authorize` and validates the local callback.
-- `ExchangeAuthorizationCode` exchanges the code at
-  `https://auth.openai.com/oauth/token`.
-- `StartDeviceCode` and `LoginDevice` implement the headless device-code flow
-  using OpenAI's Codex device endpoints.
-- `RefreshToken` refreshes access tokens and re-extracts the ChatGPT account
-  ID from the access-token JWT claim
-  `https://api.openai.com/auth.chatgpt_account_id`.
+- `auth.Login(ctx, "codex", client, interaction)` reuses the SDK's PKCE flow
+  and validates state before exchanging a code. The callback is fixed at
+  `http://localhost:1455/auth/callback`, bound only to IPv4 loopback.
+- `auth.Interaction` supplies `OpenURL` and optional `Prompt` callbacks.
+  Manual input must include state: a full callback URL or `code#state`.
+  Both callbacks must respect context cancellation. Browser completion
+  cancels and joins the losing prompt. Login is bounded to five minutes or
+  the caller's earlier deadline.
+- If the callback port is unavailable, a supplied `Prompt` still allows
+  state-validated manual login. Callback-only login fails immediately with a
+  safe listener-unavailable error. State-validated provider denial callbacks
+  end login promptly; invalid-state callbacks are ignored.
+- `auth.Refresh(ctx, "codex", client, current)` returns updated access and
+  refresh tokens, expiry, and account ID for caller persistence.
+- A nil HTTP client uses `http.DefaultClient`. Public auth errors omit raw
+  endpoint bodies and interaction errors; cancellation remains identifiable.
 
-The credential shape is `{access, refresh, expires, accountId}` and is kept
-separate from `providers/openai` API-key configuration. `SaveCredential` and
-`LoadCredential` provide a minimal JSON auth-store abstraction; saved files use
-0600 permissions and created parent directories use 0700 permissions.
+The public credential fields are `Access`, `Refresh`, `Expires`, and
+`AccountID`. The SDK does not log or persist them through this API. The caller
+owns secure storage and must persist rotated refresh tokens. Device login is
+not exposed by this facade.
+
+`codex.WithCredentials(codex.Credential(creds))` configures a fixed snapshot.
+For app-managed refresh, use `codex.WithCredentialSource(source)`: the source
+is invoked on every Generate and Stream call, even on an already-created
+model, and takes precedence over the fixed snapshot. The caller must make
+the source concurrency-safe and handle refresh and persistence there.
 
 ## Request shape
 
@@ -81,3 +92,6 @@ protected from override.
 The package tests use fake HTTP/SSE servers for OAuth token exchange, refresh,
 device polling, header verification, and streaming parse behavior. They do not
 contact OpenAI and do not require real subscription credentials.
+Behavior tests use isolated ephemeral loopback listeners while verifying that
+the registered production redirect remains unchanged. Public consumer tests
+use manual input and fake token transports without requiring a free fixed port.

@@ -26,6 +26,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/azrtydxb/go-ai-sdk/internal/oauthflow"
 )
 
 // ---------------------------------------------------------------------------
@@ -217,17 +219,27 @@ var errNoRefreshToken = errors.New("anthropicauth: no refresh token — call Com
 // The interaction argument supplies the browser-open and prompt capabilities.
 // Returns the Credentials (access, refresh, expires) on success.
 func (t *OAuthTokenSource) CompletePKCE(ctx context.Context, inter *Interaction) (*Credentials, error) {
+	ctx, stop := context.WithTimeout(ctx, 5*time.Minute)
+	defer stop()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if inter == nil {
+		return nil, errors.New("anthropicauth: interaction required")
+	}
 	verifier, challenge := generatePKCE()
+	expectedState, _ := generatePKCE()
 
 	// Start the callback server.
-	srv, authURL, cancel, err := startCallbackServer(verifier, challenge)
-	if err != nil {
-		return nil, fmt.Errorf("anthropicauth: start callback server: %w", err)
+	srv, authURL, cancel, err := startCallbackServer(expectedState, challenge)
+	var results <-chan oauthflow.Result
+	if err != nil && inter.Prompt == nil {
+		return nil, oauthflow.ErrCallbackUnavailable
 	}
-	defer func() {
-		cancel()
-		_ = srv.server.Close()
-	}()
+	if err == nil {
+		defer cancel()
+		results = srv.resultCh
+	}
 
 	// Open browser to authorize URL.
 	if inter.OpenURL != nil {
@@ -241,40 +253,14 @@ func (t *OAuthTokenSource) CompletePKCE(ctx context.Context, inter *Interaction)
 		fmt.Fprintf(inter.Stderr(), "anthropicauth: please complete login in your browser.\nWaiting for callback on %s\n", authURL)
 	}
 
-	// Wait for the OAuth callback or manual code input.
-	var code, state string
-
-	if inter.Prompt != nil {
-		promptMsg := fmt.Sprintf("anthropicauth: complete login in your browser, or paste the authorization code here:\n%s", authURL)
-		input, err := inter.Prompt(ctx, promptMsg)
-		if err != nil {
-			cancel()
-			return nil, fmt.Errorf("anthropicauth: prompt: %w", err)
-		}
-		if input != "" {
-			code, state = parseAuthInput(input, verifier)
-		}
-	}
-
-	// If no code yet, wait for the callback server.
-	if code == "" {
-		result, err := srv.waitForCode(ctx)
-		if err != nil {
-			cancel()
-			return nil, fmt.Errorf("anthropicauth: wait for callback: %w", err)
-		}
-		code, state = result.Code, result.State
-	}
-
-	if code == "" {
-		return nil, errors.New("anthropicauth: missing authorization code")
-	}
-	if state == "" {
-		state = verifier
+	result, err := oauthflow.Wait(ctx, results, inter.Prompt,
+		"Paste the full callback URL or code#state:\n"+authURL, expectedState)
+	if err != nil {
+		return nil, err
 	}
 
 	// Exchange the authorization code for tokens.
-	creds, err := t.exchangeCode(ctx, code, state, verifier, challenge)
+	creds, err := t.exchangeCode(ctx, result.Code, result.State, verifier, challenge)
 	if err != nil {
 		return nil, fmt.Errorf("anthropicauth: exchange code: %w", err)
 	}
@@ -283,31 +269,9 @@ func (t *OAuthTokenSource) CompletePKCE(ctx context.Context, inter *Interaction)
 
 // parseAuthInput tries to extract the authorization code from user input.
 // The input may be a plain code, a redirect URL, or a URL with #fragment.
-func parseAuthInput(input, expectedState string) (code, state string) {
-	input = strings.TrimSpace(input)
-	if input == "" {
-		return "", ""
-	}
-
-	// Try as URL
-	if u, err := url.Parse(input); err == nil && u.Host != "" {
-		return u.Query().Get("code"), u.Query().Get("state")
-	}
-
-	// Try fragment: code#state
-	if idx := strings.Index(input, "#"); idx >= 0 {
-		return strings.TrimSpace(input[:idx]), strings.TrimSpace(input[idx+1:])
-	}
-
-	// Try query: code=xxx&state=yyy
-	if strings.Contains(input, "code=") {
-		if parsed, err := url.ParseQuery(input); err == nil {
-			return parsed.Get("code"), parsed.Get("state")
-		}
-	}
-
-	// Assume plain code
-	return input, ""
+func parseAuthInput(input, _ string) (code, state string) {
+	result := oauthflow.Parse(input)
+	return result.Code, result.State
 }
 
 // exchangeCode performs the token exchange: POST to the token endpoint with
@@ -437,10 +401,7 @@ func (t *OAuthTokenSource) doRefresh(ctx context.Context) (string, error) {
 // Callback server
 // ---------------------------------------------------------------------------
 
-type callbackResult struct {
-	Code  string
-	State string
-}
+type callbackResult = oauthflow.Result
 
 type callbackServer struct {
 	server   *http.Server
@@ -456,43 +417,13 @@ func (cs *callbackServer) waitForCode(ctx context.Context) (*callbackResult, err
 	}
 }
 
+var listenCallback = net.Listen
+
 func startCallbackServer(expectedState, challenge string) (*callbackServer, string, func(), error) {
 	resultCh := make(chan callbackResult, 1)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc(callbackPath, func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		if err := q.Get("error"); err != "" {
-			http.Error(w, "auth error: "+err, http.StatusBadRequest)
-			return
-		}
-		code := q.Get("code")
-		state := q.Get("state")
-		if code == "" || state == "" {
-			http.Error(w, "missing code or state", http.StatusBadRequest)
-			return
-		}
-		if state != expectedState {
-			http.Error(w, "state mismatch", http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte("<html><body><h1>Auth successful</h1><p>You can close this window.</p></body></html>"))
-		select {
-		case resultCh <- callbackResult{Code: code, State: state}:
-		default:
-		}
-	})
-
-	ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", callbackHost, callbackPort))
-	if err != nil {
-		return nil, "", nil, fmt.Errorf("anthropicauth: listen: %w", err)
-	}
-
-	srv := &http.Server{Handler: mux}
-	go func() {
-		_ = srv.Serve(ln)
-	}()
+	mux.HandleFunc(callbackPath, oauthflow.Handler(expectedState, resultCh))
 
 	// Build the authorize URL.
 	authParams := url.Values{}
@@ -505,9 +436,18 @@ func startCallbackServer(expectedState, challenge string) (*callbackServer, stri
 	authParams.Set("code_challenge_method", "S256")
 
 	authURL := authorizeURL + "?" + authParams.Encode()
+	ln, err := listenCallback("tcp", fmt.Sprintf("%s:%d", callbackHost, callbackPort))
+	if err != nil {
+		return nil, authURL, nil, err
+	}
+	srv := &http.Server{Addr: ln.Addr().String(), Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	done := make(chan struct{})
+	go func() { defer close(done); _ = srv.Serve(ln) }()
 
 	cancel := func() {
 		_ = srv.Close()
+		_ = ln.Close()
+		<-done
 	}
 	return &callbackServer{server: srv, resultCh: resultCh}, authURL, cancel, nil
 }
@@ -528,7 +468,8 @@ type Interaction struct {
 
 	// Prompt is called when the user cannot complete the login via browser
 	// (e.g. headless). It should return the authorization code or full
-	// redirect URL. If nil, only the browser callback path is supported.
+	// redirect URL including state, or code#state. It must return when ctx is
+	// canceled. If nil, only the browser callback path is supported.
 	Prompt func(ctx context.Context, message string) (string, error)
 }
 

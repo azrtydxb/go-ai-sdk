@@ -36,23 +36,47 @@ configurable via an `Option`).
 
 `p.AuthMode()` returns `"api-key"` or `"oauth"` so diagnostics can clearly
 separate Anthropic API-key usage from Claude Pro/Max subscription OAuth usage.
-The OAuth helpers in `internal/anthropicauth` implement a PKCE browser flow
-against `https://claude.ai/oauth/authorize` and exchange/refresh tokens at
-`https://platform.claude.com/v1/oauth/token` using the Claude subscription
-scopes required for inference. They also expose `SaveCredentials` and
-`LoadCredentials` for JSON persistence with 0600 credential files and 0700
-created parent directories.
+OAuth authentication does not guarantee included plan usage. Current
+[Pi documentation](https://github.com/earendil-works/pi/blob/46c9de402bddf46b03c3b9f46487b777aaa41861/packages/coding-agent/docs/providers.md)
+states that third-party harness usage draws from paid extra usage, not included
+Claude Pro/Max limits. Verify the provider's terms and account usage settings.
+The public `github.com/azrtydxb/go-ai-sdk/auth` package reuses the SDK's PKCE
+browser flow against `https://claude.ai/oauth/authorize` and exchange/refresh
+at `https://platform.claude.com/v1/oauth/token`. Call
+`auth.Login(ctx, "anthropic", client, interaction)` during setup, and
+`auth.Refresh(ctx, "anthropic", client, current)` when refreshing. Both return
+credential snapshots for caller-owned secure storage; neither writes files
+or accesses a keyring. Persist rotated refresh tokens and never log credentials.
+
+The callback is fixed at `http://localhost:53692/callback`, bound to IPv4
+loopback. Browser and manual input race; manual input must include the
+independent OAuth state as a full callback URL or `code#state`. Interaction
+callbacks must honor cancellation, and a successful browser callback cancels
+and joins the losing prompt. Login is bounded to five minutes or the caller's
+shorter deadline. Public errors omit raw endpoint bodies and interaction
+errors; cancellation remains identifiable. If the callback port is unavailable,
+a supplied `Prompt` still permits state-validated manual login; callback-only
+login fails immediately with a safe listener-unavailable error. Valid-state
+provider denial callbacks end login promptly, while invalid-state callbacks
+cannot terminate a legitimate login. Tests use fake transports and isolated
+ephemeral loopback listeners, not real credentials or fixed-port fixtures.
 
 ```go
 import (
-	"github.com/azrtydxb/go-ai-sdk/internal/anthropicauth"
+	"context"
+
 	"github.com/azrtydxb/go-ai-sdk/providers/anthropic"
 )
 
-ts := anthropicauth.NewOAuthTokenSource()
-// Complete ts.CompletePKCE(ctx, prompter) in an interactive setup step.
-p := anthropic.New(anthropic.WithOAuthTokenSource(ts))
-model := p.Model("claude-sonnet-5")
+// Implement this shape in the application to load, refresh, and securely
+// persist credentials. WithOAuthTokenSource accepts it without internal imports.
+type tokenSource func(context.Context) (string, error)
+
+func (f tokenSource) Token(ctx context.Context) (string, error) { return f(ctx) }
+
+func oauthProvider(loadToken tokenSource) *anthropic.Provider {
+	return anthropic.New(anthropic.WithOAuthTokenSource(loadToken))
+}
 ```
 
 ## Supported capabilities

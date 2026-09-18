@@ -418,14 +418,14 @@ func TestCallbackServer(t *testing.T) {
 }
 
 func TestCallbackServer_StateMismatch(t *testing.T) {
-	_, _, closeFn, err := startCallbackServer("correct-state", "challenge")
+	srv, _, closeFn, err := startCallbackServer("correct-state", "challenge")
 	if err != nil {
 		t.Fatalf("startCallbackServer: %v", err)
 	}
 	defer closeFn()
 
 	callbackURL := fmt.Sprintf("http://%s%s?code=test-code&state=wrong-state",
-		"127.0.0.1:53692", callbackPath)
+		srv.server.Addr, callbackPath)
 
 	resp, err := http.Get(callbackURL)
 	if err != nil {
