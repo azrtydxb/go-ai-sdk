@@ -49,6 +49,33 @@ if err != nil {
 process's `os.Stderr`. `client.Close` closes the child's stdin, waits
 briefly for it to exit on its own, and kills it if it hasn't.
 
+For explicit environment, working directory, stderr, and lifetime control:
+
+```go
+transport, err := mcp.NewStdioTransportWithOptions(ctx,
+	[]string{"/absolute/path/to/my-mcp-server", "--flag"},
+	mcp.StdioOptions{
+		Env: map[string]string{"MCP_TOKEN": "server-scoped-token"},
+		Dir: "/path/to/project",
+	},
+)
+```
+
+This constructor returns `(mcp.Transport, error)`. By default it does not
+inherit the parent environment and discards stderr. `InheritEnv: true` opts
+into inheritance; explicit `Env` entries override inherited entries. Set
+`Stderr` to an `io.Writer` to capture diagnostics (the writer must not block
+indefinitely). An empty `Dir` uses the caller's working directory. Context
+cancellation kills and reaps the direct child and closes the transport;
+`Close` waits for cleanup and can be called concurrently or repeatedly.
+Always defer transport/client Close, including when initialization fails.
+
+Both constructors execute trusted argv directly, not through a shell, and
+start the process immediately. Validate/authorize configuration before calling.
+Use an absolute executable path to avoid Go's parent-PATH executable lookup.
+Environment scoping and `Dir` are not a filesystem or process-tree sandbox.
+The original constructor retains its inherited environment and `os.Stderr` behavior.
+
 ## Client walkthrough: Streamable HTTP
 
 The Streamable HTTP transport POSTs each JSON-RPC message and reads the

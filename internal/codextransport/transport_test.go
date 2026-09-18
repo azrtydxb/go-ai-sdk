@@ -43,6 +43,32 @@ func testCred(accountID string) codexauth.Credential {
 
 var fakeTime = time.Now().Add(24 * time.Hour)
 
+func TestReasoningEffortFallback(t *testing.T) {
+	for _, reasoning := range []*provider.ReasoningConfig{nil, {}, {Effort: "max"}} {
+		for _, stream := range []bool{false, true} {
+			m := NewModelWithOptions(Config{Credential: testCred("account"), ModelID: "test", ReasoningEffort: "low"}).(*languageModel)
+			req, err := m.buildRequest(t.Context(), provider.Call{Reasoning: reasoning}, stream)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var body struct {
+				Reasoning struct{ Effort, Summary string }
+			}
+			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			_ = req.Body.Close()
+			want := "low"
+			if reasoning != nil && reasoning.Effort != "" {
+				want = reasoning.Effort
+			}
+			if body.Reasoning.Effort != want || body.Reasoning.Summary != "auto" {
+				t.Fatalf("reasoning=%+v, want effort %q with existing summary", body.Reasoning, want)
+			}
+		}
+	}
+}
+
 // sseFixtureServer creates an httptest.Server that responds with the
 // given raw SSE events (already JSON-encoded). The events must follow
 // the format "data: <event>\n\n".

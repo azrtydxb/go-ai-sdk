@@ -9,8 +9,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -583,5 +586,192 @@ func TestFramedTransportCloseJoinsErrors(t *testing.T) {
 	err := tr.Close()
 	if !errors.Is(err, werr) || !errors.Is(err, cerr) {
 		t.Fatalf("Close() = %v, want both werr and cerr via errors.Is", err)
+	}
+}
+
+// TestStdioOptionsHelper runs only in a child copy of this test binary.
+func TestStdioOptionsHelper(t *testing.T) {
+	helper := false
+	for _, arg := range os.Args {
+		if arg == "sdk-stdio-helper" {
+			helper = true
+		}
+	}
+	if !helper {
+		return
+	}
+	dir, err := os.Getwd()
+	if err != nil {
+		os.Exit(2)
+	}
+	_, _ = fmt.Fprint(os.Stderr, "helper stderr\n")
+	args := os.Args
+	for i, arg := range args {
+		if arg == "--" {
+			args = args[i+1:]
+			break
+		}
+	}
+	_ = json.NewEncoder(os.Stdout).Encode(struct {
+		PID    int
+		Dir    string
+		Secret string
+		Scoped string
+		Args   []string
+	}{os.Getpid(), dir, os.Getenv("SDK_SYNTHETIC_SECRET"), os.Getenv("SDK_SCOPED"), args})
+	if os.Getenv("SDK_STDIO_STUBBORN") == "1" {
+		for {
+			time.Sleep(time.Hour)
+		}
+	}
+	_, _ = io.Copy(os.Stdout, os.Stdin)
+	os.Exit(0)
+}
+
+func TestStdioOptions(t *testing.T) {
+	t.Setenv("SDK_SYNTHETIC_SECRET", "must-not-leak")
+	t.Setenv("SDK_SCOPED", "parent")
+	parentStderr, err := os.CreateTemp(t.TempDir(), "stderr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer parentStderr.Close()
+	originalStderr := os.Stderr
+	os.Stderr = parentStderr
+	defer func() { os.Stderr = originalStderr }()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"zero", "isolated", "inherit", "legacy", "cancel", "close", "cancel-close"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			dir := t.TempDir()
+			var stderr bytes.Buffer
+			opts := StdioOptions{Env: map[string]string{"SDK_STDIO_HELPER": "1", "SDK_SCOPED": "child", "GORACE": "atexit_sleep_ms=0"}, Dir: dir}
+			if mode == "zero" {
+				opts = StdioOptions{}
+			}
+			if mode == "inherit" {
+				opts.InheritEnv = true
+				opts.Stderr = &stderr
+			}
+			if mode == "cancel" || mode == "close" || mode == "cancel-close" {
+				opts.Env["SDK_STDIO_STUBBORN"] = "1"
+			}
+			args := []string{"sdk-stdio-helper", "literal space", "$(exit 99)", "; exit 99", "*"}
+			command := append([]string{exe, "-test.run=^TestStdioOptionsHelper$", "--"}, args...)
+			var tr Transport
+			if mode == "legacy" {
+				tr, err = NewStdioTransport(command, []string{"SDK_STDIO_HELPER=1", "SDK_SCOPED=child", "GORACE=atexit_sleep_ms=0"})
+			} else {
+				tr, err = NewStdioTransportWithOptions(ctx, command, opts)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tr.Close()
+			receiveCtx, receiveCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer receiveCancel()
+			raw, err := tr.Receive(receiveCtx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var report struct {
+				PID                 int
+				Dir, Secret, Scoped string
+				Args                []string
+			}
+			if err := json.Unmarshal(raw, &report); err != nil {
+				t.Fatal(err)
+			}
+			wantSecret := ""
+			if mode == "inherit" || mode == "legacy" {
+				wantSecret = "must-not-leak"
+			}
+			wantScoped := "child"
+			if mode == "zero" {
+				wantScoped = ""
+			}
+			if report.Secret != wantSecret || report.Scoped != wantScoped {
+				t.Fatalf("environment: %+v", report)
+			}
+			wantDir := dir
+			if mode == "legacy" || mode == "zero" {
+				wantDir, _ = os.Getwd()
+			}
+			wantDir, err = filepath.EvalSymlinks(wantDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if report.Dir != wantDir {
+				t.Fatalf("cwd=%q, want %q", report.Dir, wantDir)
+			}
+			if !reflect.DeepEqual(report.Args, args) {
+				t.Fatalf("argv=%q, want %q", report.Args, args)
+			}
+			if mode == "cancel" {
+				cancel()
+				select {
+				case <-tr.(*framedTransport).closed:
+				case <-receiveCtx.Done():
+					t.Fatal("cancel did not close transport")
+				}
+			}
+			var wg sync.WaitGroup
+			for range 8 {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					if mode == "cancel-close" {
+						cancel()
+					}
+					_ = tr.Close()
+				}()
+			}
+			closed := make(chan struct{})
+			go func() { wg.Wait(); close(closed) }()
+			select {
+			case <-closed:
+			case <-receiveCtx.Done():
+				t.Fatal("Close did not join cleanup")
+			}
+			// The transport has already reaped the child: a second wait must fail.
+			proc, err := os.FindProcess(report.PID)
+			if err == nil {
+				_, err = proc.Wait()
+				if !errors.Is(err, syscall.ECHILD) && !errors.Is(err, os.ErrProcessDone) {
+					t.Fatalf("child not reaped: %v", err)
+				}
+			}
+			if mode == "inherit" && stderr.String() != "helper stderr\n" {
+				t.Fatalf("stderr=%q", stderr.String())
+			}
+		})
+	}
+	data, err := os.ReadFile(parentStderr.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "helper stderr\n" {
+		t.Fatalf("parent stderr=%q, want only legacy child output", data)
+	}
+}
+
+func TestStdioOptionsStartErrors(t *testing.T) {
+	for _, command := range [][]string{nil, {}, {""}, {filepath.Join(t.TempDir(), "missing")}} {
+		if tr, err := NewStdioTransportWithOptions(t.Context(), command, StdioOptions{}); err == nil || tr != nil {
+			t.Fatalf("command %q: transport=%v err=%v", command, tr, err)
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewStdioTransportWithOptions(ctx, []string{exe}, StdioOptions{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled start: %v", err)
 	}
 }

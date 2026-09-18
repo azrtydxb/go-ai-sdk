@@ -76,6 +76,18 @@ The provider sends Responses-style requests to
 `Call.Headers` and provider headers may add non-auth headers; auth headers are
 protected from override.
 
+`Call.Reasoning.Effort` is forwarded as `reasoning.effort` for both Generate
+and Stream. It is also available through `ai.GenerateTextOpts.Reasoning`,
+including options set by `agent.Agent.PrepareOpts`. Nonempty efforts are sent
+unchanged (for example `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or
+`max`); supported values depend on the selected model and are not clamped by
+the SDK. An unset/empty effort keeps the existing default. Reasoning token
+budgets are not mapped by this provider.
+
+Generic sampling/output knobs such as `Temperature` and `MaxTokens` are not
+forwarded to the subscription backend. `Call.ProviderOptions` is not a broad
+request passthrough for Codex; do not use it to enable unsupported fields.
+
 ## Supported capabilities
 
 - **Text generation and streaming** — `p.Model(id)` implements

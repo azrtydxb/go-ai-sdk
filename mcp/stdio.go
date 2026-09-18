@@ -266,15 +266,45 @@ func (t *framedTransport) Close() error {
 // cmd is trusted developer configuration, executed verbatim; callers
 // passing user-influenced input are responsible for validating it.
 func NewStdioTransport(cmd []string, env []string) (Transport, error) {
+	return newStdioTransport(context.Background(), cmd, append(os.Environ(), env...), "", os.Stderr)
+}
+
+// StdioOptions controls the environment and execution of a trusted MCP command.
+type StdioOptions struct {
+	Env        map[string]string // explicit environment entries; override inherited entries
+	Dir        string            // working directory; empty uses the caller's directory
+	Stderr     io.Writer         // nil discards stderr; must not block indefinitely
+	InheritEnv bool              // false starts with an empty environment
+}
+
+// NewStdioTransportWithOptions launches command directly as argv, without a shell.
+// The zero options isolate the environment and discard stderr. Executable lookup
+// follows exec.CommandContext (use an absolute path to avoid parent PATH lookup).
+// Cancellation kills and reaps the direct child and closes the transport. Close
+// waits for cleanup; neither option provides process-tree or filesystem isolation.
+// The command is trusted configuration: callers must authorize it before calling.
+func NewStdioTransportWithOptions(ctx context.Context, command []string, opts StdioOptions) (Transport, error) {
+	env := make([]string, 0, len(opts.Env))
+	if opts.InheritEnv {
+		env = os.Environ()
+	}
+	for key, value := range opts.Env {
+		env = append(env, key+"="+value)
+	}
+	return newStdioTransport(ctx, command, env, opts.Dir, opts.Stderr)
+}
+
+func newStdioTransport(ctx context.Context, cmd []string, env []string, dir string, stderr io.Writer) (Transport, error) {
 	if len(cmd) == 0 {
 		return nil, errors.New("mcp: NewStdioTransport: empty command")
 	}
 
 	// Trusted developer configuration by contract (see NewStdioTransport docs).
 	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
-	c := exec.Command(cmd[0], cmd[1:]...)
-	c.Env = append(os.Environ(), env...)
-	c.Stderr = os.Stderr
+	c := exec.CommandContext(ctx, cmd[0], cmd[1:]...)
+	c.Env = env
+	c.Dir = dir
+	c.Stderr = stderr
 
 	stdin, err := c.StdinPipe()
 	if err != nil {
@@ -282,14 +312,18 @@ func NewStdioTransport(cmd []string, env []string) (Transport, error) {
 	}
 	stdout, err := c.StdoutPipe()
 	if err != nil {
+		_ = stdin.Close()
 		return nil, err
 	}
 
 	if err := c.Start(); err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
 		return nil, err
 	}
 
 	closeFn := func() error {
+		defer stdout.Close()
 		done := make(chan error, 1)
 		go func() { done <- c.Wait() }()
 		select {
@@ -302,5 +336,15 @@ func NewStdioTransport(cmd []string, env []string) (Transport, error) {
 		}
 	}
 
-	return newFramedTransport(stdout, stdin, closeFn), nil
+	tr := newFramedTransport(stdout, stdin, closeFn)
+	if ctx.Done() != nil {
+		go func() {
+			select {
+			case <-ctx.Done():
+				_ = tr.Close()
+			case <-tr.closed:
+			}
+		}()
+	}
+	return tr, nil
 }

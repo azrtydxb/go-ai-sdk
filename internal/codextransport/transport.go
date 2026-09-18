@@ -173,9 +173,13 @@ func (m *languageModel) buildRequest(ctx context.Context, call provider.Call, st
 	if cfg.Instructions != "" {
 		body["instructions"] = cfg.Instructions
 	}
-	if cfg.ReasoningEffort != "" {
+	effort := cfg.ReasoningEffort
+	if call.Reasoning != nil && call.Reasoning.Effort != "" {
+		effort = call.Reasoning.Effort
+	}
+	if effort != "" {
 		body["reasoning"] = map[string]string{
-			"effort":  cfg.ReasoningEffort,
+			"effort":  effort,
 			"summary": "auto",
 		}
 	}
