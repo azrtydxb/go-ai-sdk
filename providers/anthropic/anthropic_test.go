@@ -1747,3 +1747,32 @@ func TestAuthProviderMode(t *testing.T) {
 		t.Errorf("AuthMode with OAuth = %q, want oauth", got)
 	}
 }
+
+// TestRequestShapeReasoningEffortNoneDisablesThinking asserts
+// provider.EffortNone sends thinking:{"type":"disabled"} — never an
+// "enabled" block with a zero budget, which the Messages API rejects.
+func TestRequestShapeReasoningEffortNoneDisablesThinking(t *testing.T) {
+	srv, fs := newFixtureServer(t)
+	model := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("claude-test")
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages:  []provider.Message{provider.UserText("simple")},
+		Reasoning: &provider.ReasoningConfig{Effort: provider.EffortNone},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if fs.lastRequest.Thinking == nil {
+		t.Fatal("Thinking = nil, want an explicit disabled block")
+	}
+	if got := *fs.lastRequest.Thinking; got != (wireThinking{Type: "disabled"}) {
+		t.Errorf("Thinking = %+v, want {Type: disabled}", got)
+	}
+	raw, err := json.Marshal(fs.lastRequest.Thinking)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if string(raw) != `{"type":"disabled"}` {
+		t.Errorf("wire thinking = %s, want budget_tokens omitted", raw)
+	}
+}

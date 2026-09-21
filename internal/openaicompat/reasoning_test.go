@@ -240,3 +240,82 @@ func TestAssistantSourcePartSkippedNotError(t *testing.T) {
 		t.Errorf("request body contains grounding artifacts, want dropped: %s", lastRaw)
 	}
 }
+
+// TestGenerateReasoningFieldFallback covers the OpenRouter-style "reasoning"
+// field name: it becomes a ReasoningPart when reasoning_content is absent,
+// and reasoning_content wins (no doubling) when a server sends both.
+func TestGenerateReasoningFieldFallback(t *testing.T) {
+	tests := []struct {
+		name, message, want string
+	}{
+		{"reasoning only", `{"content":"42","reasoning":"let me think..."}`, "let me think..."},
+		{"both fields", `{"content":"42","reasoning_content":"primary","reasoning":"fallback"}`, "primary"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			model := newReasoningTestModel(t, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, `{"choices":[{"message":%s,"finish_reason":"stop"}]}`, tt.message)
+			})
+			resp, err := model.Generate(context.Background(), provider.Call{
+				Messages: []provider.Message{provider.UserText("think")},
+			})
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			if resp.ReasoningText() != tt.want {
+				t.Errorf("ReasoningText() = %q, want %q", resp.ReasoningText(), tt.want)
+			}
+			if resp.Text() != "42" {
+				t.Errorf("Text() = %q, want 42", resp.Text())
+			}
+		})
+	}
+}
+
+// TestStreamReasoningFieldFallback covers "delta.reasoning" (OpenRouter's
+// streaming field): each chunk becomes a ReasoningDelta, same as
+// reasoning_content.
+func TestStreamReasoningFieldFallback(t *testing.T) {
+	model := newReasoningTestModel(t, func(w http.ResponseWriter, r *http.Request) {
+		flusher := w.(http.Flusher)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+
+		chunks := []string{
+			`{"choices":[{"delta":{"reasoning":"Here"}}]}`,
+			`{"choices":[{"delta":{"reasoning":"'s a thinking process"}}]}`,
+			`{"choices":[{"delta":{"reasoning_content":"primary","reasoning":"fallback"}}]}`,
+			`{"choices":[{"delta":{"content":"42"}}]}`,
+			`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
+		}
+		for _, c := range chunks {
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", c)
+			flusher.Flush()
+		}
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	})
+
+	sr, err := model.Stream(context.Background(), provider.Call{
+		Messages: []provider.Message{provider.UserText("think")},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	defer func() { _ = sr.Close() }()
+
+	var got []string
+	for part := range sr.Parts() {
+		if rd, ok := part.(provider.ReasoningDelta); ok {
+			got = append(got, rd.Text)
+		}
+	}
+	if err := sr.Err(); err != nil {
+		t.Fatalf("Err() = %v", err)
+	}
+	want := []string{"Here", "'s a thinking process", "primary"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("ReasoningDelta texts = %q, want %q", got, want)
+	}
+}

@@ -233,7 +233,7 @@ func buildGenerateContentRequest(modelID string, call provider.Call) (generateCo
 	}
 	if call.Reasoning != nil {
 		if budget, ok := provider.ResolveBudgetTokens(call.Reasoning); ok {
-			gc.ThinkingConfig = &wireThinkingConfig{ThinkingBudget: budget, IncludeThoughts: true}
+			gc.ThinkingConfig = &wireThinkingConfig{ThinkingBudget: budget, IncludeThoughts: budget != 0}
 			haveGC = true
 		}
 	}
