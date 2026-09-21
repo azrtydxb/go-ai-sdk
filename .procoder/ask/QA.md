@@ -1,6 +1,6 @@
 # Questions procoder cannot answer for you
 
-Written 2026-09-21 07:15 UTC.
+Written 2026-09-21 07:18 UTC.
 
 Answer each one by writing a line beginning `Answer: ` under it, then
 hand the file back with `procoder ask --file .procoder/ask/QA.md`.
@@ -8,38 +8,7 @@ Leave the `Key:` lines alone — they are what ties an answer to its question.
 
 ## Q1: [decision] decisions.md
 
-Key: 5e6460d93483
-Question: Landing the allowlist commit: the gate's per-file gitleaks scan can't see .gitleaks.toml — how to commit?
-
-Verified: procoder's gate runs `gitleaks dir <changed-file>` per file; gitleaks 8.30 hard-codes the DEFAULT config for single-file sources (repo config only applies to directory scans or via the GITLEAKS_CONFIG env). So the allowlist clears whole-tree scans but not the gate's per-file scan, which still blocks committing `.procoder/ask/` (its `Key:` lines). Options:
-
-- **A) Split the commit**: land `.gitleaks.toml` + docs/code changes now (they contain no Key lines, so the gate passes); leave the ask records (QA.md, answers.md) for a later commit. (Default — gets the reviewed config in without weakening the gate.)
-- **B) Patch procoder** (the dev repo at ~/Development/procoder): make the per-file scan pass `-c <root>/.gitleaks.toml` when present, rebuild the launcher binary, then commit everything. Root-cause fix; procoder-side change, out of this session's scope.
-- **C) Set GITLEAKS_CONFIG** in the environments the hooks run in, commit everything now. Works with the current binary; depends on the hook process inheriting the variable.
-- **D) Skip the gate for this commit** (`--no-verify`). Against the contract; last resort.
-
-**Decided: moot (2026-09-21).** The gate now passes over `.procoder/ask/` with 0 blocking findings, so the records commit normally; no split, patch, env var, or `--no-verify` was needed.
-
-Answer: Moot — the gate now passes over .procoder/ask/ with 0 blocking findings; the records commit normally.
-
-## Q2: [decision] decisions.md
-
-Key: 27c418a9b8f3
-Question: Working on the default branch: branch the current change or stay on main?
-
-`[git] default_branch_policy = "block"` and the gate blocks "working directly on the default branch (main)" — this session's changes (websocket.go, mcp/stdio.go, todo, ask files) are uncommitted on main.
-
-- **A) Cut a branch for this change** (e.g. `fix/websocket-tls-and-security-findings`), move the working tree onto it, and commit there. (Default.)
-- **B) Keep working on main** and relax the policy (`default_branch_policy = "report"`) in `.procoder/config.toml`.
-- **C) Hold the changes uncommitted** until you say how to land them.
-
-**Decided: A) (2026-09-21).** Every change goes through a branch and a PR; `default_branch_policy = "block"` stays.
-
-Answer: A) Branch and PR for every change; default_branch_policy stays "block".
-
-## Q3: [decision] decisions.md
-
-Key: 87c6636ec7d9
+Key: 7858ba130333
 Question: [decision] Next Reddit target after the r/golang Small Projects comment
 
 The Small Projects thread comment (p76i8q0) is live. Where to post next?
@@ -55,20 +24,35 @@ The Small Projects thread comment (p76i8q0) is live. Where to post next?
 Note: r/OpenSource and r/SideProject enforce account-age/karma posting floors —
 verify before posting to either.
 
-Answer: E) Stop here (2026-09-21) — no further Reddit posts for now; let the r/golang Small Projects comment settle and revisit later.
+**Decided: E) Stop here (2026-09-21)** — no further Reddit posts for now; let the r/golang Small Projects comment settle and revisit later.
 
 Answer: E) Stop here — no further Reddit posts for now; revisit later.
 
-## Q4: [decision] decisions.md
+## Q2: [decision] decisions.md
 
-Key: dd1c14e49bd7
-Question: ws scheme: suppress the detect-insecure-websocket ERRORs or leave them blocking?
+Key: a0c6cf66e3a7
+Question: [decision] Reddit: which second subreddit for the go-ai-sdk post?
 
-`internal/websocket.Dial` deliberately supports both the ws (insecure, localhost and test fixtures) and wss (TLS) schemes — the semgrep ERROR on the ws case (websocket.go) is a false positive on a by-design feature; the same rule flags the ws-scheme test-fixture mentions in providers and docs. The gate blocks on that line while it is in scope.
+The r/golang post (1w4c73t) is live. Options for the next Reddit post (same
+account, same pitch, adjusted per community):
 
-- **A) Add a `nosemgrep: detect-insecure-websocket` suppression** with a justification comment at each flagged line (code sites now done: websocket.go, wsstream.go, deepgram live, openai realtime ×2). (Default — the FP verdict was already in the analysis; this makes it durable.)
-- **B) Leave it blocking.** Accept that the gate stays red on this line; every future change touching websocket.go inherits the block.
+- **A) r/OpenSource** (ideally the weekly "Open Source Friday" thread) —
+  lowest risk, built for exactly this; smaller reach than r/golang.
+- **B) r/programming** — big reach (~10M) but strict self-promo norm;
+  needs the engineering-story framing (iter.Seq streaming design) to
+  survive; higher downvote risk.
+- **C) r/mcp (Model Context Protocol community)** — the in-tree MCP
+  client (stdio + Streamable HTTP) is the hook; smaller, very on-topic.
+- **D) Don't crosspost yet** — let the r/golang post mature (~24h),
+  reply to its comments, then decide.
 
-**Decided: A) (2026-09-21).** The `nosemgrep: detect-insecure-websocket` suppressions with justification comments are in the code at all six flagged sites.
+Default: A (safest second post; save B for when the repo has visible
+traction).
+**Decided: superseded** by r/golang mod action — the standalone post (1w4c73t) was
+held for review as a "small project"; the project was instead posted as a
+top-level comment in the weekly Small Projects thread
+(our comment: r/golang/comments/1w3ndze/_/p76i8q0). The held
+standalone post was left in place (delete not reached via UI; the mod
+message says it is queued, not removed, and mods handle it).
 
-Answer: A) nosemgrep suppressions with justification, in the code at all six flagged sites.
+Answer: Superseded by the r/golang mod action — posted as a comment in the weekly Small Projects thread instead (r/golang/comments/1w3ndze/_/p76i8q0).

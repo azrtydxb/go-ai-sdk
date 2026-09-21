@@ -79,7 +79,7 @@ account, same pitch, adjusted per community):
 
 Default: A (safest second post; save B for when the repo has visible
 traction).
-Answer: superseded by r/golang mod action — the standalone post (1w4c73t) was
+**Decided: superseded** by r/golang mod action — the standalone post (1w4c73t) was
 held for review as a "small project"; the project was instead posted as a
 top-level comment in the weekly Small Projects thread
 (our comment: r/golang/comments/1w3ndze/_/p76i8q0). The held
@@ -101,7 +101,7 @@ The Small Projects thread comment (p76i8q0) is live. Where to post next?
 Note: r/OpenSource and r/SideProject enforce account-age/karma posting floors —
 verify before posting to either.
 
-Answer: E) Stop here (2026-09-21) — no further Reddit posts for now; let the r/golang Small Projects comment settle and revisit later.
+**Decided: E) Stop here (2026-09-21)** — no further Reddit posts for now; let the r/golang Small Projects comment settle and revisit later.
 
 ## Issues #4/#5 (subscription auth): the audit found acceptance criteria unmet — close, or build the gaps?
 

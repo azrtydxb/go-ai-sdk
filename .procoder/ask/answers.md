@@ -1,35 +1,13 @@
 # What a human decided
 
-Written 2026-09-21 07:15 UTC. procoder reads this
+Written 2026-09-21 07:19 UTC. procoder reads this
 file to avoid asking a question twice; edit an answer here to change what
 it believes. Reword the question and it will be asked again.
 
-## [decision] decisions.md
+## (no longer asked)
 
 Key: 0c9984c5bd41
 Question: [decision] Reddit: which second subreddit for the go-ai-sdk post?
-
-The r/golang post (1w4c73t) is live. Options for the next Reddit post (same
-account, same pitch, adjusted per community):
-
-- **A) r/OpenSource** (ideally the weekly "Open Source Friday" thread) —
-  lowest risk, built for exactly this; smaller reach than r/golang.
-- **B) r/programming** — big reach (~10M) but strict self-promo norm;
-  needs the engineering-story framing (iter.Seq streaming design) to
-  survive; higher downvote risk.
-- **C) r/mcp (Model Context Protocol community)** — the in-tree MCP
-  client (stdio + Streamable HTTP) is the hook; smaller, very on-topic.
-- **D) Don't crosspost yet** — let the r/golang post mature (~24h),
-  reply to its comments, then decide.
-
-Default: A (safest second post; save B for when the repo has visible
-traction).
-Answer: superseded by r/golang mod action — the standalone post (1w4c73t) was
-held for review as a "small project"; the project was instead posted as a
-top-level comment in the weekly Small Projects thread
-(our comment: r/golang/comments/1w3ndze/_/p76i8q0). The held
-standalone post was left in place (delete not reached via UI; the mod
-message says it is queued, not removed, and mods handle it).
 
 Answer: superseded by r/golang mod action — the standalone post (1w4c73t) was
 
@@ -120,16 +98,9 @@ Question: gitleaks flags procoder's own question keys in .procoder/ask/ — how 
 
 Answer: A) scoped allowlist .gitleaks.toml ([extend] useDefault + [[allowlists]] for .procoder/ask/), verified with gitleaks 8.30.1 (user: ok = default)
 
-## (no longer asked)
-
-Key: 8197b535e994
-Question: Landing the allowlist commit: the gate's per-file gitleaks scan can't see .gitleaks.toml — how to commit?
-
-Answer: A and B: the split-commit (A) was superseded because the gate scans the whole branch diff, not just staged files — B (patch procoder's per-file gitleaks scan to pass -c when a repo .gitleaks.toml exists, committed in the procoder repo) was done first, then all files committed together (user: A and B next)
-
 ## [decision] decisions.md
 
-Key: 87c6636ec7d9
+Key: 7858ba130333
 Question: [decision] Next Reddit target after the r/golang Small Projects comment
 
 The Small Projects thread comment (p76i8q0) is live. Where to post next?
@@ -145,7 +116,21 @@ The Small Projects thread comment (p76i8q0) is live. Where to post next?
 Note: r/OpenSource and r/SideProject enforce account-age/karma posting floors —
 verify before posting to either.
 
-Answer: E) Stop here (2026-09-21) — no further Reddit posts for now; let the r/golang Small Projects comment settle and revisit later.
+**Decided: E) Stop here (2026-09-21)** — no further Reddit posts for now; let the r/golang Small Projects comment settle and revisit later.
+
+Answer: E) Stop here — no further Reddit posts for now; revisit later.
+
+## (no longer asked)
+
+Key: 8197b535e994
+Question: Landing the allowlist commit: the gate's per-file gitleaks scan can't see .gitleaks.toml — how to commit?
+
+Answer: A and B: the split-commit (A) was superseded because the gate scans the whole branch diff, not just staged files — B (patch procoder's per-file gitleaks scan to pass -c when a repo .gitleaks.toml exists, committed in the procoder repo) was done first, then all files committed together (user: A and B next)
+
+## (no longer asked)
+
+Key: 87c6636ec7d9
+Question: [decision] Next Reddit target after the r/golang Small Projects comment
 
 Answer: E) Stop here (2026-09-21) — no further Reddit posts for now; let the r/golang Small Projects comment settle and revisit later.
 
@@ -155,6 +140,35 @@ Key: 92535e04da17
 Question: gitleaks flags procoder's own question keys in .procoder/ask/ — how to silence?
 
 Answer: A) scoped allowlist .gitleaks.toml ([extend] useDefault + [[allowlists]] for .procoder/ask/), verified with gitleaks 8.30.1 (user: ok = default)
+
+## [decision] decisions.md
+
+Key: a0c6cf66e3a7
+Question: [decision] Reddit: which second subreddit for the go-ai-sdk post?
+
+The r/golang post (1w4c73t) is live. Options for the next Reddit post (same
+account, same pitch, adjusted per community):
+
+- **A) r/OpenSource** (ideally the weekly "Open Source Friday" thread) —
+  lowest risk, built for exactly this; smaller reach than r/golang.
+- **B) r/programming** — big reach (~10M) but strict self-promo norm;
+  needs the engineering-story framing (iter.Seq streaming design) to
+  survive; higher downvote risk.
+- **C) r/mcp (Model Context Protocol community)** — the in-tree MCP
+  client (stdio + Streamable HTTP) is the hook; smaller, very on-topic.
+- **D) Don't crosspost yet** — let the r/golang post mature (~24h),
+  reply to its comments, then decide.
+
+Default: A (safest second post; save B for when the repo has visible
+traction).
+**Decided: superseded** by r/golang mod action — the standalone post (1w4c73t) was
+held for review as a "small project"; the project was instead posted as a
+top-level comment in the weekly Small Projects thread
+(our comment: r/golang/comments/1w3ndze/_/p76i8q0). The held
+standalone post was left in place (delete not reached via UI; the mod
+message says it is queued, not removed, and mods handle it).
+
+Answer: Superseded by the r/golang mod action — posted as a comment in the weekly Small Projects thread instead (r/golang/comments/1w3ndze/_/p76i8q0).
 
 ## [decision] decisions.md
 
