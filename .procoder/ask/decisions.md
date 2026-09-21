@@ -25,12 +25,16 @@ Verified: procoder's gate runs `gitleaks dir <changed-file>` per file; gitleaks 
 - **C) Set GITLEAKS_CONFIG** in the environments the hooks run in, commit everything now. Works with the current binary; depends on the hook process inheriting the variable.
 - **D) Skip the gate for this commit** (`--no-verify`). Against the contract; last resort.
 
+**Decided: moot (2026-09-21).** The gate now passes over `.procoder/ask/` with 0 blocking findings, so the records commit normally; no split, patch, env var, or `--no-verify` was needed.
+
 ## ws scheme: suppress the detect-insecure-websocket ERRORs or leave them blocking?
 
 `internal/websocket.Dial` deliberately supports both the ws (insecure, localhost and test fixtures) and wss (TLS) schemes — the semgrep ERROR on the ws case (websocket.go) is a false positive on a by-design feature; the same rule flags the ws-scheme test-fixture mentions in providers and docs. The gate blocks on that line while it is in scope.
 
 - **A) Add a `nosemgrep: detect-insecure-websocket` suppression** with a justification comment at each flagged line (code sites now done: websocket.go, wsstream.go, deepgram live, openai realtime ×2). (Default — the FP verdict was already in the analysis; this makes it durable.)
 - **B) Leave it blocking.** Accept that the gate stays red on this line; every future change touching websocket.go inherits the block.
+
+**Decided: A) (2026-09-21).** The `nosemgrep: detect-insecure-websocket` suppressions with justification comments are in the code at all six flagged sites.
 
 ## Working on the default branch: branch the current change or stay on main?
 
@@ -39,6 +43,8 @@ Verified: procoder's gate runs `gitleaks dir <changed-file>` per file; gitleaks 
 - **A) Cut a branch for this change** (e.g. `fix/websocket-tls-and-security-findings`), move the working tree onto it, and commit there. (Default.)
 - **B) Keep working on main** and relax the policy (`default_branch_policy = "report"`) in `.procoder/config.toml`.
 - **C) Hold the changes uncommitted** until you say how to land them.
+
+**Decided: A) (2026-09-21).** Every change goes through a branch and a PR; `default_branch_policy = "block"` stays.
 
 ## TLS MinVersion in internal/websocket Dial: set explicitly or leave the Go default?
 
@@ -73,7 +79,7 @@ account, same pitch, adjusted per community):
 
 Default: A (safest second post; save B for when the repo has visible
 traction).
-Answer: superseded by r/golang mod action — the standalone post (1w4c73t) was
+**Decided: superseded** by r/golang mod action — the standalone post (1w4c73t) was
 held for review as a "small project"; the project was instead posted as a
 top-level comment in the weekly Small Projects thread
 (our comment: r/golang/comments/1w3ndze/_/p76i8q0). The held
@@ -94,6 +100,8 @@ The Small Projects thread comment (p76i8q0) is live. Where to post next?
 
 Note: r/OpenSource and r/SideProject enforce account-age/karma posting floors —
 verify before posting to either.
+
+**Decided: E) Stop here (2026-09-21)** — no further Reddit posts for now; let the r/golang Small Projects comment settle and revisit later.
 
 ## Issues #4/#5 (subscription auth): the audit found acceptance criteria unmet — close, or build the gaps?
 

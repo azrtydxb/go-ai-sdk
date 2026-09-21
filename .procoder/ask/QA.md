@@ -1,6 +1,6 @@
 # Questions procoder cannot answer for you
 
-Written 2026-08-31 19:27 UTC.
+Written 2026-09-21 07:18 UTC.
 
 Answer each one by writing a line beginning `Answer: ` under it, then
 hand the file back with `procoder ask --file .procoder/ask/QA.md`.
@@ -8,14 +8,51 @@ Leave the `Key:` lines alone — they are what ties an answer to its question.
 
 ## Q1: [decision] decisions.md
 
-Key: 8197b535e994
-Question: Landing the allowlist commit: the gate's per-file gitleaks scan can't see .gitleaks.toml — how to commit?
+Key: 7858ba130333
+Question: [decision] Next Reddit target after the r/golang Small Projects comment
 
-Verified: procoder's gate runs `gitleaks dir <changed-file>` per file; gitleaks 8.30 hard-codes the DEFAULT config for single-file sources (repo config only applies to directory scans or via the GITLEAKS_CONFIG env). So the allowlist clears whole-tree scans but not the gate's per-file scan, which still blocks committing `.procoder/ask/` (its `Key:` lines). Options:
+The Small Projects thread comment (p76i8q0) is live. Where to post next?
 
-- **A) Split the commit**: land `.gitleaks.toml` + docs/code changes now (they contain no Key lines, so the gate passes); leave the ask records (QA.md, answers.md) for a later commit. (Default — gets the reviewed config in without weakening the gate.)
-- **B) Patch procoder** (the dev repo at ~/Development/procoder): make the per-file scan pass `-c <root>/.gitleaks.toml` when present, rebuild the launcher binary, then commit everything. Root-cause fix; procoder-side change, out of this session's scope.
-- **C) Set GITLEAKS_CONFIG** in the environments the hooks run in, commit everything now. Works with the current binary; depends on the hook process inheriting the variable.
-- **D) Skip the gate for this commit** (`--no-verify`). Against the contract; last resort.
+- **A) r/OpenSource — Open Source Friday thread** — safest; made for this pitch; check the thread's day/week first. (Default.)
+- **B) r/modelcontextprotocol** — MCP-client angle; smaller, very on-topic audience.
+- **C) r/SideProject** — solo-project culture; good title fit; account-age/karma check first.
+- **D) r/programming** — biggest reach; needs the engineering-story framing (iter.Seq
+  streaming design, compat-test harness, zero-dep policy); highest downvote risk.
+  Better once the repo has visible traction.
+- **E) Stop here** — let the r/golang post settle, engage its comments, decide later.
 
-Answer: A and B: the split-commit (A) was superseded because the gate scans the whole branch diff, not just staged files — B (patch procoder's per-file gitleaks scan to pass -c when a repo .gitleaks.toml exists, committed in the procoder repo) was done first, then all files committed together (user: A and B next)
+Note: r/OpenSource and r/SideProject enforce account-age/karma posting floors —
+verify before posting to either.
+
+**Decided: E) Stop here (2026-09-21)** — no further Reddit posts for now; let the r/golang Small Projects comment settle and revisit later.
+
+Answer: E) Stop here — no further Reddit posts for now; revisit later.
+
+## Q2: [decision] decisions.md
+
+Key: a0c6cf66e3a7
+Question: [decision] Reddit: which second subreddit for the go-ai-sdk post?
+
+The r/golang post (1w4c73t) is live. Options for the next Reddit post (same
+account, same pitch, adjusted per community):
+
+- **A) r/OpenSource** (ideally the weekly "Open Source Friday" thread) —
+  lowest risk, built for exactly this; smaller reach than r/golang.
+- **B) r/programming** — big reach (~10M) but strict self-promo norm;
+  needs the engineering-story framing (iter.Seq streaming design) to
+  survive; higher downvote risk.
+- **C) r/mcp (Model Context Protocol community)** — the in-tree MCP
+  client (stdio + Streamable HTTP) is the hook; smaller, very on-topic.
+- **D) Don't crosspost yet** — let the r/golang post mature (~24h),
+  reply to its comments, then decide.
+
+Default: A (safest second post; save B for when the repo has visible
+traction).
+**Decided: superseded** by r/golang mod action — the standalone post (1w4c73t) was
+held for review as a "small project"; the project was instead posted as a
+top-level comment in the weekly Small Projects thread
+(our comment: r/golang/comments/1w3ndze/_/p76i8q0). The held
+standalone post was left in place (delete not reached via UI; the mod
+message says it is queued, not removed, and mods handle it).
+
+Answer: Superseded by the r/golang mod action — posted as a comment in the weekly Small Projects thread instead (r/golang/comments/1w3ndze/_/p76i8q0).
