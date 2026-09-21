@@ -55,3 +55,53 @@ Verified: procoder's gate runs `gitleaks dir <changed-file>` per file; gitleaks 
 - **C) Defer** — leave the findings open, revisit later.
 
 **Decided: A)** `procoder todo add` — recorded as `.procoder/todo/20260831-mechanical-lint-cleanup-fix-all-71-golangci-lint-findings.md`.
+
+## [decision] Reddit: which second subreddit for the go-ai-sdk post?
+
+The r/golang post (1w4c73t) is live. Options for the next Reddit post (same
+account, same pitch, adjusted per community):
+
+- **A) r/OpenSource** (ideally the weekly "Open Source Friday" thread) —
+  lowest risk, built for exactly this; smaller reach than r/golang.
+- **B) r/programming** — big reach (~10M) but strict self-promo norm;
+  needs the engineering-story framing (iter.Seq streaming design) to
+  survive; higher downvote risk.
+- **C) r/mcp (Model Context Protocol community)** — the in-tree MCP
+  client (stdio + Streamable HTTP) is the hook; smaller, very on-topic.
+- **D) Don't crosspost yet** — let the r/golang post mature (~24h),
+  reply to its comments, then decide.
+
+Default: A (safest second post; save B for when the repo has visible
+traction).
+Answer: superseded by r/golang mod action — the standalone post (1w4c73t) was
+held for review as a "small project"; the project was instead posted as a
+top-level comment in the weekly Small Projects thread
+(our comment: r/golang/comments/1w3ndze/_/p76i8q0). The held
+standalone post was left in place (delete not reached via UI; the mod
+message says it is queued, not removed, and mods handle it).
+
+## [decision] Next Reddit target after the r/golang Small Projects comment
+
+The Small Projects thread comment (p76i8q0) is live. Where to post next?
+
+- **A) r/OpenSource — Open Source Friday thread** — safest; made for this pitch; check the thread's day/week first. (Default.)
+- **B) r/modelcontextprotocol** — MCP-client angle; smaller, very on-topic audience.
+- **C) r/SideProject** — solo-project culture; good title fit; account-age/karma check first.
+- **D) r/programming** — biggest reach; needs the engineering-story framing (iter.Seq
+  streaming design, compat-test harness, zero-dep policy); highest downvote risk.
+  Better once the repo has visible traction.
+- **E) Stop here** — let the r/golang post settle, engage its comments, decide later.
+
+Note: r/OpenSource and r/SideProject enforce account-age/karma posting floors —
+verify before posting to either.
+
+## Issues #4/#5 (subscription auth): the audit found acceptance criteria unmet — close, or build the gaps?
+
+Audit of HEAD against the issues' acceptance criteria (verified in code): Codex has no automatic token refresh (`providers/codex` documents "the caller owns refresh"; the transport never checks expiry); device-code login exists only in `internal/codexauth` with no public entry point; the 0600/0700 credential writers exist only in `internal/` for both providers, and package `auth` states "without credential persistence. Callers own secure storage". Claude Pro/Max is otherwise met (auto-refresh, bearer + betas, `AuthMode()` diagnostics). Non-goals respected for both.
+
+- **A) Build the gaps**: public device-code login, Codex auto-refresh on the request path (mirroring anthropic's token source), and a public file credential store (0600/0700) for both providers; then close #4 and #5. Reverses the "callers own storage" stance in package `auth`. (Default.)
+- **B) Keep the caller-owns-storage design**: close #5 as met, add only Codex auto-refresh + public device-code login, and amend the issues to say persistence is deliberately the caller's.
+- **C) Close both as-is** with a comment recording the deliberate deviations.
+- **D) Leave both open**, no work now.
+
+**Decided: A)** Build all gaps — public device-code login, Codex auto-refresh, public 0600/0700 file credential store for both providers; then close #4 and #5.
