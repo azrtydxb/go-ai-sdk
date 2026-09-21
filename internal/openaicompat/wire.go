@@ -184,6 +184,8 @@ type chatResponseMessage struct {
 	ToolCalls []wireToolCall `json:"tool_calls"`
 	// ReasoningContent is DeepSeek-R1-style reasoning output.
 	ReasoningContent string `json:"reasoning_content,omitempty"`
+	// Reasoning is the OpenRouter-style name for the same field.
+	Reasoning string `json:"reasoning,omitempty"`
 }
 
 type wireUsage struct {
@@ -223,6 +225,18 @@ type chatStreamDelta struct {
 	ToolCalls []wireToolCallDelta `json:"tool_calls"`
 	// ReasoningContent is DeepSeek-R1-style streamed reasoning text.
 	ReasoningContent string `json:"reasoning_content,omitempty"`
+	// Reasoning is the OpenRouter-style name for the same field.
+	Reasoning string `json:"reasoning,omitempty"`
+}
+
+// reasoningText picks the reasoning text from the two field names in the
+// wild: reasoning_content (DeepSeek/vLLM) first, reasoning (OpenRouter) as
+// the fallback — never both, so a server sending the pair isn't doubled.
+func reasoningText(reasoningContent, reasoning string) string {
+	if reasoningContent != "" {
+		return reasoningContent
+	}
+	return reasoning
 }
 
 type wireToolCallDelta struct {
@@ -616,8 +630,8 @@ func convertResponse(wr chatResponse, raw []byte, providerName string) *provider
 	choice := wr.Choices[0]
 	resp.FinishReason = mapFinishReason(choice.FinishReason)
 
-	if choice.Message.ReasoningContent != "" {
-		resp.Content = append(resp.Content, provider.ReasoningPart{Text: choice.Message.ReasoningContent})
+	if text := reasoningText(choice.Message.ReasoningContent, choice.Message.Reasoning); text != "" {
+		resp.Content = append(resp.Content, provider.ReasoningPart{Text: text})
 	}
 	if choice.Message.Content != nil && *choice.Message.Content != "" {
 		resp.Content = append(resp.Content, provider.TextPart{Text: *choice.Message.Content})

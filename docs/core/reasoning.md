@@ -28,8 +28,8 @@ each provider to its own native knob:
 
 ```go
 type ReasoningConfig struct {
-	Effort       string // "", "minimal", "low", "medium", "high" — passed through, not validated
-	BudgetTokens *int   // explicit thinking-token budget
+	Effort       string // "", EffortNone, "minimal", "low", "medium", "high" — passed through, not validated
+	BudgetTokens *int   // explicit thinking-token budget; 0 means explicitly no thinking, same as EffortNone
 }
 ```
 
@@ -76,17 +76,27 @@ three wire packages call it instead of each keeping its own private copy.
 The resolution logic and per-provider mapping below are unchanged by that
 consolidation.
 
-| `Effort`             | Budget tokens                                 |
-| -------------------- | --------------------------------------------- |
-| `"minimal"`          | 1024                                          |
-| `"low"`              | 4096                                          |
-| `"medium"`           | 8192                                          |
-| `"high"`             | 16384                                         |
-| `""` or unrecognized | not resolved (`ok == false`) — no budget sent |
+| `Effort`                         | Budget tokens                                 |
+| -------------------------------- | --------------------------------------------- |
+| `provider.EffortNone` (`"none"`) | 0, `ok == true` — explicitly no thinking      |
+| `"minimal"`                      | 1024                                          |
+| `"low"`                          | 4096                                          |
+| `"medium"`                       | 8192                                          |
+| `"high"`                         | 16384                                         |
+| `""` or unrecognized             | not resolved (`ok == false`) — no budget sent |
 
 ```go
 budget, ok := provider.EffortBudgetTokens("medium") // 8192, true
 ```
+
+`provider.EffortNone` is a third state, distinct from leaving `Effort`
+empty: `""` expresses no preference (the provider's own default applies),
+while `EffortNone` — or an explicit `BudgetTokens` of 0 — asks for no
+thinking at all. Anthropic and Bedrock send `thinking: {"type": "disabled"}`
+for it (never an enabled block with a zero budget); geminicompat sends
+`thinkingBudget: 0` with `includeThoughts: false`; openaicompat and the Codex
+transport pass `"none"` through as the effort string, so the model itself
+must accept it.
 
 Anthropic and Bedrock do **not** validate `max_tokens > budget_tokens` or
 Anthropic's temperature restriction under extended thinking — an
@@ -144,7 +154,10 @@ finished block (including any signature) as `provider.ReasoningEnd`.
 
 DeepSeek-R1-style models (routed through the shared `openaicompat` base)
 report reasoning via a `reasoning_content` field alongside the normal
-`content` field — no signature, no redaction, just plain text. Non-streamed
+`content` field — no signature, no redaction, just plain text. OpenRouter-shaped
+servers name the same field `reasoning`; `reasoning_content` is read first and
+`reasoning` is the fallback, on both the final message and streamed deltas
+(never both, so a server sending the pair is not doubled). Non-streamed
 responses surface it as a single `ReasoningPart{Text: ...}`; streamed
 responses surface it as a run of `ReasoningDelta`s with no closing
 `ReasoningEnd` (see the incremental-assembly note below).

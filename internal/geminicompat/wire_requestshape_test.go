@@ -749,3 +749,25 @@ func TestRequestShapeReasoningNeitherResolvesOmitsThinkingConfig(t *testing.T) {
 		t.Errorf("thinkingConfig = %+v, want nil", req.GenerationConfig.ThinkingConfig)
 	}
 }
+
+// TestRequestShapeReasoningEffortNoneZeroBudget asserts provider.EffortNone
+// sends thinkingBudget:0 (Gemini's "thinking off") without asking for
+// thoughts back.
+func TestRequestShapeReasoningEffortNoneZeroBudget(t *testing.T) {
+	model, srv := newTestLanguageModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages:  []provider.Message{provider.UserText("simple")},
+		Reasoning: &provider.ReasoningConfig{Effort: provider.EffortNone},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	req := lastRequest(t, srv)
+	if req.GenerationConfig == nil || req.GenerationConfig.ThinkingConfig == nil {
+		t.Fatal("thinkingConfig = nil, want an explicit zero budget")
+	}
+	if got := *req.GenerationConfig.ThinkingConfig; got != (wireThinkingConfig{}) {
+		t.Errorf("thinkingConfig = %+v, want {ThinkingBudget: 0, IncludeThoughts: false}", got)
+	}
+}

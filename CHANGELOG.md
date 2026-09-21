@@ -15,18 +15,29 @@ once it reaches 1.0.
   (created directories `0700`); `auth.NewSource` loads, refreshes on expiry,
   and saves rotated tokens — serialized across processes by a lock file, so
   a rotating refresh token is never spent twice — and doubles as the token
-  source for
-  `anthropic.WithOAuthTokenSource`. `codex.WithCredentialFile` wires it into
+  source for `anthropic.WithOAuthTokenSource`. `codex.WithCredentialFile` wires it into
   the Codex provider, and `codex.WithCredentials` now refreshes an expired
   token in memory when it carries a refresh token and an expiry. (#4, #5)
 - **`auth.LoginDevice`** exposes Codex device-code login for headless
   hosts. (#4)
+- **`provider.EffortNone` ("none") — explicitly no thinking.**
+  `EffortBudgetTokens` and `ResolveBudgetTokens` report it (and an explicit
+  zero `BudgetTokens`) as `(0, true)`, distinct from `""` / unrecognized
+  (`(0, false)`, no preference). Anthropic and Bedrock send
+  `thinking: {"type": "disabled"}`, geminicompat sends `thinkingBudget: 0`,
+  openaicompat and Codex pass `"none"` through. (#6)
 
 ### Fixed
 
 - Internal credential writers now write-then-rename, so a crash mid-write
   cannot destroy a refresh token, and an existing file with a looser mode is
   tightened to `0600` instead of keeping it.
+- **openaicompat: `reasoning` field dropped.** Reasoning text sent as
+  `reasoning` (OpenRouter's field name) instead of `reasoning_content` is now
+  surfaced as `ReasoningPart` / `ReasoningDelta`; `reasoning_content` still
+  wins when both are present. (#7)
+- An explicit `BudgetTokens` of 0 no longer sends Anthropic/Bedrock an
+  enabled thinking block with a zero budget, which the APIs reject.
 
 ## v0.5.0 (2026-09-17)
 

@@ -48,6 +48,18 @@ func TestResolveBudgetTokens(t *testing.T) {
 			ok:   true,
 		},
 		{
+			name: "effort none is explicitly no thinking",
+			cfg:  &ReasoningConfig{Effort: EffortNone},
+			want: 0,
+			ok:   true,
+		},
+		{
+			name: "explicit zero budget is explicitly no thinking",
+			cfg:  &ReasoningConfig{BudgetTokens: intPtr(0)},
+			want: 0,
+			ok:   true,
+		},
+		{
 			name: "budget tokens wins over effort",
 			cfg:  &ReasoningConfig{Effort: "minimal", BudgetTokens: intPtr(5000)},
 			want: 5000,

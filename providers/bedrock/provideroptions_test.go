@@ -242,3 +242,27 @@ func TestReasoningNeitherResolvesOmitsThinking(t *testing.T) {
 		t.Errorf("AdditionalModelRequestFields = %#v, want nil", fs.lastRequest.AdditionalModelRequestFields)
 	}
 }
+
+// TestReasoningEffortNoneDisablesThinking asserts provider.EffortNone sends
+// thinking:{"type":"disabled"} with no budget_tokens.
+func TestReasoningEffortNoneDisablesThinking(t *testing.T) {
+	model, fs := newTestModel(t)
+
+	_, err := model.Generate(context.Background(), provider.Call{
+		Messages:  []provider.Message{provider.UserText("simple")},
+		Reasoning: &provider.ReasoningConfig{Effort: provider.EffortNone},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	thinking, ok := fs.lastRequest.AdditionalModelRequestFields["thinking"].(map[string]any)
+	if !ok {
+		t.Fatalf("additionalModelRequestFields.thinking missing: %#v", fs.lastRequest.AdditionalModelRequestFields)
+	}
+	if thinking["type"] != "disabled" {
+		t.Errorf("thinking.type = %v, want disabled", thinking["type"])
+	}
+	if _, has := thinking["budget_tokens"]; has {
+		t.Errorf("thinking.budget_tokens = %v, want omitted", thinking["budget_tokens"])
+	}
+}
