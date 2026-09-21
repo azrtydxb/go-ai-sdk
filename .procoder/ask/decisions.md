@@ -76,7 +76,7 @@ traction).
 Answer: superseded by r/golang mod action — the standalone post (1w4c73t) was
 held for review as a "small project"; the project was instead posted as a
 top-level comment in the weekly Small Projects thread
-(r/golang/comments/1w3ndze, our comment: /comment/p76i8q0). The held
+(our comment: r/golang/comments/1w3ndze/_/p76i8q0). The held
 standalone post was left in place (delete not reached via UI; the mod
 message says it is queued, not removed, and mods handle it).
 
