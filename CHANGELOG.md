@@ -8,6 +8,24 @@ once it reaches 1.0.
 
 ## [Unreleased]
 
+### Added
+
+- **`provider.EffortNone` ("none") — explicitly no thinking.**
+  `EffortBudgetTokens` and `ResolveBudgetTokens` report it (and an explicit
+  zero `BudgetTokens`) as `(0, true)`, distinct from `""` / unrecognized
+  (`(0, false)`, no preference). Anthropic and Bedrock send
+  `thinking: {"type": "disabled"}`, geminicompat sends `thinkingBudget: 0`,
+  openaicompat and Codex pass `"none"` through. (#6)
+
+### Fixed
+
+- **openaicompat: `reasoning` field dropped.** Reasoning text sent as
+  `reasoning` (OpenRouter's field name) instead of `reasoning_content` is now
+  surfaced as `ReasoningPart` / `ReasoningDelta`; `reasoning_content` still
+  wins when both are present. (#7)
+- An explicit `BudgetTokens` of 0 no longer sends Anthropic/Bedrock an
+  enabled thinking block with a zero budget, which the APIs reject.
+
 ## v0.5.0 (2026-09-17)
 
 Adds direct subscription-auth providers for OpenAI Codex/ChatGPT Plus-Pro

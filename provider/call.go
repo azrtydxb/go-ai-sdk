@@ -113,7 +113,10 @@ type Call struct {
 	// "includeThoughts":true}, and bedrock as
 	// additionalModelRequestFields.thinking (same shape as anthropic's).
 	// cohere and mistral have no reasoning knob and ignore this field
-	// entirely. See each provider's wire.go for the exact mapping. Effort
+	// entirely. A resolved budget of 0 (EffortNone, or BudgetTokens 0) means
+	// explicitly no thinking: anthropic and bedrock send
+	// "thinking":{"type":"disabled"}, geminicompat thinkingBudget:0 with
+	// includeThoughts:false. See each provider's wire.go for the exact mapping. Effort
 	// and BudgetTokens may be set together (providers that only understand
 	// one use that one; BudgetTokens wins where both map to the same
 	// knob). ProviderOptions still merge last and win on wire-key
@@ -172,18 +175,29 @@ type Call struct {
 // wins where both map to the same knob). ProviderOptions still merge last
 // and win on wire-key collision.
 type ReasoningConfig struct {
-	Effort       string // "", "minimal", "low", "medium", "high" — passed through, not validated
-	BudgetTokens *int   // explicit thinking-token budget
+	Effort       string // "", EffortNone, "minimal", "low", "medium", "high" — passed through, not validated
+	BudgetTokens *int   // explicit thinking-token budget; 0 means explicitly no thinking, same as EffortNone
 }
+
+// EffortNone is the ReasoningConfig.Effort value meaning "explicitly no
+// thinking" — distinct from "" (no preference, the provider's own default
+// applies). Budget-based providers turn thinking off for it (anthropic and
+// bedrock send thinking:{"type":"disabled"}, geminicompat sends
+// thinkingBudget:0); openaicompat and the Codex transport pass "none"
+// through as the effort string, which the model must itself support.
+const EffortNone = "none"
 
 // EffortBudgetTokens maps a ReasoningConfig.Effort value to an explicit
 // thinking-token budget, for providers whose only reasoning knob is a token
 // budget (anthropic, geminicompat, bedrock): "minimal"→1024, "low"→4096,
-// "medium"→8192, "high"→16384. Reports false (with a zero int) for "" or
-// any unrecognized effort string, so callers can omit the field entirely
-// rather than send a fabricated default.
+// "medium"→8192, "high"→16384, and EffortNone→0 (reported as (0, true):
+// asked for no thinking). Reports false (with a zero int) for "" or any
+// unrecognized effort string, so callers can omit the field entirely rather
+// than send a fabricated default.
 func EffortBudgetTokens(effort string) (int, bool) {
 	switch effort {
+	case EffortNone:
+		return 0, true
 	case "minimal":
 		return 1024, true
 	case "low":
@@ -199,7 +213,8 @@ func EffortBudgetTokens(effort string) (int, bool) {
 
 // ResolveBudgetTokens resolves a ReasoningConfig to a concrete thinking-token
 // budget: BudgetTokens when set, else the EffortBudgetTokens mapping of
-// Effort. ok is false when neither resolves.
+// Effort. ok is false when neither resolves. (0, true) means explicitly no
+// thinking — callers must disable thinking rather than send a zero budget.
 func ResolveBudgetTokens(cfg *ReasoningConfig) (n int, ok bool) {
 	if cfg == nil {
 		return 0, false

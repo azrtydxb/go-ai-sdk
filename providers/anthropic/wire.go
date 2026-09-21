@@ -96,7 +96,7 @@ type messagesRequest struct {
 // as an APICallError from the API.
 type wireThinking struct {
 	Type         string `json:"type"`
-	BudgetTokens int    `json:"budget_tokens"`
+	BudgetTokens int    `json:"budget_tokens,omitempty"` // omitted for Type "disabled"
 }
 
 // ---- Response wire types (non-streaming) ----
@@ -213,6 +213,9 @@ func buildMessagesRequest(modelID string, call provider.Call, stream bool) (mess
 	if call.Reasoning != nil {
 		if budget, ok := provider.ResolveBudgetTokens(call.Reasoning); ok {
 			req.Thinking = &wireThinking{Type: "enabled", BudgetTokens: budget}
+			if budget == 0 { // provider.EffortNone / explicit zero budget
+				req.Thinking.Type = "disabled"
+			}
 		}
 	}
 

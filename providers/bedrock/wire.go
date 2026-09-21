@@ -333,12 +333,11 @@ func buildConverseRequest(call provider.Call) (converseRequest, error) {
 
 	if call.Reasoning != nil {
 		if budget, ok := provider.ResolveBudgetTokens(call.Reasoning); ok {
-			req.AdditionalModelRequestFields = map[string]any{
-				"thinking": map[string]any{
-					"type":          "enabled",
-					"budget_tokens": budget,
-				},
+			thinking := map[string]any{"type": "enabled", "budget_tokens": budget}
+			if budget == 0 { // provider.EffortNone / explicit zero budget
+				thinking = map[string]any{"type": "disabled"}
 			}
+			req.AdditionalModelRequestFields = map[string]any{"thinking": thinking}
 		}
 	}
 
