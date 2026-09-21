@@ -8,6 +8,12 @@ once it reaches 1.0.
 
 ## [Unreleased]
 
+## v0.6.0 (2026-09-21)
+
+Subscription auth becomes self-contained — the SDK can now store credentials,
+refresh them automatically, and log in without a browser — and reasoning gains
+an explicit "no thinking" level.
+
 ### Added
 
 - **Credential persistence and automatic refresh for subscription auth.**
@@ -38,6 +44,35 @@ once it reaches 1.0.
   wins when both are present. (#7)
 - An explicit `BudgetTokens` of 0 no longer sends Anthropic/Bedrock an
   enabled thinking block with a zero budget, which the APIs reject.
+
+## v0.5.2 (2026-09-18)
+
+### Fixed
+
+- Codex forwards `Call.Reasoning.Effort` on Generate and Stream, including
+  options set by `agent.Agent.PrepareOpts`; unsupported generic sampling and
+  output parameters are still not forwarded.
+
+### Added
+
+- `mcp.NewStdioTransportWithOptions` for context-bound MCP child processes
+  with an explicit environment, working directory, and stderr handling. The
+  legacy constructor's behavior is unchanged.
+
+## v0.5.1 (2026-09-18)
+
+### Added
+
+- Public `auth.Login`, `auth.Refresh`, `auth.Credentials`, and
+  `auth.Interaction` for browser/manual Codex and Anthropic login, plus
+  `codex.Credential` and `codex.WithCredentialSource`.
+
+### Fixed
+
+- Anthropic OAuth state is separate from its PKCE verifier; state is validated
+  before token exchange or denial handling, losing prompts are cancelled and
+  joined, occupied callback ports fall back to manual login, and public errors
+  are sanitized.
 
 ## v0.5.0 (2026-09-17)
 
