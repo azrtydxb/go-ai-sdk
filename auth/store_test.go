@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -113,6 +114,73 @@ func TestSourceUsesFileRefreshedByAnotherProcess(t *testing.T) {
 	}
 	if got, err := source.Token(context.Background()); err != nil || got != "theirs" {
 		t.Fatalf("Token = %q, %v; want the other process's token", got, err)
+	}
+}
+
+// TestSourceRefreshIsSerializedAcrossProcesses runs several Sources on one
+// file — each standing in for a separate process — against a token endpoint
+// that, like the real one, rejects a refresh token it has already rotated.
+func TestSourceRefreshIsSerializedAcrossProcesses(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cred.json")
+	if err := auth.Save(path, auth.Credentials{Access: "old-access", Refresh: "old-refresh", Expires: time.Now().Add(-time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	refreshes := 0
+	base := tokenClient(t, "codex", func(map[string]string) {})
+	client := &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+		mu.Lock()
+		refreshes++
+		first := refreshes == 1
+		mu.Unlock()
+		if !first {
+			return &http.Response{StatusCode: 400, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"error":"invalid_grant"}`))}, nil
+		}
+		time.Sleep(50 * time.Millisecond) // hold the refresh open so the others pile up
+		return base.Transport.RoundTrip(r)
+	})}
+
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := auth.NewSource("codex", path, client).Token(context.Background()); err != nil {
+				t.Errorf("Token: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	if refreshes != 1 {
+		t.Errorf("refreshes = %d, want 1", refreshes)
+	}
+	if _, err := os.Stat(path + ".lock"); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("lock file left behind: %v", err)
+	}
+}
+
+func TestSourceLockWaitHonorsContextAndBreaksStaleLocks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cred.json")
+	client := tokenClient(t, "codex", func(map[string]string) {})
+	if err := auth.Save(path, auth.Credentials{Access: "old-access", Refresh: "old-refresh", Expires: time.Now().Add(-time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path+".lock", nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	if _, err := auth.NewSource("codex", path, client).Token(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Token behind a held lock = %v, want DeadlineExceeded", err)
+	}
+
+	old := time.Now().Add(-time.Hour) // a crashed owner's leftover
+	if err := os.Chtimes(path+".lock", old, old); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := auth.NewSource("codex", path, client).Token(context.Background()); err != nil {
+		t.Fatalf("Token behind a stale lock: %v", err)
 	}
 }
 

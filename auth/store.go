@@ -3,7 +3,9 @@ package auth
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -76,19 +78,25 @@ func (s *Source) Credentials(ctx context.Context) (Credentials, error) {
 	// every refresh save to it), and another process sharing it may have
 	// refreshed already — refreshing again with the token it rotated away
 	// would fail.
-	// debt: no cross-process file lock — two processes that both find the
-	// file expired still race to refresh. Revisit if concurrent CLIs sharing
-	// one credential file report spurious refresh failures.
-	if s.path != "" {
-		if c, err := Load(s.path); err == nil {
-			s.current = c
-		}
-	}
+	s.reload()
 	if usable(s.current) {
 		return s.current, nil
 	}
 	if s.current.Refresh == "" {
 		return Credentials{}, errors.New("auth: no credentials; log in first")
+	}
+	if s.path != "" {
+		// Refresh tokens rotate, so only one process may refresh at a time;
+		// whoever waited here finds the winner's tokens on the second reload.
+		unlock, err := lockFile(ctx, s.path+".lock")
+		if err != nil {
+			return Credentials{}, err
+		}
+		defer unlock()
+		s.reload()
+		if usable(s.current) {
+			return s.current, nil
+		}
 	}
 	c, err := Refresh(ctx, s.provider, s.client, s.current)
 	if err != nil {
@@ -101,6 +109,46 @@ func (s *Source) Credentials(ctx context.Context) (Credentials, error) {
 		}
 	}
 	return c, nil
+}
+
+func (s *Source) reload() {
+	if s.path == "" {
+		return
+	}
+	if c, err := Load(s.path); err == nil {
+		s.current = c
+	}
+}
+
+// staleLock is how old a lock file must be before a waiter assumes its owner
+// crashed and breaks it — far longer than a token refresh takes.
+const staleLock = 2 * time.Minute
+
+// lockFile takes a cross-process lock by exclusively creating path, waiting
+// for a current holder until ctx ends. A lock file rather than flock: it is
+// portable stdlib, at the price of breaking locks left by a crashed owner by
+// age. Two waiters breaking the same stale lock can both proceed; that needs
+// a crash plus simultaneous waiters, and costs one failed refresh.
+func lockFile(ctx context.Context, path string) (unlock func(), err error) {
+	for {
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			_ = f.Close()
+			return func() { _ = os.Remove(path) }, nil
+		}
+		if !errors.Is(err, fs.ErrExist) {
+			return nil, errors.New("auth: lock credentials failed")
+		}
+		if info, statErr := os.Stat(path); statErr == nil && time.Since(info.ModTime()) > staleLock {
+			_ = os.Remove(path)
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 }
 
 // Token returns a current access token.

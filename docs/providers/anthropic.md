@@ -49,7 +49,9 @@ return credential snapshots and write nothing to disk. `auth.Save(path, creds)`
 persists a snapshot (atomic write, file mode `0600`, created directories
 `0700`), and `auth.NewSource("anthropic", path, client)` is a ready-made token
 source: it loads from the file, refreshes once the access token expires, saves
-rotated tokens back, and is safe for concurrent use. Never log credentials;
+rotated tokens back, and is safe for concurrent use, including by several
+processes sharing the file (refreshes are serialized through a `<path>.lock`
+file). Never log credentials;
 the SDK never reads `~/.claude`.
 
 The callback is fixed at `http://localhost:53692/callback`, bound to IPv4

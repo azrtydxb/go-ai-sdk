@@ -61,9 +61,10 @@ Import `github.com/azrtydxb/go-ai-sdk/auth` for the public login API:
   tightened), and any directory it creates is `0700`.
 - `auth.NewSource("codex", path, client)` combines them: it loads from the
   file, refreshes once the access token expires, saves rotated tokens back,
-  and is safe for concurrent use. Before refreshing it re-reads the file, so a
-  token another process already refreshed is reused; there is no cross-process
-  file lock beyond that.
+  and is safe for concurrent use — across processes too: a refresh holds
+  a `<path>.lock` file, and a process that waited on it reuses the tokens the
+  winner saved instead of refreshing again. A lock left by a crashed process
+  is broken after two minutes.
 - A nil HTTP client uses `http.DefaultClient`. Public auth errors omit raw
   endpoint bodies and interaction errors; cancellation remains identifiable.
 
