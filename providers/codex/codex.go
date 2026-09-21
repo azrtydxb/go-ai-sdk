@@ -9,6 +9,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/azrtydxb/go-ai-sdk/auth"
 	"github.com/azrtydxb/go-ai-sdk/internal/codexauth"
 	"github.com/azrtydxb/go-ai-sdk/internal/codextransport"
 	"github.com/azrtydxb/go-ai-sdk/provider"
@@ -21,6 +22,7 @@ type Credential = codexauth.Credential
 type Provider struct {
 	credential       codexauth.Credential
 	credentialSource func(context.Context) (Credential, error)
+	credentialFile   string
 	httpClient       *http.Client
 	baseURL          string
 }
@@ -28,7 +30,10 @@ type Provider struct {
 // Option configures a Provider.
 type Option func(*Provider)
 
-// WithCredentials sets the OAuth credentials for the provider.
+// WithCredentials sets the OAuth credentials for the provider. When cred
+// carries a refresh token, an expired access token is refreshed
+// automatically, in memory only: rotated tokens are not persisted, so prefer
+// WithCredentialFile for anything longer-lived than one process.
 func WithCredentials(cred Credential) Option {
 	return func(p *Provider) { p.credential = cred }
 }
@@ -38,6 +43,15 @@ func WithCredentials(cred Credential) Option {
 // refresh, secure persistence, and synchronization of concurrent source calls.
 func WithCredentialSource(source func(context.Context) (Credential, error)) Option {
 	return func(p *Provider) { p.credentialSource = source }
+}
+
+// WithCredentialFile loads credentials from a file written by auth.Save (or
+// an auth.Source), refreshes them automatically once expired, and saves
+// rotated tokens back with owner-only permissions. Credentials passed via
+// WithCredentials are written to the file first. WithCredentialSource takes
+// precedence over it.
+func WithCredentialFile(path string) Option {
+	return func(p *Provider) { p.credentialFile = path }
 }
 
 // WithHTTPClient overrides the *http.Client used for requests.
@@ -56,6 +70,23 @@ func New(opts ...Option) *Provider {
 	p := &Provider{}
 	for _, opt := range opts {
 		opt(p)
+	}
+	// A zero Expires means the caller never said when the token expires, so
+	// it is used as-is rather than refreshed on the first request.
+	refreshable := p.credential.Refresh != "" && !p.credential.Expires.IsZero()
+	if p.credentialSource == nil && (p.credentialFile != "" || refreshable) {
+		source := auth.NewSource("codex", p.credentialFile, p.httpClient)
+		var setErr error
+		if p.credential.Access != "" || p.credential.Refresh != "" {
+			setErr = source.Set(auth.Credentials(p.credential))
+		}
+		p.credentialSource = func(ctx context.Context) (Credential, error) {
+			if setErr != nil {
+				return Credential{}, setErr
+			}
+			c, err := source.Credentials(ctx)
+			return Credential(c), err
+		}
 	}
 	return p
 }

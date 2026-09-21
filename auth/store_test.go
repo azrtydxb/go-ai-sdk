@@ -1,0 +1,166 @@
+package auth_test
+
+import (
+	"context"
+	"errors"
+	"io"
+	"io/fs"
+	"net/http"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/azrtydxb/go-ai-sdk/auth"
+)
+
+func TestSaveLoadOwnerOnlyPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits")
+	}
+	dir := filepath.Join(t.TempDir(), "nested")
+	path := filepath.Join(dir, "codex.json")
+	want := auth.Credentials{Access: "a", Refresh: "r", Expires: time.Now().Add(time.Hour).Round(0), AccountID: "acct"}
+
+	// A pre-existing world-readable file must be tightened, not kept.
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := auth.Save(path, want); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	for p, mode := range map[string]fs.FileMode{path: 0o600, dir: 0o700} {
+		info, err := os.Stat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != mode {
+			t.Errorf("%s mode = %o, want %o", p, got, mode)
+		}
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Errorf("dir has %d entries, want 1 (temp file left behind)", len(entries))
+	}
+	got, err := auth.Load(path)
+	if err != nil || !got.Expires.Equal(want.Expires) || got.Access != want.Access || got.Refresh != want.Refresh || got.AccountID != want.AccountID {
+		t.Fatalf("Load = %+v, %v; want %+v", got, err, want)
+	}
+	if _, err := auth.Load(filepath.Join(dir, "missing.json")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("Load(missing) = %v, want fs.ErrNotExist", err)
+	}
+}
+
+func TestSourceRefreshesExpiredAndPersistsRotation(t *testing.T) {
+	for _, provider := range []string{"codex", "anthropic"} {
+		t.Run(provider, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "cred.json")
+			refreshes := 0
+			client := tokenClient(t, provider, func(fields map[string]string) {
+				refreshes++
+				if fields["grant_type"] != "refresh_token" || fields["refresh_token"] != "old-refresh" {
+					t.Errorf("refresh grant = %v", fields)
+				}
+			})
+			source := auth.NewSource(provider, path, client)
+			if _, err := source.Credentials(context.Background()); err == nil {
+				t.Fatal("Credentials with nothing stored: want error")
+			}
+			expired := auth.Credentials{Access: "old-access", Refresh: "old-refresh", Expires: time.Now().Add(-time.Minute)}
+			if err := source.Set(expired); err != nil {
+				t.Fatal(err)
+			}
+
+			token, err := source.Token(context.Background())
+			if err != nil || token == "" || token == "old-access" {
+				t.Fatalf("Token = %q, %v; want a refreshed token", token, err)
+			}
+			if _, err := source.Token(context.Background()); err != nil || refreshes != 1 {
+				t.Fatalf("second Token: err=%v refreshes=%d, want the cached token and 1 refresh", err, refreshes)
+			}
+			saved, err := auth.Load(path)
+			if err != nil || saved.Refresh != "rotated-refresh" || saved.Access != token {
+				t.Fatalf("file after refresh = %+v, %v; want the rotated tokens", saved, err)
+			}
+
+			// A fresh Source (a new process) picks the saved credentials up
+			// without logging in or refreshing again.
+			again := auth.NewSource(provider, path, client)
+			if got, err := again.Token(context.Background()); err != nil || got != token || refreshes != 1 {
+				t.Fatalf("new Source Token = %q, %v (refreshes=%d)", got, err, refreshes)
+			}
+		})
+	}
+}
+
+func TestSourceUsesFileRefreshedByAnotherProcess(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cred.json")
+	client := &http.Client{Transport: roundTrip(func(*http.Request) (*http.Response, error) {
+		t.Error("refreshed although the file already held valid credentials")
+		return nil, errors.New("unexpected")
+	})}
+	source := auth.NewSource("codex", path, client)
+	if err := source.Set(auth.Credentials{Access: "old", Refresh: "old-refresh", Expires: time.Now().Add(-time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := auth.Save(path, auth.Credentials{Access: "theirs", Refresh: "their-refresh", Expires: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := source.Token(context.Background()); err != nil || got != "theirs" {
+		t.Fatalf("Token = %q, %v; want the other process's token", got, err)
+	}
+}
+
+func TestLoginDevice(t *testing.T) {
+	var shownURL, shownCode string
+	polls := 0
+	inner := tokenClient(t, "codex", func(fields map[string]string) {
+		if fields["grant_type"] != "authorization_code" || fields["code"] != "device-auth-code" || fields["code_verifier"] != "device-verifier" {
+			t.Errorf("token exchange = %v", fields)
+		}
+	})
+	client := &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+		respond := func(status int, body string) (*http.Response, error) {
+			return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+		}
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/usercode"):
+			return respond(200, `{"device_auth_id":"dev-1","user_code":"ABCD-1234","interval":"1","expires_in":"60"}`)
+		case strings.Contains(r.URL.Path, "deviceauth"):
+			polls++
+			if polls == 1 {
+				return respond(403, `{}`) // still pending
+			}
+			return respond(200, `{"authorization_code":"device-auth-code","code_verifier":"device-verifier"}`)
+		default:
+			return inner.Transport.RoundTrip(r)
+		}
+	})}
+
+	got, err := auth.LoginDevice(context.Background(), "codex", client, func(_ context.Context, verificationURL, userCode string) error {
+		shownURL, shownCode = verificationURL, userCode
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("LoginDevice: %v", err)
+	}
+	if !strings.HasPrefix(shownURL, "https://auth.openai.com/") || shownCode != "ABCD-1234" {
+		t.Errorf("show got (%q, %q)", shownURL, shownCode)
+	}
+	if got.Refresh != "rotated-refresh" || got.AccountID != "fixture-account" || got.Expires.IsZero() || polls != 2 {
+		t.Errorf("credentials = %+v after %d polls", got, polls)
+	}
+
+	if _, err := auth.LoginDevice(context.Background(), "anthropic", client, func(context.Context, string, string) error { return nil }); err == nil {
+		t.Error("LoginDevice(anthropic): want unsupported error")
+	}
+	_, err = auth.LoginDevice(context.Background(), "codex", client, func(context.Context, string, string) error { return errors.New("RAW-SECRET-TOKEN") })
+	if err == nil || strings.Contains(err.Error(), "RAW-SECRET") || errors.Unwrap(err) != nil {
+		t.Errorf("unsafe show error: %v", err)
+	}
+}

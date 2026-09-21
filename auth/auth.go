@@ -1,5 +1,7 @@
-// Package auth provides browser OAuth login and refresh without credential
-// persistence. Callers own secure storage and must not log credentials.
+// Package auth provides OAuth login (browser and device-code), refresh, and
+// an owner-only credential file store for subscription providers. Login and
+// Refresh never touch disk; Save, Load, and Source do, and only at the path
+// the caller names. Callers must not log credentials.
 package auth
 
 import (

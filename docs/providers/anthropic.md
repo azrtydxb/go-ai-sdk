@@ -44,9 +44,13 @@ The public `github.com/azrtydxb/go-ai-sdk/auth` package reuses the SDK's PKCE
 browser flow against `https://claude.ai/oauth/authorize` and exchange/refresh
 at `https://platform.claude.com/v1/oauth/token`. Call
 `auth.Login(ctx, "anthropic", client, interaction)` during setup, and
-`auth.Refresh(ctx, "anthropic", client, current)` when refreshing. Both return
-credential snapshots for caller-owned secure storage; neither writes files
-or accesses a keyring. Persist rotated refresh tokens and never log credentials.
+`auth.Refresh(ctx, "anthropic", client, current)` to force a refresh. Both
+return credential snapshots and write nothing to disk. `auth.Save(path, creds)`
+persists a snapshot (atomic write, file mode `0600`, created directories
+`0700`), and `auth.NewSource("anthropic", path, client)` is a ready-made token
+source: it loads from the file, refreshes once the access token expires, saves
+rotated tokens back, and is safe for concurrent use. Never log credentials;
+the SDK never reads `~/.claude`.
 
 The callback is fixed at `http://localhost:53692/callback`, bound to IPv4
 loopback. Browser and manual input race; manual input must include the
@@ -63,13 +67,26 @@ ephemeral loopback listeners, not real credentials or fixed-port fixtures.
 
 ```go
 import (
+	"github.com/azrtydxb/go-ai-sdk/auth"
+	"github.com/azrtydxb/go-ai-sdk/providers/anthropic"
+)
+
+// Setup, once: creds, err := auth.Login(ctx, "anthropic", nil, interaction),
+// then auth.Save(path, creds). Every run:
+p := anthropic.New(anthropic.WithOAuthTokenSource(auth.NewSource("anthropic", path, nil)))
+```
+
+For app-managed storage (a keyring, a secrets manager), any type with a
+`Token` method works instead:
+
+```go
+import (
 	"context"
 
 	"github.com/azrtydxb/go-ai-sdk/providers/anthropic"
 )
 
-// Implement this shape in the application to load, refresh, and securely
-// persist credentials. WithOAuthTokenSource accepts it without internal imports.
+// WithOAuthTokenSource accepts this shape without internal imports.
 type tokenSource func(context.Context) (string, error)
 
 func (f tokenSource) Token(ctx context.Context) (string, error) { return f(ctx) }
