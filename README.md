@@ -90,7 +90,7 @@ in [`examples/`](examples/), each compiled by CI.
 
 ## Status
 
-**v0.5.** The public API has reached **full parity with the AI SDK 6 core**
+**v0.6.0.** The public API has reached **full parity with the AI SDK 6 core**
 (see the migration guide's
 [AI SDK 6 delta](docs/migrating-from-vercel-ai-sdk.md#ai-sdk-6-delta) for
 the feature-by-feature record, and the

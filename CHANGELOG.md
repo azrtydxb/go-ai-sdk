@@ -8,6 +8,12 @@ once it reaches 1.0.
 
 ## [Unreleased]
 
+## 0.6.0 (2026-09-21)
+
+Subscription auth becomes self-contained — the SDK can now store credentials,
+refresh them automatically, and log in without a browser — and reasoning gains
+an explicit "no thinking" level.
+
 ### Added
 
 - **Credential persistence and automatic refresh for subscription auth.**
@@ -39,7 +45,36 @@ once it reaches 1.0.
 - An explicit `BudgetTokens` of 0 no longer sends Anthropic/Bedrock an
   enabled thinking block with a zero budget, which the APIs reject.
 
-## v0.5.0 (2026-09-17)
+## 0.5.2 (2026-09-18)
+
+### Fixed
+
+- Codex forwards `Call.Reasoning.Effort` on Generate and Stream, including
+  options set by `agent.Agent.PrepareOpts`; unsupported generic sampling and
+  output parameters are still not forwarded.
+
+### Added
+
+- `mcp.NewStdioTransportWithOptions` for context-bound MCP child processes
+  with an explicit environment, working directory, and stderr handling. The
+  legacy constructor's behavior is unchanged.
+
+## 0.5.1 (2026-09-18)
+
+### Added
+
+- Public `auth.Login`, `auth.Refresh`, `auth.Credentials`, and
+  `auth.Interaction` for browser/manual Codex and Anthropic login, plus
+  `codex.Credential` and `codex.WithCredentialSource`.
+
+### Fixed
+
+- Anthropic OAuth state is separate from its PKCE verifier; state is validated
+  before token exchange or denial handling, losing prompts are cancelled and
+  joined, occupied callback ports fall back to manual login, and public errors
+  are sanitized.
+
+## 0.5.0 (2026-09-17)
 
 Adds direct subscription-auth providers for OpenAI Codex/ChatGPT Plus-Pro
 and Claude Pro/Max, implemented against the same OAuth and backend transport
@@ -75,7 +110,7 @@ shapes used by Pi rather than delegating to the `codex` or `claude` CLIs.
   directories with mode `0700`; no implementation shells out to `codex` or
   `claude`, reads `~/.codex` / `~/.claude`, or scrapes browser cookies.
 
-## v0.4.1 (2026-08-14)
+## 0.4.1 (2026-08-14)
 
 A repo-wide de-duplication and simplification pass (ponytail audit):
 ~1,900 production lines deleted with no public API changes and no
@@ -125,7 +160,7 @@ transcription upload filenames).
   (single-value), bedrock's never-decoded `eventMessageStart` wire type
   and a delegation-only `doRequest` wrapper — all internal.
 
-## v0.4.0 (2026-08-14)
+## 0.4.0 (2026-08-14)
 
 A follow-up wave closing every item carried in v0.3.0's Notes section, plus
 one item from the v0.2.1 hardening baseline: `Call.Headers`'s reach
@@ -214,7 +249,7 @@ map[string]string` field, threaded through to the corresponding
   repair-from-scratch approach and is not planned to change without a
   different parsing strategy (e.g. incremental/streaming JSON parsing).
 
-## v0.3.0 (2026-08-14)
+## 0.3.0 (2026-08-14)
 
 A follow-up wave closing the deferred/documented-not-fixed items from the
 `ai`/`mcp` correctness, concurrency, and feature-parity audits: two
@@ -304,7 +339,7 @@ each remains its own documented, non-blocking gap:
   `GenerateObject`/`StreamObject` only; the embed and media call paths
   don't thread per-call headers through to their provider requests.
 
-## v0.2.3 (2026-08-04)
+## 0.2.3 (2026-08-04)
 
 A documentation-only release ahead of announcing the module. No code, no
 public API, and no behavior changed — every change below is doc comments,
@@ -330,7 +365,7 @@ example tests, and the LICENSE copyright line.
 - **`LICENSE`**: filled in the Apache-2.0 appendix's
   `Copyright [yyyy] [name of copyright owner]` placeholder.
 
-## v0.2.2 (2026-08-04)
+## 0.2.2 (2026-08-04)
 
 A follow-up sweep closing every deferred/documented-not-fixed item left by
 the v0.2.1 hardening audits (concurrency, connection-reuse, and one
@@ -393,7 +428,7 @@ changes are called out under Changed.
   instead of each duplicating it — no behavior change. See
   [Architecture](docs/architecture.md).
 
-## v0.2.1 (2026-08-04)
+## 0.2.1 (2026-08-04)
 
 A hardening sweep across security (SSRF, injection, RNG), concurrency
 (goroutine/connection leaks, races), and correctness (two HIGH bugs
@@ -560,7 +595,7 @@ out under Changed.
   (previously the request was always sent). Conforming tool-serving servers
   advertise the capability, so this only affects servers that omit it.
 
-## v0.2.0 (2026-08-03)
+## 0.2.0 (2026-08-03)
 
 Waves 9, 10, 11, 12, 13, and 14 of the [AI SDK 6 parity roadmap](docs/superpowers/plans/2026-08-03-v6-parity-roadmap.md) —
 the closing release of the parity program. Wave 9: v5 leftovers plus quick
@@ -1040,7 +1075,7 @@ OnInputDelta, OnInputAvailable})`, mirroring the Vercel AI SDK v6's
   empty `error` field now includes the raw response body in the returned
   error, instead of reporting the failure with no detail at all.
 
-## v0.1.0 (2026-08-03)
+## 0.1.0 (2026-08-03)
 
 The public API described in the [design spec](docs/superpowers/specs/2026-08-02-go-ai-sdk-design.md)
 is implemented and tested end-to-end: the full core SDK, 22 providers, media
