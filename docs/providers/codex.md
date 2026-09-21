@@ -10,18 +10,22 @@ import (
 	"context"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
+	"github.com/azrtydxb/go-ai-sdk/auth"
 	"github.com/azrtydxb/go-ai-sdk/providers/codex"
 )
 
-// Complete auth.Login(ctx, "codex", client, interaction) during setup,
-// securely persist the result, then load the credential for requests.
-cred := codex.Credential{
-	Access:    "eyJ...",
-	Refresh:   "...",
-	AccountID: "acct_...",
+// Setup, once: log in and save the credentials (file mode 0600).
+creds, err := auth.Login(ctx, "codex", nil, interaction) // or auth.LoginDevice
+if err != nil {
+	return err
+}
+if err := auth.Save(path, creds); err != nil {
+	return err
 }
 
-p := codex.New(codex.WithCredentials(cred))
+// Every run: the provider loads the file, refreshes expired tokens
+// automatically, and saves rotated tokens back.
+p := codex.New(codex.WithCredentialFile(path))
 model := p.Model("gpt-5.4")
 
 result, err := ai.GenerateText(context.Background(), ai.GenerateTextOpts{
@@ -32,7 +36,7 @@ result, err := ai.GenerateText(context.Background(), ai.GenerateTextOpts{
 
 ## Authentication
 
-Import `github.com/azrtydxb/go-ai-sdk/auth` for the public browser-login API:
+Import `github.com/azrtydxb/go-ai-sdk/auth` for the public login API:
 
 - `auth.Login(ctx, "codex", client, interaction)` reuses the SDK's PKCE flow
   and validates state before exchanging a code. The callback is fixed at
@@ -46,21 +50,42 @@ Import `github.com/azrtydxb/go-ai-sdk/auth` for the public browser-login API:
   state-validated manual login. Callback-only login fails immediately with a
   safe listener-unavailable error. State-validated provider denial callbacks
   end login promptly; invalid-state callbacks are ignored.
-- `auth.Refresh(ctx, "codex", client, current)` returns updated access and
-  refresh tokens, expiry, and account ID for caller persistence.
+- `auth.LoginDevice(ctx, "codex", client, show)` is the device-code flow for
+  hosts with no browser: `show` receives the verification URL and user code
+  to display, and the call polls until the user authorizes, the code expires,
+  or the context ends.
+- `auth.Refresh(ctx, "codex", client, current)` forces a refresh and returns
+  updated access and refresh tokens, expiry, and account ID.
+- `auth.Save(path, creds)` and `auth.Load(path)` persist a snapshot as JSON.
+  The write is atomic, the file is mode `0600` (an existing looser mode is
+  tightened), and any directory it creates is `0700`.
+- `auth.NewSource("codex", path, client)` combines them: it loads from the
+  file, refreshes once the access token expires, saves rotated tokens back,
+  and is safe for concurrent use — across processes too: a refresh holds
+  a `<path>.lock` file, and a process that waited on it reuses the tokens the
+  winner saved instead of refreshing again. A lock left by a crashed process
+  is broken after two minutes.
 - A nil HTTP client uses `http.DefaultClient`. Public auth errors omit raw
   endpoint bodies and interaction errors; cancellation remains identifiable.
 
 The public credential fields are `Access`, `Refresh`, `Expires`, and
-`AccountID`. The SDK does not log or persist them through this API. The caller
-owns secure storage and must persist rotated refresh tokens. Device login is
-not exposed by this facade.
+`AccountID`. The SDK never logs them. `Login`, `LoginDevice`, and `Refresh`
+write nothing to disk; only `Save`, a `Source` with a path, and
+`codex.WithCredentialFile` do. The SDK never reads `~/.codex`.
 
-`codex.WithCredentials(codex.Credential(creds))` configures a fixed snapshot.
-For app-managed refresh, use `codex.WithCredentialSource(source)`: the source
-is invoked on every Generate and Stream call, even on an already-created
-model, and takes precedence over the fixed snapshot. The caller must make
-the source concurrency-safe and handle refresh and persistence there.
+Three ways to hand credentials to the provider:
+
+- `codex.WithCredentialFile(path)` — the default choice. Loads, refreshes
+  automatically, and saves rotated tokens to `path`.
+- `codex.WithCredentials(codex.Credential(creds))` — an in-memory snapshot.
+  With a refresh token and a non-zero `Expires` it still refreshes
+  automatically once expired, but rotated tokens are lost on exit. A zero
+  `Expires` is used as-is and never refreshed.
+- `codex.WithCredentialSource(source)` — app-managed storage (a keyring, a
+  secrets manager). The source is invoked on every Generate and Stream call,
+  even on an already-created model, and takes precedence over the other two.
+  The caller must make it concurrency-safe and handle refresh and persistence
+  there.
 
 ## Request shape
 

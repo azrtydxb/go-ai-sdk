@@ -74,7 +74,22 @@ func SaveCredential(path string, c Credential) error {
 	if err != nil {
 		return fmt.Errorf("codexauth: marshal credential: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	// Write-then-rename: a crash mid-write must not destroy the only copy of
+	// a refresh token, and CreateTemp's 0600 mode also replaces a looser mode
+	// left on an existing file (os.WriteFile would keep it).
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".credential-*")
+	if err != nil {
+		return fmt.Errorf("codexauth: write credential: %w", err)
+	}
+	_, err = tmp.Write(data)
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		err = os.Rename(tmp.Name(), path)
+	}
+	if err != nil {
+		_ = os.Remove(tmp.Name())
 		return fmt.Errorf("codexauth: write credential: %w", err)
 	}
 	return nil

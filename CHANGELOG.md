@@ -10,6 +10,16 @@ once it reaches 1.0.
 
 ### Added
 
+- **Credential persistence and automatic refresh for subscription auth.**
+  `auth.Save` / `auth.Load` store credentials atomically with mode `0600`
+  (created directories `0700`); `auth.NewSource` loads, refreshes on expiry,
+  and saves rotated tokens — serialized across processes by a lock file, so
+  a rotating refresh token is never spent twice — and doubles as the token
+  source for `anthropic.WithOAuthTokenSource`. `codex.WithCredentialFile` wires it into
+  the Codex provider, and `codex.WithCredentials` now refreshes an expired
+  token in memory when it carries a refresh token and an expiry. (#4, #5)
+- **`auth.LoginDevice`** exposes Codex device-code login for headless
+  hosts. (#4)
 - **`provider.EffortNone` ("none") — explicitly no thinking.**
   `EffortBudgetTokens` and `ResolveBudgetTokens` report it (and an explicit
   zero `BudgetTokens`) as `(0, true)`, distinct from `""` / unrecognized
@@ -19,6 +29,9 @@ once it reaches 1.0.
 
 ### Fixed
 
+- Internal credential writers now write-then-rename, so a crash mid-write
+  cannot destroy a refresh token, and an existing file with a looser mode is
+  tightened to `0600` instead of keeping it.
 - **openaicompat: `reasoning` field dropped.** Reasoning text sent as
   `reasoning` (OpenRouter's field name) instead of `reasoning_content` is now
   surfaced as `ReasoningPart` / `ReasoningDelta`; `reasoning_content` still
