@@ -214,7 +214,9 @@ func EffortBudgetTokens(effort string) (int, bool) {
 // ResolveBudgetTokens resolves a ReasoningConfig to a concrete thinking-token
 // budget: BudgetTokens when set, else the EffortBudgetTokens mapping of
 // Effort. ok is false when neither resolves. (0, true) means explicitly no
-// thinking — callers must disable thinking rather than send a zero budget.
+// thinking — callers must send their wire's "thinking off" shape for it
+// (anthropic/bedrock: type "disabled"; geminicompat: a zero thinkingBudget),
+// never an enabled block carrying a zero budget.
 func ResolveBudgetTokens(cfg *ReasoningConfig) (n int, ok bool) {
 	if cfg == nil {
 		return 0, false
