@@ -44,6 +44,7 @@ type Source struct {
 
 	mu      sync.Mutex
 	current Credentials
+	unsaved bool // current holds refreshed tokens the file does not have yet
 }
 
 // NewSource returns a Source for "codex" or "anthropic" backed by the file
@@ -55,15 +56,18 @@ func NewSource(provider, path string, client *http.Client) *Source {
 }
 
 // Set replaces the current credentials — typically the result of Login or
-// LoginDevice — and saves them when the Source has a path.
+// LoginDevice — saving them first when the Source has a path. If the save
+// fails the Source is left unchanged.
 func (s *Source) Set(c Credentials) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.current = c
-	if s.path == "" {
-		return nil
+	if s.path != "" {
+		if err := Save(s.path, c); err != nil {
+			return err
+		}
 	}
-	return Save(s.path, c)
+	s.current, s.unsaved = c, false
+	return nil
 }
 
 // Credentials returns unexpired credentials, refreshing and saving them
@@ -71,6 +75,15 @@ func (s *Source) Set(c Credentials) error {
 func (s *Source) Credentials(ctx context.Context) (Credentials, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// A refresh whose save failed spent the old refresh token, so memory
+	// holds the only valid copy: keep retrying the save, and keep failing
+	// loudly, until the file has it.
+	if s.unsaved {
+		if err := Save(s.path, s.current); err != nil {
+			return Credentials{}, err
+		}
+		s.unsaved = false
+	}
 	if usable(s.current) {
 		return s.current, nil
 	}
@@ -78,7 +91,9 @@ func (s *Source) Credentials(ctx context.Context) (Credentials, error) {
 	// every refresh save to it), and another process sharing it may have
 	// refreshed already — refreshing again with the token it rotated away
 	// would fail.
-	s.reload()
+	if err := s.reload(); err != nil {
+		return Credentials{}, err
+	}
 	if usable(s.current) {
 		return s.current, nil
 	}
@@ -93,7 +108,9 @@ func (s *Source) Credentials(ctx context.Context) (Credentials, error) {
 			return Credentials{}, err
 		}
 		defer unlock()
-		s.reload()
+		if err := s.reload(); err != nil {
+			return Credentials{}, err
+		}
 		if usable(s.current) {
 			return s.current, nil
 		}
@@ -105,19 +122,29 @@ func (s *Source) Credentials(ctx context.Context) (Credentials, error) {
 	s.current = c
 	if s.path != "" {
 		if err := Save(s.path, c); err != nil {
+			s.unsaved = true
 			return Credentials{}, err
 		}
 	}
 	return c, nil
 }
 
-func (s *Source) reload() {
+// reload replaces memory with the file's credentials. Only a missing file is
+// ignored: an unreadable or corrupt one is reported rather than papered over
+// by refreshing from a stale snapshot and overwriting it.
+func (s *Source) reload() error {
 	if s.path == "" {
-		return
+		return nil
 	}
-	if c, err := Load(s.path); err == nil {
-		s.current = c
+	c, err := Load(s.path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
 	}
+	if err != nil {
+		return errors.New("auth: load credentials failed")
+	}
+	s.current = c
+	return nil
 }
 
 // staleLock is how old a lock file must be before a waiter assumes its owner

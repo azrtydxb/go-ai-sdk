@@ -184,6 +184,95 @@ func TestSourceLockWaitHonorsContextAndBreaksStaleLocks(t *testing.T) {
 	}
 }
 
+func TestSourceReportsCorruptFileInsteadOfOverwritingIt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cred.json")
+	client := &http.Client{Transport: roundTrip(func(*http.Request) (*http.Response, error) {
+		t.Error("refreshed despite an unreadable credential file")
+		return nil, errors.New("unexpected")
+	})}
+	source := auth.NewSource("codex", path, client)
+	if err := source.Set(auth.Credentials{Access: "old", Refresh: "old-refresh", Expires: time.Now().Add(-time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{corrupt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := source.Token(context.Background()); err == nil || strings.Contains(err.Error(), "no credentials") {
+		t.Fatalf("Token = %v, want a load failure", err)
+	}
+	if data, _ := os.ReadFile(path); string(data) != "{corrupt" {
+		t.Errorf("corrupt file was overwritten: %q", data)
+	}
+}
+
+func TestSourceSaveFailures(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Getuid() == 0 {
+		t.Skip("needs POSIX directory permissions that bind the current user")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cred.json")
+	client := tokenClient(t, "codex", func(map[string]string) {})
+	expired := auth.Credentials{Access: "old-access", Refresh: "old-refresh", Expires: time.Now().Add(-time.Minute)}
+	readOnly := func(on bool) {
+		mode := fs.FileMode(0o700)
+		if on {
+			mode = 0o500
+		}
+		if err := os.Chmod(dir, mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { readOnly(false) })
+
+	// Set: a failed save leaves the Source unchanged.
+	source := auth.NewSource("codex", path, client)
+	readOnly(true)
+	if err := source.Set(expired); err == nil {
+		t.Fatal("Set into a read-only directory: want error")
+	}
+	if _, err := source.Token(context.Background()); err == nil || !strings.Contains(err.Error(), "no credentials") {
+		t.Fatalf("Token after failed Set = %v, want no credentials", err)
+	}
+
+	// Refresh: a failed save keeps failing until the rotated tokens reach the
+	// file, then succeeds without spending the rotated-away token again. The
+	// token endpoint blocks the save by turning the path into a directory.
+	readOnly(false)
+	refreshes := 0
+	blocking := &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+		refreshes++
+		if err := os.Remove(path); err != nil {
+			t.Error(err)
+		}
+		if err := os.MkdirAll(filepath.Join(path, "occupied"), 0o700); err != nil {
+			t.Error(err)
+		}
+		return client.Transport.RoundTrip(r)
+	})}
+	source = auth.NewSource("codex", path, blocking)
+	if err := source.Set(expired); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, err := source.Token(context.Background()); err == nil {
+			t.Fatal("Token with an unsaved rotation: want error")
+		}
+	}
+	if err := os.RemoveAll(path); err != nil {
+		t.Fatal(err)
+	}
+	token, err := source.Token(context.Background())
+	if err != nil {
+		t.Fatalf("Token once the path is writable: %v", err)
+	}
+	if refreshes != 1 {
+		t.Errorf("refreshes = %d, want 1", refreshes)
+	}
+	if saved, err := auth.Load(path); err != nil || saved.Access != token || saved.Refresh != "rotated-refresh" {
+		t.Errorf("file = %+v, %v; want the rotated tokens", saved, err)
+	}
+}
+
 func TestLoginDevice(t *testing.T) {
 	var shownURL, shownCode string
 	polls := 0
