@@ -240,7 +240,7 @@ tagged-consumer resolution works today.
   the living, feature-by-feature status table this snapshot is drawn from
 - [v6 parity roadmap](../plans/2026-08-03-v6-parity-roadmap.md) — the
   wave-by-wave plan (waves 9–14) that reached this state
-- [CHANGELOG.md § 0.2.0](../../../CHANGELOG.md#v020-2026-08-03) — the
+- [CHANGELOG.md § 0.2.0](../../../CHANGELOG.md#020-2026-08-03) — the
   release this wave shipped as
 - [Architecture](../../architecture.md) — how the observability layer and
   `contrib/otel`'s nested-module split fit into the codebase
