@@ -56,6 +56,7 @@ exists — the SDK's public API is implemented and documented end-to-end (see
 - [Hugging Face](providers/huggingface.md)
 - [Baseten](providers/baseten.md)
 - [LM Studio](providers/lmstudio.md)
+- [OpenAI-compatible (self-hosted)](providers/openaicompatible.md)
 - [NVIDIA NIM](providers/nvidia.md)
 - [Vercel AI Gateway](providers/gateway.md)
 - [Mistral](providers/mistral.md)

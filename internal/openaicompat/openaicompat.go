@@ -6,6 +6,8 @@ package openaicompat
 
 import (
 	"net/http"
+
+	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 )
 
 // Config parameterizes an OpenAI-compatible provider.
@@ -61,6 +63,22 @@ type Config struct {
 	// still captured from any stream chunk that carries it (Mistral sends
 	// it on the final content chunk).
 	NoStreamOptions bool
+
+	// OmitEmptyAuth sends no auth header at all when APIKey is empty,
+	// instead of a bare "Authorization: Bearer". Set it for self-hosted
+	// servers (vLLM, TEI, speaches, ...) that need no key.
+	OmitEmptyAuth bool
+
+	// Headers are static extra headers sent on every request, after the
+	// auth header and before per-call headers (which win on conflict). A
+	// key matching the auth header is ignored.
+	Headers map[string]string
+
+	// TranscriptionFormat overrides the response_format sent to
+	// audio/transcriptions. Empty keeps the default (verbose_json, or json
+	// for gpt-4o models). Use "json" for servers that lack verbose_json;
+	// "text" is also understood (the body becomes TranscriptionResponse.Text).
+	TranscriptionFormat string
 }
 
 // client returns the configured *http.Client, falling back to
@@ -74,11 +92,15 @@ func (c Config) client() *http.Client {
 
 // setAuthHeader sets the API key header on req per c.APIKeyHeader.
 func (c Config) setAuthHeader(req *http.Request) {
-	if c.APIKeyHeader != "" {
+	switch {
+	case c.OmitEmptyAuth && c.APIKey == "":
+		// self-hosted, keyless: no auth header
+	case c.APIKeyHeader != "":
 		req.Header.Set(c.APIKeyHeader, c.APIKey)
-		return
+	default:
+		req.Header.Set("Authorization", "Bearer "+c.APIKey)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.APIKey)
+	httpheader.Apply(req, c.Headers, c.authHeaderName())
 }
 
 // authHeaderName returns the HTTP header name c.setAuthHeader sets, so

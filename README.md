@@ -167,7 +167,8 @@ gained a leading `ctx context.Context` parameter and `ai.SpanInfo` gained
 - **Embeddings** — `ai.Embed`/`ai.EmbedMany` with automatic batching and
   `ai.CosineSimilarity`. See [Embeddings](docs/core/embeddings.md).
 - **Reranking** — `ai.Rerank` ranks documents by relevance to a query via
-  `provider.RerankingModel` (Cohere, Voyage, Mixedbread). See
+  `provider.RerankingModel` (Cohere, Voyage, Mixedbread, and self-hosted
+  vLLM/TEI endpoints via the OpenAI-compatible provider). See
   [Embeddings § Reranking](docs/core/embeddings.md#reranking).
 - **Media** — image generation, video generation, speech synthesis,
   transcription (including live streaming transcription), and audio
@@ -220,6 +221,39 @@ gained a leading `ctx context.Context` parameter and `ai.SpanInfo` gained
   server→client channel to receive it on), and token-provider auth with
   transient retry on the HTTP transport. See [MCP](docs/mcp.md).
 
+## Self-hosted OpenAI-compatible endpoints
+
+`providers/openaicompatible` targets vLLM, Ollama, TEI, speaches and any other
+server that speaks the OpenAI API. There is no default base URL and the API key
+is optional (no `Authorization` header is sent without one).
+
+```go
+p := openaicompatible.New("http://vllm.internal:8000/v1",
+	openaicompatible.WithHeader("X-Tenant", "acme"))
+
+chat := p.Chat("Qwen/Qwen3-32B")        // streaming, usage in the final part
+embed := p.Embedding("BAAI/bge-m3")
+
+// Rerank: vLLM /v1/rerank (default) or Hugging Face TEI /rerank.
+vllm := p.Rerank("BAAI/bge-reranker-v2-m3")
+tei := openaicompatible.New("http://tei:8080").
+	Rerank("bge-reranker", openaicompatible.WithRerankShape(openaicompatible.RerankTEI))
+res, _ := ai.Rerank(ctx, ai.RerankOpts{Model: tei, Query: q, Documents: docs, TopN: 5})
+
+// Speech and transcription, e.g. MediaTek Breeze models served behind
+// /v1/audio/speech and /v1/audio/transcriptions.
+tr, _ := ai.Transcribe(ctx, ai.TranscribeOpts{
+	Model:     p.Transcription("MediaTek-Research/Breeze-ASR-25"),
+	Audio:     wav, MediaType: "audio/wav", Language: "zh",
+})
+sp, _ := ai.GenerateSpeech(ctx, ai.GenerateSpeechOpts{
+	Model: p.Speech("MediaTek-Research/BreezyVoice"), Text: "你好", Voice: "my-voice",
+})
+```
+
+See [OpenAI-compatible](docs/providers/openaicompatible.md) and
+`examples/self-hosted-voice`.
+
 ## Documentation
 
 - [Getting started](docs/getting-started.md) — install, first call, env
@@ -249,48 +283,49 @@ All 40 supported providers, by capability (✅ = supported · — = not exposed
 by this package · ⚠ = supported with a caveat, see that provider's page in
 [`docs/providers/`](docs/providers/)):
 
-| Provider                                       | Chat & streaming | Tool calling    | Structured output    | Embeddings | Reranking | Images | Video | Speech (TTS) | Transcription (STT) |
-| ---------------------------------------------- | ---------------- | --------------- | -------------------- | ---------- | --------- | ------ | ----- | ------------ | ------------------- |
-| [OpenAI](docs/providers/openai.md)             | ✅               | ✅              | ✅ native            | ✅         | —         | ✅     | —     | ✅           | ✅ ⚠ live           |
-| [OpenAI Codex](docs/providers/codex.md)        | ✅               | ✅              | ⚠ tool-mode          | —          | —         | —      | —     | —            | —                   |
-| [Azure OpenAI](docs/providers/azure.md)        | ✅               | ✅              | ✅ native            | ✅         | —         | —      | —     | —            | —                   |
-| [Groq](docs/providers/groq.md)                 | ✅               | ✅              | ✅ native            | —          | —         | —      | —     | —            | ✅                  |
-| [xAI](docs/providers/xai.md)                   | ✅               | ✅              | ✅ native            | —          | —         | ✅ ⚠   | —     | —            | —                   |
-| [DeepSeek](docs/providers/deepseek.md)         | ✅               | ✅              | ⚠ `json_object`-only | —          | —         | —      | —     | —            | —                   |
-| [Cerebras](docs/providers/cerebras.md)         | ✅               | ✅              | ✅ native            | —          | —         | —      | —     | —            | —                   |
-| [Together](docs/providers/together.md)         | ✅               | ✅              | ✅ native            | ✅         | —         | —      | —     | —            | —                   |
-| [Fireworks](docs/providers/fireworks.md)       | ✅               | ✅              | ✅ native            | ✅         | —         | —      | —     | —            | —                   |
-| [Perplexity](docs/providers/perplexity.md)     | ✅               | ⚠ no live tools | ✅ native            | —          | —         | —      | —     | —            | —                   |
-| [Moonshot](docs/providers/moonshot.md)         | ✅               | ✅              | ✅ native            | —          | —         | —      | —     | —            | —                   |
-| [Qwen](docs/providers/qwen.md)                 | ✅               | ✅              | ✅ native            | ✅         | —         | —      | —     | —            | —                   |
-| [MiniMax](docs/providers/minimax.md)           | ✅               | ✅              | ✅ native            | —          | —         | —      | —     | —            | —                   |
-| [DeepInfra](docs/providers/deepinfra.md)       | ✅               | ✅              | ✅ native            | ✅         | —         | —      | —     | —            | —                   |
-| [Hugging Face](docs/providers/huggingface.md)  | ✅               | ✅              | ⚠ tool-mode          | —          | —         | —      | —     | —            | —                   |
-| [Baseten](docs/providers/baseten.md)           | ✅               | ✅              | ✅ native            | ✅         | —         | —      | —     | —            | —                   |
-| [LM Studio](docs/providers/lmstudio.md)        | ✅               | ✅              | ✅ native            | ✅         | —         | —      | —     | —            | —                   |
-| [NVIDIA NIM](docs/providers/nvidia.md)         | ✅               | ✅              | ✅ native            | ✅         | —         | —      | —     | —            | —                   |
-| [Vercel AI Gateway](docs/providers/gateway.md) | ✅               | ✅              | ⚠ tool-mode          | ✅         | —         | —      | —     | —            | —                   |
-| [Mistral](docs/providers/mistral.md)           | ✅               | ✅              | ⚠ schema dropped     | ✅         | —         | —      | —     | —            | —                   |
-| [Cohere](docs/providers/cohere.md)             | ✅               | ✅              | ✅ native            | ✅         | ✅        | —      | —     | —            | —                   |
-| [Voyage](docs/providers/voyage.md)             | —                | —               | —                    | ✅         | ✅        | —      | —     | —            | —                   |
-| [Mixedbread](docs/providers/mixedbread.md)     | —                | —               | —                    | —          | ✅        | —      | —     | —            | —                   |
-| [ElevenLabs](docs/providers/elevenlabs.md)     | —                | —               | —                    | —          | —         | —      | —     | ✅           | ✅                  |
-| [Anthropic](docs/providers/anthropic.md)       | ✅               | ✅              | ⚠ tool-mode          | —          | —         | —      | —     | —            | —                   |
-| [Google](docs/providers/google.md)             | ✅               | ✅              | ✅ native            | ✅         | —         | ✅     | —     | —            | —                   |
-| [Vertex AI](docs/providers/vertex.md)          | ✅               | ✅              | ✅ native            | ✅         | —         | ✅     | —     | —            | —                   |
-| [Amazon Bedrock](docs/providers/bedrock.md)    | ✅               | ✅              | ⚠ tool-mode          | ✅         | —         | —      | —     | —            | —                   |
-| [fal](docs/providers/fal.md)                   | —                | —               | —                    | —          | —         | ✅     | ✅    | —            | —                   |
-| [Replicate](docs/providers/replicate.md)       | —                | —               | —                    | —          | —         | ✅     | ✅    | —            | —                   |
-| [Luma](docs/providers/luma.md)                 | —                | —               | —                    | —          | —         | ✅     | ✅    | —            | —                   |
-| [Deepgram](docs/providers/deepgram.md)         | —                | —               | —                    | —          | —         | —      | —     | —            | ✅ ⚠ live           |
-| [LMNT](docs/providers/lmnt.md)                 | —                | —               | —                    | —          | —         | —      | —     | ✅           | —                   |
-| [Hume](docs/providers/hume.md)                 | —                | —               | —                    | —          | —         | —      | —     | ✅           | —                   |
-| [AssemblyAI](docs/providers/assemblyai.md)     | —                | —               | —                    | —          | —         | —      | —     | —            | ✅                  |
-| [Gladia](docs/providers/gladia.md)             | —                | —               | —                    | —          | —         | —      | —     | —            | ✅                  |
-| [Rev.ai](docs/providers/revai.md)              | —                | —               | —                    | —          | —         | —      | —     | —            | ✅                  |
-| [Cartesia](docs/providers/cartesia.md)         | —                | —               | —                    | —          | —         | —      | —     | ✅           | —                   |
-| [Prodia](docs/providers/prodia.md)             | —                | —               | —                    | —          | —         | ✅     | —     | —            | —                   |
-| [Black Forest Labs](docs/providers/bfl.md)     | —                | —               | —                    | —          | —         | ✅     | —     | —            | —                   |
+| Provider                                                              | Chat & streaming | Tool calling    | Structured output    | Embeddings | Reranking | Images | Video | Speech (TTS) | Transcription (STT) |
+| --------------------------------------------------------------------- | ---------------- | --------------- | -------------------- | ---------- | --------- | ------ | ----- | ------------ | ------------------- |
+| [OpenAI](docs/providers/openai.md)                                    | ✅               | ✅              | ✅ native            | ✅         | —         | ✅     | —     | ✅           | ✅ ⚠ live           |
+| [OpenAI Codex](docs/providers/codex.md)                               | ✅               | ✅              | ⚠ tool-mode          | —          | —         | —      | —     | —            | —                   |
+| [Azure OpenAI](docs/providers/azure.md)                               | ✅               | ✅              | ✅ native            | ✅         | —         | —      | —     | —            | —                   |
+| [Groq](docs/providers/groq.md)                                        | ✅               | ✅              | ✅ native            | —          | —         | —      | —     | —            | ✅                  |
+| [xAI](docs/providers/xai.md)                                          | ✅               | ✅              | ✅ native            | —          | —         | ✅ ⚠   | —     | —            | —                   |
+| [DeepSeek](docs/providers/deepseek.md)                                | ✅               | ✅              | ⚠ `json_object`-only | —          | —         | —      | —     | —            | —                   |
+| [Cerebras](docs/providers/cerebras.md)                                | ✅               | ✅              | ✅ native            | —          | —         | —      | —     | —            | —                   |
+| [Together](docs/providers/together.md)                                | ✅               | ✅              | ✅ native            | ✅         | —         | —      | —     | —            | —                   |
+| [Fireworks](docs/providers/fireworks.md)                              | ✅               | ✅              | ✅ native            | ✅         | —         | —      | —     | —            | —                   |
+| [Perplexity](docs/providers/perplexity.md)                            | ✅               | ⚠ no live tools | ✅ native            | —          | —         | —      | —     | —            | —                   |
+| [Moonshot](docs/providers/moonshot.md)                                | ✅               | ✅              | ✅ native            | —          | —         | —      | —     | —            | —                   |
+| [Qwen](docs/providers/qwen.md)                                        | ✅               | ✅              | ✅ native            | ✅         | —         | —      | —     | —            | —                   |
+| [MiniMax](docs/providers/minimax.md)                                  | ✅               | ✅              | ✅ native            | —          | —         | —      | —     | —            | —                   |
+| [DeepInfra](docs/providers/deepinfra.md)                              | ✅               | ✅              | ✅ native            | ✅         | —         | —      | —     | —            | —                   |
+| [Hugging Face](docs/providers/huggingface.md)                         | ✅               | ✅              | ⚠ tool-mode          | —          | —         | —      | —     | —            | —                   |
+| [Baseten](docs/providers/baseten.md)                                  | ✅               | ✅              | ✅ native            | ✅         | —         | —      | —     | —            | —                   |
+| [LM Studio](docs/providers/lmstudio.md)                               | ✅               | ✅              | ✅ native            | ✅         | —         | —      | —     | —            | —                   |
+| [OpenAI-compatible (self-hosted)](docs/providers/openaicompatible.md) | ✅               | ✅              | ✅ native            | —          | ✅        | ✅     | ✅    | —            | —                   |
+| [NVIDIA NIM](docs/providers/nvidia.md)                                | ✅               | ✅              | ✅ native            | ✅         | —         | —      | —     | —            | —                   |
+| [Vercel AI Gateway](docs/providers/gateway.md)                        | ✅               | ✅              | ⚠ tool-mode          | ✅         | —         | —      | —     | —            | —                   |
+| [Mistral](docs/providers/mistral.md)                                  | ✅               | ✅              | ⚠ schema dropped     | ✅         | —         | —      | —     | —            | —                   |
+| [Cohere](docs/providers/cohere.md)                                    | ✅               | ✅              | ✅ native            | ✅         | ✅        | —      | —     | —            | —                   |
+| [Voyage](docs/providers/voyage.md)                                    | —                | —               | —                    | ✅         | ✅        | —      | —     | —            | —                   |
+| [Mixedbread](docs/providers/mixedbread.md)                            | —                | —               | —                    | —          | ✅        | —      | —     | —            | —                   |
+| [ElevenLabs](docs/providers/elevenlabs.md)                            | —                | —               | —                    | —          | —         | —      | —     | ✅           | ✅                  |
+| [Anthropic](docs/providers/anthropic.md)                              | ✅               | ✅              | ⚠ tool-mode          | —          | —         | —      | —     | —            | —                   |
+| [Google](docs/providers/google.md)                                    | ✅               | ✅              | ✅ native            | ✅         | —         | ✅     | —     | —            | —                   |
+| [Vertex AI](docs/providers/vertex.md)                                 | ✅               | ✅              | ✅ native            | ✅         | —         | ✅     | —     | —            | —                   |
+| [Amazon Bedrock](docs/providers/bedrock.md)                           | ✅               | ✅              | ⚠ tool-mode          | ✅         | —         | —      | —     | —            | —                   |
+| [fal](docs/providers/fal.md)                                          | —                | —               | —                    | —          | —         | ✅     | ✅    | —            | —                   |
+| [Replicate](docs/providers/replicate.md)                              | —                | —               | —                    | —          | —         | ✅     | ✅    | —            | —                   |
+| [Luma](docs/providers/luma.md)                                        | —                | —               | —                    | —          | —         | ✅     | ✅    | —            | —                   |
+| [Deepgram](docs/providers/deepgram.md)                                | —                | —               | —                    | —          | —         | —      | —     | —            | ✅ ⚠ live           |
+| [LMNT](docs/providers/lmnt.md)                                        | —                | —               | —                    | —          | —         | —      | —     | ✅           | —                   |
+| [Hume](docs/providers/hume.md)                                        | —                | —               | —                    | —          | —         | —      | —     | ✅           | —                   |
+| [AssemblyAI](docs/providers/assemblyai.md)                            | —                | —               | —                    | —          | —         | —      | —     | —            | ✅                  |
+| [Gladia](docs/providers/gladia.md)                                    | —                | —               | —                    | —          | —         | —      | —     | —            | ✅                  |
+| [Rev.ai](docs/providers/revai.md)                                     | —                | —               | —                    | —          | —         | —      | —     | —            | ✅                  |
+| [Cartesia](docs/providers/cartesia.md)                                | —                | —               | —                    | —          | —         | —      | —     | ✅           | —                   |
+| [Prodia](docs/providers/prodia.md)                                    | —                | —               | —                    | —          | —         | ✅     | —     | —            | —                   |
+| [Black Forest Labs](docs/providers/bfl.md)                            | —                | —               | —                    | —          | —         | ✅     | —     | —            | —                   |
 
 "Native" structured output means schema-constrained JSON directly via
 native JSON mode; "tool-mode" (Anthropic, Bedrock, Hugging Face, Vercel AI
