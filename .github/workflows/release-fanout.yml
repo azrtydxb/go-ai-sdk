@@ -1,0 +1,63 @@
+name: Release fan-out
+
+# A tag here is only useful once every product runs it. Each consumer has a
+# go-ai-sdk-bump workflow that opens a bump PR and auto-merges it when its CI
+# is green; this tells them a new version exists the moment it is tagged,
+# instead of waiting for their daily safety-net run.
+#
+# Pushing to another repository needs a token from the azrtydxb-sdk-bump GitHub
+# App: GITHUB_TOKEN cannot reach other repos. An installation token is scoped
+# to one account, hence one matrix leg per owner.
+#
+# contrib/otel is tagged `contrib/otel/vX` and does not match `v*`, so its
+# releases do not fan out — no consumer bumps it through this path.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Tag to announce, e.g. v0.6.0"
+        required: true
+
+permissions: {}
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - owner: azrtydxb
+            repos: "Hecto hello kuvryn-scout nexora NovaForge dhole novaflow-v2"
+          - owner: piwi3910
+            repos: "talking-agent"
+    steps:
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: token
+        with:
+          app-id: ${{ vars.SDK_BUMP_APP_ID }}
+          private-key: ${{ secrets.SDK_BUMP_PRIVATE_KEY }}
+          owner: ${{ matrix.owner }}
+      - name: Notify consumers
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          VERSION: ${{ inputs.version || github.ref_name }}
+          OWNER: ${{ matrix.owner }}
+          REPOS: ${{ matrix.repos }}
+        run: |
+          if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::'$VERSION' is not a semver tag"; exit 1
+          fi
+          failed=0
+          for repo in $REPOS; do
+            if gh api "repos/$OWNER/$repo/dispatches" -f event_type=go-ai-sdk-release -f "client_payload[version]=$VERSION"; then
+              echo "notified $OWNER/$repo of $VERSION"
+            else
+              echo "::error::could not notify $OWNER/$repo"; failed=1
+            fi
+          done
+          exit $failed
