@@ -93,6 +93,73 @@ See `examples/self-hosted-voice`. Notes: `ai.GenerateSpeechOpts.Language` is
 not sent on the wire (the OpenAI speech API has none); pass server-specific
 fields through `ProviderOptions["openaicompatible"]` (or your `WithName`).
 
-⚠ **Live-testing note:** like every provider in this SDK, the contract is
-verified against `httptest` servers, not against live vLLM, TEI or Breeze
-deployments.
+## Live testing
+
+`providers/openaicompatible/live_test.go` runs the provider through the `ai.*`
+entry points against real servers. Each test skips unless its variables are
+set, so plain `go test ./...` stays hermetic.
+
+| Test                   | Variables                                                                                                   |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `TestLiveRerankTEI`    | `OPENAICOMPAT_LIVE_TEI_URL` (TEI root, no `/v1`)                                                            |
+| `TestLiveRerankOpenAI` | `OPENAICOMPAT_LIVE_RERANK_URL`, `_RERANK_MODEL`                                                             |
+| `TestLiveEmbed`        | `OPENAICOMPAT_LIVE_EMBED_URL`, `_EMBED_MODEL`                                                               |
+| `TestLiveChatStream`   | `OPENAICOMPAT_LIVE_CHAT_URL`, `_CHAT_MODEL`                                                                 |
+| `TestLiveTranscribe`   | `OPENAICOMPAT_LIVE_STT_URL`, `_STT_MODEL`, `_STT_AUDIO` (file path), optional `_STT_LANG`, `_STT_MEDIATYPE` |
+| `TestLiveSpeech`       | `OPENAICOMPAT_LIVE_TTS_URL`, `_TTS_MODEL`, `_TTS_VOICE`, optional `_TTS_OPTS` (`k=v,k=v` extra fields)      |
+
+Verified on Apple Silicon (arm64 Docker, CPU only, 8 GB):
+
+```sh
+# TEI: reranker (RerankTEI) and a small embedder (/v1/embeddings)
+docker run -d -p 18081:80 -v tei:/data ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-latest --model-id BAAI/bge-reranker-base
+docker run -d -p 18082:80 -v tei:/data ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-latest --model-id BAAI/bge-small-en-v1.5
+
+# speaches: Breeze-ASR-25 (STT, verbose_json and text) and Kokoro (TTS)
+docker run -d -p 18083:8000 -v hf:/home/ubuntu/.cache/huggingface/hub ghcr.io/speaches-ai/speaches:latest-cpu
+curl -X POST localhost:18083/v1/models/phate334/Breeze-ASR-25-int8-CT2
+curl -X POST localhost:18083/v1/models/speaches-ai/Kokoro-82M-v1.0-ONNX
+say -v Meijia -o zh.aiff "你好，今天天氣很好，我想去公園散步。" && afconvert -f WAVE -d LEI16@16000 -c 1 zh.aiff zh.wav
+
+# llama.cpp: chat (streaming + usage) and a reranker (RerankOpenAI shape)
+docker run -d -p 18084:8080 -v llama:/root/.cache ghcr.io/ggml-org/llama.cpp:server -hf Qwen/Qwen2.5-0.5B-Instruct-GGUF:Q4_K_M --host 0.0.0.0
+docker run -d -p 18085:8080 -v llama:/root/.cache ghcr.io/ggml-org/llama.cpp:server -hf gpustack/bge-reranker-v2-m3-GGUF:Q4_K_M --reranking --host 0.0.0.0
+
+OPENAICOMPAT_LIVE_TEI_URL=http://localhost:18081 \
+OPENAICOMPAT_LIVE_EMBED_URL=http://localhost:18082/v1 OPENAICOMPAT_LIVE_EMBED_MODEL=BAAI/bge-small-en-v1.5 \
+OPENAICOMPAT_LIVE_STT_URL=http://localhost:18083/v1 OPENAICOMPAT_LIVE_STT_MODEL=phate334/Breeze-ASR-25-int8-CT2 \
+OPENAICOMPAT_LIVE_STT_AUDIO=$PWD/zh.wav OPENAICOMPAT_LIVE_STT_LANG=zh \
+OPENAICOMPAT_LIVE_TTS_URL=http://localhost:18083/v1 OPENAICOMPAT_LIVE_TTS_MODEL=speaches-ai/Kokoro-82M-v1.0-ONNX OPENAICOMPAT_LIVE_TTS_VOICE=af_heart \
+OPENAICOMPAT_LIVE_RERANK_URL=http://localhost:18085 OPENAICOMPAT_LIVE_RERANK_MODEL=bge-reranker-v2-m3 \
+OPENAICOMPAT_LIVE_CHAT_URL=http://localhost:18084/v1 OPENAICOMPAT_LIVE_CHAT_MODEL=qwen2.5-0.5b \
+go test ./providers/openaicompatible -run Live -v
+```
+
+All of the above passed. The TEI `cpu-<version>` tags are amd64 only; use
+`cpu-arm64-latest` on Apple Silicon. Breeze-ASR-25 returned correct Traditional
+Chinese text for the Mandarin clip in both `verbose_json` and `text` formats
+(CPU int8, roughly 25-35 s for a 4 s clip including model load).
+
+### Server notes
+
+- **vLLM** serves `/rerank`, `/v1/rerank` and `/v2/rerank`. Prefer a base URL
+  without `/v1` for reranking (this provider appends `/rerank`); `/v1/rerank`
+  works but logs a deprecation warning. Chat and embeddings still need `/v1`,
+  so use two `New(...)` providers when mixing them.
+- **llama.cpp** (`--reranking`) also exposes `/rerank` and `/v1/rerank` in the
+  Jina/Cohere shape, which is the `RerankOpenAI` shape. Scores are raw logits.
+- **TEI** serves `/rerank` at its root, so use the root URL only. Scores are
+  sigmoid-normalised (0..1) unless `raw_scores` is true; pass it with
+  `ProviderOptions: {"openaicompatible": {"raw_scores": true}}`. TEI does not
+  report token usage for rerank. Its `/v1/embeddings` works with `Embedding`.
+- **speaches** returns `Content-Type: audio/mp3` for mp3 (non-standard but
+  `audio/*`, passed through). Its Kokoro build failed for Mandarin voices
+  (`zf_*`: espeak backend rejects language `zh`; `language`/`lang_code` fields
+  did not help), so TTS was verified with an English voice.
+- **Kokoro-FastAPI** style servers select the language with `lang_code`; pass
+  it via `ProviderOptions`.
+- **BreezyVoice** is CUDA-only (nvidia/cuda amd64 image), so it was not run
+  live. Its `api.py` serves one voice (the configured speaker prompt) per
+  server instance, ignores `voice` and `response_format`, and always returns a
+  22050 Hz WAV as `audio/wav`; the provider reports `audio/wav` regardless of
+  the requested format (`TestSpeechBreezyVoiceContract`).
