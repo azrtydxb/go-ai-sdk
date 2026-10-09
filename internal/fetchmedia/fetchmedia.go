@@ -86,7 +86,7 @@ func SetLookupIPAddrForTest(fn func(ctx context.Context, host string) ([]net.IPA
 //     being read into memory in full.
 //
 // A non-2xx response is returned as an *ai.APICallError (via
-// ai.NewAPICallError), wrapped like every other failure mode.
+// ai.NewAPICallErrorFromResponse, so a 429/503 carries its Retry-After), wrapped like every other failure mode.
 // errPrefix is added exactly once, as fmt.Errorf("%s: fetch %s: %w",
 // errPrefix, url, err) — callers must not additionally wrap the returned
 // error with their own "fetch ...:" prefix.
@@ -155,7 +155,9 @@ func fetch(ctx context.Context, client *http.Client, rawURL string, maxBytes int
 		if len(truncated) > maxErrorBodyBytes {
 			truncated = truncated[:maxErrorBodyBytes]
 		}
-		return nil, "", ai.NewAPICallError(resp.StatusCode, rawURL, string(truncated), string(truncated))
+		apiErr := ai.NewAPICallErrorFromResponse(resp, string(truncated), string(truncated))
+		apiErr.URL = rawURL // the requested URL, not the post-redirect one
+		return nil, "", apiErr
 	}
 
 	return body, parseMediaType(resp.Header.Get("Content-Type")), nil
