@@ -113,3 +113,38 @@ Audit of HEAD against the issues' acceptance criteria (verified in code): Codex 
 - **D) Leave both open**, no work now.
 
 **Decided: A)** Build all gaps — public device-code login, Codex auto-refresh, public 0600/0700 file credential store for both providers; then close #4 and #5.
+
+## #35 public OpenAI-compatible provider: package name and option shape?
+
+- **A) `providers/openaicompatible`** with `New(baseURL string, opts ...Option)` (`WithAPIKey`, `WithHeader`, `WithHTTPClient`, `WithName`), and model accessors `Chat`, `Embedding`, `Speech`, `Transcription`, `Rerank` (shape selectable: OpenAI/vLLM `/v1/rerank` or TEI `/rerank`). Thin public wrapper over `internal/openaicompat`; no default base URL. Recorded in an ADR. (Default.)
+- **B) `providers/openaicompat`** — same shape, shorter name mirroring the internal package.
+- **C) Separate packages** per server family (`providers/vllm`, `providers/tei`, `providers/ollama`) each wrapping the internal package.
+
+**Decided: A) (2026-10-09).** `providers/openaicompatible`, option shape as listed, ADR recorded.
+
+## "Breeze" voice support: what does it mean concretely?
+
+- **A) MediaTek Breeze models (Breeze-ASR-25 STT, BreezyVoice TTS) served behind OpenAI-compatible `/v1/audio/transcriptions` and `/v1/audio/speech`** — covered by Speech/Transcription on the #35 provider, with a contract test and README example naming them. No dedicated package. (Default.)
+- **B) Same, plus a thin `providers/breeze` package** with defaults for those model ids.
+- **C) Something else** (a different "Breeze" product/API).
+
+**Decided: A) (2026-10-09).** Breeze voice goes through the openaicompatible provider's Speech/Transcription; no dedicated package.
+
+## Retry-After (#41): cap the server-requested wait?
+
+With no ctx deadline, `Retry-After: 3600` would sleep an hour.
+
+- **A) Cap at 60s** — waits longer than the cap fall back to returning the typed `RetryAfterExceedsBudgetError` immediately. (Default.)
+- **B) No cap** — rely on callers setting `ai.Timeout`; document it.
+
+**Decided: A) (2026-10-09).** Requested waits above 60s return `RetryAfterExceedsBudgetError` immediately.
+
+## Landing PRs #38–#42
+
+#40 and #41 conflict in `ai/errors.go`; #40/#41/#42 conflict in `CHANGELOG.md`.
+
+- **A) Merge in order #38, #39, #40, #41, #42**, rebasing each later PR hunk by hunk onto main as needed, waiting for green CI each time. Then tag a release for #35/#36. (Default.)
+- **B) Merge but don't tag** — leave the release to you.
+- **C) Hold** — you review the PRs first.
+
+**Decided: A) (2026-10-09).** Merge in order with hunk-by-hunk rebases and green CI, then tag a release.
