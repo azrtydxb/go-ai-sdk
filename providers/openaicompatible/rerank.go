@@ -139,7 +139,7 @@ func (m *rerankingModel) Rerank(ctx context.Context, call provider.RerankCall) (
 		return nil, fmt.Errorf("%s: read rerank response: %w", p.name, err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), providerutil.ErrorMessage(body))
+		return nil, ai.NewAPICallErrorFromResponse(resp, string(body), providerutil.ErrorMessage(body))
 	}
 
 	out := &provider.RerankResponse{Raw: json.RawMessage(body)}
