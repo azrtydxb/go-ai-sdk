@@ -10,11 +10,11 @@ import (
 	"mime"
 	"net"
 	"net/http"
-	"strconv"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/azrtydxb/go-ai-sdk/internal/retry"
 	"github.com/azrtydxb/go-ai-sdk/internal/sse"
 )
 
@@ -423,7 +423,7 @@ func (t *httpTransport) sendOnce(ctx context.Context, msg json.RawMessage) error
 		return nil
 	}
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable {
-		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
+		retryAfter := retry.ParseRetryAfter(resp.Header.Get("Retry-After"))
 		body, bodyErr := t.readTrackedBody(resp.Body, 64*1024)
 		if bodyErr != nil && errors.Is(bodyErr, errTransportClosed) {
 			return bodyErr
@@ -527,28 +527,6 @@ func (t *httpTransport) backoffDelay(attempt int) time.Duration {
 		delay = defaultRetryMaxDelay
 	}
 	return delay
-}
-
-// parseRetryAfter parses a Retry-After header value, which per RFC 9110
-// is either a non-negative integer number of seconds or an HTTP-date. It
-// returns 0 (meaning "no usable hint") if v is empty or invalid, or if the
-// parsed instant is not in the future.
-func parseRetryAfter(v string) time.Duration {
-	if v == "" {
-		return 0
-	}
-	if secs, err := strconv.Atoi(v); err == nil {
-		if secs <= 0 {
-			return 0
-		}
-		return time.Duration(secs) * time.Second
-	}
-	if when, err := http.ParseTime(v); err == nil {
-		if d := time.Until(when); d > 0 {
-			return d
-		}
-	}
-	return 0
 }
 
 // drainSSE reads SSE events from body, enqueuing each one's data in arrival

@@ -72,5 +72,5 @@ func (p *Provider) client() *http.Client {
 }
 
 func apiError(resp *http.Response, body []byte) error {
-	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), providerutil.ErrorMessage(body))
+	return ai.NewAPICallErrorFromResponse(resp, string(body), providerutil.ErrorMessage(body))
 }

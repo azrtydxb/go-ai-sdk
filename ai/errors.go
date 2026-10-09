@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -17,6 +18,30 @@ type APICallError struct {
 	ResponseBody string
 	Retryable    bool
 	Message      string
+
+	// retryAfter is the server's Retry-After hint (429/503 only); 0 = none.
+	retryAfter time.Duration
+}
+
+// RetryAfter reports the server's Retry-After wait for a 429 or 503
+// response, if it sent a valid one. It satisfies retry.RetryAfterer.
+func (e *APICallError) RetryAfter() (time.Duration, bool) {
+	return e.retryAfter, e.retryAfter > 0
+}
+
+// RetryAfterExceedsBudgetError is returned when a provider asked the caller
+// to wait (Retry-After) longer than the remaining Timeout budget allows. It
+// exposes the requested wait and wraps the last API error.
+type RetryAfterExceedsBudgetError = retry.RetryAfterExceedsBudgetError
+
+// NewAPICallErrorFromResponse is NewAPICallError for an HTTP response; it
+// also captures Retry-After on 429 and 503 so retries can honour it.
+func NewAPICallErrorFromResponse(resp *http.Response, body, message string) *APICallError {
+	e := NewAPICallError(resp.StatusCode, resp.Request.URL.String(), body, message)
+	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable {
+		e.retryAfter = retry.ParseRetryAfter(resp.Header.Get("Retry-After"))
+	}
+	return e
 }
 
 // Error implements the error interface.
