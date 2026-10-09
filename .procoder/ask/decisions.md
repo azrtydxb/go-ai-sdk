@@ -129,3 +129,18 @@ Audit of HEAD against the issues' acceptance criteria (verified in code): Codex 
 - **C) Something else** (a different "Breeze" product/API).
 
 **Decided: A) (2026-10-09).** Breeze voice goes through the openaicompatible provider's Speech/Transcription; no dedicated package.
+
+## Retry-After (#41): cap the server-requested wait?
+
+With no ctx deadline, `Retry-After: 3600` would sleep an hour.
+
+- **A) Cap at 60s** — waits longer than the cap fall back to returning the typed `RetryAfterExceedsBudgetError` immediately. (Default.)
+- **B) No cap** — rely on callers setting `ai.Timeout`; document it.
+
+## Landing PRs #38–#42
+
+#40 and #41 conflict in `ai/errors.go`; #40/#41/#42 conflict in `CHANGELOG.md`.
+
+- **A) Merge in order #38, #39, #40, #41, #42**, rebasing each later PR hunk by hunk onto main as needed, waiting for green CI each time. Then tag a release for #35/#36. (Default.)
+- **B) Merge but don't tag** — leave the release to you.
+- **C) Hold** — you review the PRs first.
