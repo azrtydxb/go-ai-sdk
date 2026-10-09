@@ -34,7 +34,10 @@ func (m *transcriptionModel) ProviderName() string { return m.cfg.Name }
 // containing "gpt-4o" reject verbose_json, so those get the plain "json"
 // shape (text only); everything else (whisper-1, etc.) gets "verbose_json"
 // (text/language/duration/segments).
-func transcriptionResponseFormat(modelID string) string {
+func transcriptionResponseFormat(cfg Config, modelID string) string {
+	if cfg.TranscriptionFormat != "" {
+		return cfg.TranscriptionFormat
+	}
 	if strings.Contains(modelID, "gpt-4o") {
 		return "json"
 	}
@@ -157,7 +160,7 @@ func (m *transcriptionModel) Transcribe(ctx context.Context, call provider.Trans
 	body, err := doAudioForm(ctx, m.cfg, m.modelID, audioFormCall{
 		endpoint:        "transcriptions",
 		kind:            "transcription",
-		responseFormat:  transcriptionResponseFormat(m.modelID),
+		responseFormat:  transcriptionResponseFormat(m.cfg, m.modelID),
 		mediaType:       call.MediaType,
 		audio:           call.Audio,
 		language:        call.Language,
@@ -167,6 +170,10 @@ func (m *transcriptionModel) Transcribe(ctx context.Context, call provider.Trans
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	if m.cfg.TranscriptionFormat == "text" {
+		return &provider.TranscriptionResponse{Text: strings.TrimSpace(string(body)), Language: call.Language}, nil
 	}
 
 	var wr transcriptionResponse

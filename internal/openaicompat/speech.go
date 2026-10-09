@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
+	"strings"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/httpheader"
 	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
@@ -107,6 +109,11 @@ func (m *speechModel) GenerateSpeech(ctx context.Context, call provider.SpeechCa
 	mediaType := speechMediaTypes[format]
 	if mediaType == "" {
 		mediaType = "audio/mpeg"
+	}
+	// Self-hosted servers may return a different container than asked
+	// for; trust an explicit audio/* Content-Type over the guess.
+	if ct, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type")); err == nil && strings.HasPrefix(ct, "audio/") {
+		mediaType = ct
 	}
 
 	return &provider.SpeechResponse{

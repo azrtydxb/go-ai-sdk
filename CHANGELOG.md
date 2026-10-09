@@ -10,6 +10,18 @@ once it reaches 1.0.
 
 ### Added
 
+- **`providers/openaicompatible`: public provider for self-hosted
+  OpenAI-compatible endpoints** (vLLM, Ollama, TEI, speaches). `New(baseURL,
+  opts...)` has no default URL and an optional API key; models: `Chat`
+  (streaming, usage in the final part), `Embedding`, `Speech`,
+  `Transcription` (works with MediaTek Breeze-ASR-25 / BreezyVoice served
+  behind OpenAI-style audio endpoints). (#35)
+- **Rerank for vLLM/OpenAI `/v1/rerank` and Hugging Face TEI `/rerank`**
+  through `Provider.Rerank(id, WithRerankShape(...))` and `ai.Rerank`. (#36)
+- `internal/openaicompat.Config` gains opt-in `OmitEmptyAuth`, `Headers` and
+  `TranscriptionFormat`; speech now uses a server's `audio/*` Content-Type
+  for the returned media type.
+- ADR 0001 records the package name and option shape.
 - **`Retry-After` is honoured on 429 and 503.** Retries wait the server's
   hint (seconds or HTTP-date) instead of exponential backoff, and never
   sleep past the context deadline or 60s: an unaffordable wait returns the new
