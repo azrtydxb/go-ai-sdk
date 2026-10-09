@@ -8,11 +8,18 @@ once it reaches 1.0.
 
 ## [Unreleased]
 
+## 0.7.0 (2026-10-09)
+
+Self-hosted endpoints become a supported target — a public OpenAI-compatible
+provider with vLLM/TEI rerank and self-hosted speech and transcription — and
+retries now respect `Retry-After`.
+
 ### Added
 
 - **`providers/openaicompatible`: public provider for self-hosted
-  OpenAI-compatible endpoints** (vLLM, Ollama, TEI, speaches). `New(baseURL,
-  opts...)` has no default URL and an optional API key; models: `Chat`
+  OpenAI-compatible endpoints** (vLLM, Ollama, TEI, speaches).
+  `New(baseURL, opts...)` has no default URL and an optional API key; models:
+  `Chat`
   (streaming, usage in the final part), `Embedding`, `Speech`,
   `Transcription` (works with MediaTek Breeze-ASR-25 / BreezyVoice served
   behind OpenAI-style audio endpoints). (#35)
@@ -35,6 +42,15 @@ once it reaches 1.0.
   continues, in both `GenerateText` and `StreamText`. `RepairToolCall` still
   runs first. Set `ToolNotFound: ai.ToolNotFoundFail` on `GenerateTextOpts`
   (or `agent.Agent`) to keep the old hard failure. (#13)
+
+### Fixed
+
+- **`auth.Source` no longer holds its mutex across file-lock waits or token
+  refresh.** Callers with valid credentials never block behind a refresh;
+  queued refreshers give up when their context ends. `lockFile` no longer
+  spins when a stale lock cannot be removed, wraps its open error, and stops
+  its poll timer. (#27–#33)
+- CI no longer runs twice per pull-request commit. (#34)
 
 ## 0.6.0 (2026-09-21)
 
