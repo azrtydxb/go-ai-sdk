@@ -651,3 +651,23 @@ func TestFetchWithFuncRoundTripperClientDoesNotPanic(t *testing.T) {
 		t.Errorf("data = %q, want %q", data, "data")
 	}
 }
+
+func TestFetchCarriesRetryAfterOn429(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "7")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer func() { srv.Close() }()
+
+	_, _, err := Fetch(context.Background(), nil, srv.URL, "fal")
+	var apiErr *ai.APICallError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("err = %v, want *ai.APICallError", err)
+	}
+	if d, ok := apiErr.RetryAfter(); !ok || d != 7*time.Second {
+		t.Errorf("RetryAfter() = %v, %v; want 7s, true", d, ok)
+	}
+	if apiErr.URL != srv.URL {
+		t.Errorf("URL = %q, want %q", apiErr.URL, srv.URL)
+	}
+}
