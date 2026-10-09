@@ -137,6 +137,8 @@ With no ctx deadline, `Retry-After: 3600` would sleep an hour.
 - **A) Cap at 60s** — waits longer than the cap fall back to returning the typed `RetryAfterExceedsBudgetError` immediately. (Default.)
 - **B) No cap** — rely on callers setting `ai.Timeout`; document it.
 
+**Decided: A) (2026-10-09).** Requested waits above 60s return `RetryAfterExceedsBudgetError` immediately.
+
 ## Landing PRs #38–#42
 
 #40 and #41 conflict in `ai/errors.go`; #40/#41/#42 conflict in `CHANGELOG.md`.
@@ -144,3 +146,5 @@ With no ctx deadline, `Retry-After: 3600` would sleep an hour.
 - **A) Merge in order #38, #39, #40, #41, #42**, rebasing each later PR hunk by hunk onto main as needed, waiting for green CI each time. Then tag a release for #35/#36. (Default.)
 - **B) Merge but don't tag** — leave the release to you.
 - **C) Hold** — you review the PRs first.
+
+**Decided: A) (2026-10-09).** Merge in order with hunk-by-hunk rebases and green CI, then tag a release.
