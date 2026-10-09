@@ -148,3 +148,10 @@ With no ctx deadline, `Retry-After: 3600` would sleep an hour.
 - **C) Hold** — you review the PRs first.
 
 **Decided: A) (2026-10-09).** Merge in order with hunk-by-hunk rebases and green CI, then tag a release.
+
+## Tag v0.7.1 for the fetchmedia Retry-After fix (#44)?
+
+- **A) Tag v0.7.1 now** — CHANGELOG section via a release PR, then tag on main. (Default.)
+- **B) Hold** — let it ride into the next release.
+
+**Decided: A) (2026-10-09).** Tag v0.7.1.

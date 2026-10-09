@@ -8,6 +8,19 @@ once it reaches 1.0.
 
 ## [Unreleased]
 
+## 0.7.1 (2026-10-09)
+
+### Fixed
+
+- Image and video result downloads (bfl, fal, luma) now carry `Retry-After`
+  on 429/503, so retries honour it instead of falling back to backoff. (#44)
+
+### Added
+
+- Opt-in live tests for `providers/openaicompatible` against real
+  self-hosted servers (TEI, speaches with Breeze-ASR-25, llama.cpp), and a
+  BreezyVoice contract test. (#46)
+
 ## 0.7.0 (2026-10-09)
 
 Self-hosted endpoints become a supported target — a public OpenAI-compatible
