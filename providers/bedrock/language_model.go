@@ -134,7 +134,7 @@ func (p *Provider) doRequest(ctx context.Context, path string, body []byte, head
 }
 
 func apiError(resp *http.Response, body []byte) error {
-	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), providerutil.ErrorMessage(body))
+	return ai.NewAPICallErrorFromResponse(resp, string(body), providerutil.ErrorMessage(body))
 }
 
 func (m *languageModel) Generate(ctx context.Context, call provider.Call) (*provider.Response, error) {

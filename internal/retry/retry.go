@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -30,6 +32,56 @@ func SetBaseDelayForTest(d time.Duration) (restore func()) {
 // Retryable is an interface for errors that can be checked for retryability.
 type Retryable interface {
 	IsRetryable() bool
+}
+
+// RetryAfterer is an optional interface for errors that carry a server
+// Retry-After hint (HTTP 429/503). When the hint is present and valid, Do
+// waits that long instead of the computed backoff.
+type RetryAfterer interface {
+	RetryAfter() (time.Duration, bool)
+}
+
+// RetryAfterExceedsBudgetError is returned when the server asked for a wait
+// (Retry-After) that the context deadline cannot cover. Do returns it
+// immediately, without sleeping, wrapping the last attempt's error.
+type RetryAfterExceedsBudgetError struct {
+	// Requested is the wait the server asked for.
+	Requested time.Duration
+	// Remaining is the time left before the context deadline when the
+	// wait was refused.
+	Remaining time.Duration
+	// LastErr is the error from the last attempt.
+	LastErr error
+}
+
+// Error implements the error interface.
+func (e *RetryAfterExceedsBudgetError) Error() string {
+	return fmt.Sprintf("retry-after %v exceeds remaining time budget %v: %v", e.Requested, e.Remaining, e.LastErr)
+}
+
+// Unwrap implements the error unwrapping interface.
+func (e *RetryAfterExceedsBudgetError) Unwrap() error { return e.LastErr }
+
+// ParseRetryAfter parses a Retry-After header value, which per RFC 9110 is
+// either a non-negative integer number of seconds or an HTTP-date. It
+// returns 0 (meaning "no usable hint") if v is empty or invalid, or if the
+// parsed instant is not in the future.
+func ParseRetryAfter(v string) time.Duration {
+	if v == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(v); err == nil {
+		if secs <= 0 {
+			return 0
+		}
+		return time.Duration(secs) * time.Second
+	}
+	if when, err := http.ParseTime(v); err == nil {
+		if d := time.Until(when); d > 0 {
+			return d
+		}
+	}
+	return 0
 }
 
 // ExhaustedError is returned when retries are exhausted.
@@ -89,8 +141,25 @@ func Do[T any](ctx context.Context, maxRetries int, fn func() (T, error)) (T, er
 			}
 		}
 
-		// Calculate backoff delay
-		delay := calculateBackoff(attempt)
+		// Prefer the server's Retry-After hint over computed backoff.
+		var delay time.Duration
+		var ra RetryAfterer
+		hinted := false
+		if errors.As(err, &ra) {
+			if d, ok := ra.RetryAfter(); ok && d > 0 {
+				if dl, has := ctx.Deadline(); has {
+					if remaining := time.Until(dl); remaining < d {
+						var zero T
+						return zero, &RetryAfterExceedsBudgetError{Requested: d, Remaining: remaining, LastErr: err}
+					}
+				}
+				delay = d
+				hinted = true
+			}
+		}
+		if !hinted {
+			delay = calculateBackoff(attempt)
+		}
 
 		// Wait with context awareness, using NewTimer to ensure cleanup.
 		// The timer is stopped explicitly on every path (not deferred) so

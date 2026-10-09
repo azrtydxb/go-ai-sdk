@@ -90,7 +90,7 @@ func (p *Provider) client() *http.Client {
 
 // apiError converts a non-2xx HTTP response into an *ai.APICallError.
 func apiError(resp *http.Response, body []byte) error {
-	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), errorMessage(body))
+	return ai.NewAPICallErrorFromResponse(resp, string(body), errorMessage(body))
 }
 
 // wireErrorDetail matches fal's error body, which uses "detail" as either a

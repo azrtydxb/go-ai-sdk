@@ -110,7 +110,7 @@ func (m *embeddingModel) EmbedCall(ctx context.Context, call provider.EmbeddingC
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), providerutil.ErrorMessage(body))
+		return nil, ai.NewAPICallErrorFromResponse(resp, string(body), providerutil.ErrorMessage(body))
 	}
 
 	var pr predictResponse

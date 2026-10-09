@@ -109,5 +109,5 @@ func errorMessage(body []byte) string {
 }
 
 func apiError(resp *http.Response, body []byte) error {
-	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), errorMessage(body))
+	return ai.NewAPICallErrorFromResponse(resp, string(body), errorMessage(body))
 }

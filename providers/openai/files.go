@@ -46,7 +46,7 @@ type fileWireResponse struct {
 }
 
 func fileAPIError(resp *http.Response, body []byte) error {
-	return ai.NewAPICallError(resp.StatusCode, resp.Request.URL.String(), string(body), providerutil.ErrorMessage(body))
+	return ai.NewAPICallErrorFromResponse(resp, string(body), providerutil.ErrorMessage(body))
 }
 
 // UploadFile implements provider.FileStore. It POSTs a multipart request to
