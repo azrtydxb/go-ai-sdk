@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime/debug"
+	"sort"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/retry"
 	"github.com/azrtydxb/go-ai-sdk/provider"
@@ -127,8 +128,10 @@ type GenerateTextResult struct {
 // tool-calling loop when the model requests tool calls.
 //
 // After a response whose FinishReason is tool-calls (or that contains
-// ToolCallParts), if an unknown tool is requested, GenerateText returns a
-// *NoSuchToolError. Otherwise it executes all tool calls sequentially in
+// ToolCallParts), a call to an unknown tool is answered with an error tool
+// result (a *NoSuchToolError listing the available tools) and the loop
+// continues; with ToolNotFound set to ToolNotFoundFail, GenerateText instead
+// returns the *NoSuchToolError. It executes all tool calls sequentially in
 // response order, appends the assistant message and a single RoleTool
 // message with all tool results, and calls the model again. This repeats
 // while tool calls occur and len(Steps) < MaxSteps (default 1). Usage is
@@ -472,9 +475,9 @@ type repairFunc func(ctx context.Context, call ToolCallRecord, toolErr error) (T
 // again. A *ToolExecutionError, or any InvalidToolArgumentsError when repair
 // is nil or declines, is recorded on ToolResultRecord.Err rather than
 // aborting.
-func runToolCalls(ctx context.Context, tools []Tool, calls []provider.ToolCallPart, active map[string]bool, repair repairFunc, stepIndex int, onStart func(int, ToolCallRecord), onEnd func(int, ToolResultRecord, error)) ([]ToolResultRecord, error) {
+func runToolCalls(ctx context.Context, tools []Tool, calls []provider.ToolCallPart, active map[string]bool, repair repairFunc, policy ToolNotFoundPolicy, stepIndex int, onStart func(int, ToolCallRecord), onEnd func(int, ToolResultRecord, error)) ([]ToolResultRecord, error) {
 	byName := buildActiveToolMap(tools, active)
-	resolved, err := resolveToolCallNames(ctx, byName, calls, repair)
+	resolved, err := resolveToolCallNames(ctx, byName, calls, repair, policy)
 	if err != nil {
 		return nil, err
 	}
@@ -483,6 +486,16 @@ func runToolCalls(ctx context.Context, tools []Tool, calls []provider.ToolCallPa
 		results = append(results, executeToolCall(ctx, byName, c, nil, repair, stepIndex, onStart, onEnd))
 	}
 	return results, nil
+}
+
+// sortedToolNames returns the names in byName in sorted order.
+func sortedToolNames(byName map[string]Tool) []string {
+	names := make([]string, 0, len(byName))
+	for n := range byName {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // buildActiveToolMap indexes tools by name, dropping any not in active (nil
@@ -500,10 +513,12 @@ func buildActiveToolMap(tools []Tool, active map[string]bool) map[string]Tool {
 
 // resolveToolCallNames validates that every call in calls names a tool in
 // byName, offering an unknown name to repair once (see RepairToolCall's
-// doc); it returns a *NoSuchToolError without resolving anything further if
-// any call (post-repair) still names an unknown tool — so earlier calls in
-// the batch never execute just because a later one is unknown.
-func resolveToolCallNames(ctx context.Context, byName map[string]Tool, calls []provider.ToolCallPart, repair repairFunc) ([]provider.ToolCallPart, error) {
+// doc). Under ToolNotFoundFail it returns a *NoSuchToolError without
+// resolving anything further if any call (post-repair) still names an
+// unknown tool — so earlier calls in the batch never execute just because a
+// later one is unknown. Under ToolNotFoundReport (the default) the unknown
+// call is passed through unchanged and executeToolCall records the error.
+func resolveToolCallNames(ctx context.Context, byName map[string]Tool, calls []provider.ToolCallPart, repair repairFunc, policy ToolNotFoundPolicy) ([]provider.ToolCallPart, error) {
 	resolved := make([]provider.ToolCallPart, len(calls))
 	for i, c := range calls {
 		if _, ok := byName[c.Name]; ok {
@@ -522,7 +537,12 @@ func resolveToolCallNames(ctx context.Context, byName map[string]Tool, calls []p
 				toolErr = &NoSuchToolError{ToolName: fixed.Name}
 			}
 		}
-		return nil, toolErr
+		if policy == ToolNotFoundFail {
+			return nil, toolErr
+		}
+		// ToolNotFoundReport: keep the original call; executeToolCall
+		// records a *NoSuchToolError on its result instead of executing.
+		resolved[i] = c
 	}
 	return resolved, nil
 }
@@ -608,7 +628,15 @@ func executeToolCall(ctx context.Context, byName map[string]Tool, c provider.Too
 		return result
 	}
 
-	t := byName[c.Name]
+	t, known := byName[c.Name]
+	if !known {
+		nerr := &NoSuchToolError{ToolName: c.Name, Available: sortedToolNames(byName)}
+		result := ToolResultRecord{ToolCallID: c.ID, Name: c.Name, Err: nerr}
+		if onEnd != nil {
+			onEnd(stepIndex, result, nerr)
+		}
+		return result
+	}
 	fireOnInputAvailable(ctx, t, c.ID, c.Args)
 	res, err := recoverToolPanic(c.Name, func() (any, error) { return t.Execute(ctx, c.Args) })
 	if err != nil && repair != nil {
@@ -695,7 +723,7 @@ type toolBatchResult struct {
 // nothing executes, and Pending lists every undecided call, in call order.
 func runApprovalAwareToolCalls(ctx context.Context, opts GenerateTextOpts, tools []Tool, calls []provider.ToolCallPart, active map[string]bool, stepIndex int, consultApprovals bool) (*toolBatchResult, error) {
 	byName := buildActiveToolMap(tools, active)
-	resolved, err := resolveToolCallNames(ctx, byName, calls, opts.RepairToolCall)
+	resolved, err := resolveToolCallNames(ctx, byName, calls, opts.RepairToolCall, opts.ToolNotFound)
 	if err != nil {
 		return nil, err
 	}

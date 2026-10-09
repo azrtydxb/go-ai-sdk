@@ -61,8 +61,8 @@ requested tools and starts the next model stream automatically, so a single
 
 `stream.Err()` is `nil` until iteration ends; after an abnormal end it
 holds the terminal error: a `*ai.RetryError` if a later step's stream
-couldn't start, an `*ai.NoSuchToolError` if an unknown tool was requested,
-or the underlying provider stream's mid-stream error. Check it after the
+couldn't start, an `*ai.NoSuchToolError` if an unknown tool was requested under
+`ToolNotFoundFail`, or the underlying provider stream's mid-stream error. Check it after the
 loop:
 
 ```go
@@ -97,7 +97,7 @@ Valid once `Parts()` has been iterated (fully or partially):
   `(*provider.Response).SourceParts()`, which filters the same parts out of
   a completed response.
 - **`Steps()`** — every step executed so far. If iteration stopped because
-  of a `*ai.NoSuchToolError`, that step is still appended with `ToolCalls`
+  of a `*ai.NoSuchToolError` (`ToolNotFoundFail` only), that step is still appended with `ToolCalls`
   populated but `ToolResults` `nil` (execution never ran) — check `Err()`
   rather than assuming every step completed.
 - **`Usage()`** — summed `provider.Usage` across all steps.

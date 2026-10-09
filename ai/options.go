@@ -287,12 +287,19 @@ type GenerateTextOpts struct {
 	// Tools. A nil ActiveTools means all of Tools are active; a non-nil,
 	// possibly empty, slice replaces the active set entirely.
 	ActiveTools []string
+	// ToolNotFound selects what happens when the model calls a tool that is
+	// not among the active Tools (after RepairToolCall, if set, declined or
+	// failed to fix the name). The zero value, ToolNotFoundReport, answers
+	// that call with an error tool result naming the available tools and
+	// continues the loop; ToolNotFoundFail aborts the run with a
+	// *NoSuchToolError. Applies identically to GenerateText and StreamText.
+	ToolNotFound ToolNotFoundPolicy
 	// RepairToolCall is invoked when a tool call fails to validate — an
 	// unknown tool name (not in the active set), or an
 	// *InvalidToolArgumentsError from the tool's Execute. It may return a
 	// corrected call (retried ONCE per original call) or false to give up,
 	// in which case the original error's normal semantics apply (a
-	// *NoSuchToolError aborts the batch; an *InvalidToolArgumentsError is
+	// *NoSuchToolError aborts the batch under ToolNotFoundFail, or is reported to the model under ToolNotFoundReport; an *InvalidToolArgumentsError is
 	// recorded on the corresponding ToolResultRecord.Err). Repair runs
 	// before either of those normal-path outcomes. If the repaired call
 	// fails again — still unknown, or Execute fails again — RepairToolCall
@@ -526,3 +533,15 @@ func activeToolSet(activeTools []string) map[string]bool {
 	}
 	return set
 }
+
+// ToolNotFoundPolicy selects how the tool loop treats a call to an unknown
+// tool. See GenerateTextOpts.ToolNotFound.
+type ToolNotFoundPolicy int
+
+const (
+	// ToolNotFoundReport (the zero value) records a *NoSuchToolError on the
+	// call's tool result, so the model sees the error and the loop continues.
+	ToolNotFoundReport ToolNotFoundPolicy = iota
+	// ToolNotFoundFail aborts the run with a *NoSuchToolError.
+	ToolNotFoundFail
+)

@@ -57,8 +57,10 @@ type NoSuchToolError struct {
 }
 ```
 
-Returned (and, in the tool loop, treated as fatal — it aborts the whole
-batch) when the model requests a tool name not present in `Tools`. See
+Recorded on the tool result (and shown to the model) when the model
+requests a tool name not present in `Tools`; the loop continues. With
+`ToolNotFound: ai.ToolNotFoundFail` it is instead returned and aborts the
+whole batch. `Available` lists the callable tool names. See
 [Tools](tools.md).
 
 ### `*ai.InvalidToolArgumentsError`

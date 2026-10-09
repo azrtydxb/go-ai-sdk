@@ -113,7 +113,7 @@ func TestToolLoopStopsAtMaxSteps(t *testing.T) {
 func TestToolLoopUnknownTool(t *testing.T) {
 	m := &aitest.MockModel{Responses: []*provider.Response{
 		toolCallResponse("nope", "c1", `{}`)}}
-	_, err := GenerateText(t.Context(), GenerateTextOpts{Model: m, Prompt: "x",
+	_, err := GenerateText(t.Context(), GenerateTextOpts{ToolNotFound: ToolNotFoundFail, Model: m, Prompt: "x",
 		Tools: []Tool{NewTool("t", "", func(_ context.Context, a weatherArgs) (any, error) { return nil, nil })}})
 	var nst *NoSuchToolError
 	if !errors.As(err, &nst) || nst.ToolName != "nope" {
@@ -131,7 +131,7 @@ func TestRunToolCallsValidatesBeforeExecuting(t *testing.T) {
 		{ID: "c1", Name: "known", Args: []byte(`{"city":"x"}`)},
 		{ID: "c2", Name: "unknown", Args: []byte(`{}`)},
 	}
-	_, err := runToolCalls(t.Context(), []Tool{known}, calls, nil, nil, 0, nil, nil)
+	_, err := runToolCalls(t.Context(), []Tool{known}, calls, nil, nil, ToolNotFoundFail, 0, nil, nil)
 	var nst *NoSuchToolError
 	if !errors.As(err, &nst) || nst.ToolName != "unknown" {
 		t.Fatalf("err = %v", err)
@@ -358,7 +358,7 @@ func TestActiveToolsInactiveCallIsNoSuchTool(t *testing.T) {
 	}}
 	weather := NewTool("get_weather", "", func(_ context.Context, a weatherArgs) (any, error) { return "sunny", nil })
 	other := NewTool("get_time", "", func(_ context.Context, a weatherArgs) (any, error) { return "noon", nil })
-	_, err := GenerateText(t.Context(), GenerateTextOpts{
+	_, err := GenerateText(t.Context(), GenerateTextOpts{ToolNotFound: ToolNotFoundFail,
 		Model: m, Prompt: "x", Tools: []Tool{weather, other},
 		ActiveTools: []string{"get_weather"},
 	})
@@ -379,7 +379,7 @@ func TestActiveToolsEmptySliceOffersNoToolsAndRejectsAnyCall(t *testing.T) {
 		toolCallResponse("get_weather", "c1", `{"city":"Ghent"}`),
 	}}
 	weather := NewTool("get_weather", "", func(_ context.Context, a weatherArgs) (any, error) { return "sunny", nil })
-	_, err := GenerateText(t.Context(), GenerateTextOpts{
+	_, err := GenerateText(t.Context(), GenerateTextOpts{ToolNotFound: ToolNotFoundFail,
 		Model: m, Prompt: "weather?", Tools: []Tool{weather},
 		ActiveTools: []string{},
 	})
@@ -472,7 +472,7 @@ func TestRepairToolCallFalseKeepsOriginalError(t *testing.T) {
 	}}
 	weather := NewTool("get_weather", "", func(_ context.Context, a weatherArgs) (any, error) { return "sunny", nil })
 	var repairCalls int
-	_, err := GenerateText(t.Context(), GenerateTextOpts{
+	_, err := GenerateText(t.Context(), GenerateTextOpts{ToolNotFound: ToolNotFoundFail,
 		Model: m, Prompt: "x", Tools: []Tool{weather},
 		RepairToolCall: func(_ context.Context, call ToolCallRecord, toolErr error) (ToolCallRecord, bool) {
 			repairCalls++
@@ -497,7 +497,7 @@ func TestRepairToolCallSingleShotCap(t *testing.T) {
 	}}
 	weather := NewTool("get_weather", "", func(_ context.Context, a weatherArgs) (any, error) { return "sunny", nil })
 	var repairCalls int
-	_, err := GenerateText(t.Context(), GenerateTextOpts{
+	_, err := GenerateText(t.Context(), GenerateTextOpts{ToolNotFound: ToolNotFoundFail,
 		Model: m, Prompt: "x", Tools: []Tool{weather},
 		RepairToolCall: func(_ context.Context, call ToolCallRecord, toolErr error) (ToolCallRecord, bool) {
 			repairCalls++

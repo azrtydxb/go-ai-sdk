@@ -1024,7 +1024,7 @@ func TestStreamTextOnErrorToolLoopError(t *testing.T) {
 
 	var gotErr error
 	onFinishCalled := false
-	s, err := StreamText(t.Context(), GenerateTextOpts{
+	s, err := StreamText(t.Context(), GenerateTextOpts{ToolNotFound: ToolNotFoundFail,
 		Model:  m,
 		Prompt: "hi",
 		OnError: func(e error) {
@@ -1098,7 +1098,7 @@ func TestStreamTextActiveToolsInactiveCallIsNoSuchTool(t *testing.T) {
 	}}}
 	weather := NewTool("get_weather", "", func(_ context.Context, a weatherArgs) (any, error) { return "sunny", nil })
 	other := NewTool("get_time", "", func(_ context.Context, a weatherArgs) (any, error) { return "noon", nil })
-	s, err := StreamText(t.Context(), GenerateTextOpts{
+	s, err := StreamText(t.Context(), GenerateTextOpts{ToolNotFound: ToolNotFoundFail,
 		Model: m, Prompt: "x", Tools: []Tool{weather, other},
 		ActiveTools: []string{"get_weather"},
 	})
@@ -1211,7 +1211,7 @@ func TestStreamTextRepairToolCallFalseKeepsOriginalError(t *testing.T) {
 	}}}
 	weather := NewTool("get_weather", "", func(_ context.Context, a weatherArgs) (any, error) { return "sunny", nil })
 	var repairCalls int
-	s, err := StreamText(t.Context(), GenerateTextOpts{
+	s, err := StreamText(t.Context(), GenerateTextOpts{ToolNotFound: ToolNotFoundFail,
 		Model: m, Prompt: "x", Tools: []Tool{weather},
 		RepairToolCall: func(_ context.Context, call ToolCallRecord, toolErr error) (ToolCallRecord, bool) {
 			repairCalls++
@@ -1242,7 +1242,7 @@ func TestStreamTextRepairToolCallSingleShotCap(t *testing.T) {
 	}}}
 	weather := NewTool("get_weather", "", func(_ context.Context, a weatherArgs) (any, error) { return "sunny", nil })
 	var repairCalls int
-	s, err := StreamText(t.Context(), GenerateTextOpts{
+	s, err := StreamText(t.Context(), GenerateTextOpts{ToolNotFound: ToolNotFoundFail,
 		Model: m, Prompt: "x", Tools: []Tool{weather},
 		RepairToolCall: func(_ context.Context, call ToolCallRecord, toolErr error) (ToolCallRecord, bool) {
 			repairCalls++
@@ -1373,7 +1373,7 @@ func TestStreamTextOnAbortFiresOnCtxCancelDuringToolExecution(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 
 	var aborted, errored int
-	s, err := StreamText(ctx, GenerateTextOpts{
+	s, err := StreamText(ctx, GenerateTextOpts{ToolNotFound: ToolNotFoundFail,
 		Model: m, Prompt: "hi",
 		OnAbort: func() { aborted++ },
 		OnError: func(error) { errored++ },

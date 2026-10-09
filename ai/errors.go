@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/retry"
@@ -60,10 +61,16 @@ func (e *NoObjectGeneratedError) Unwrap() error {
 // NoSuchToolError is returned when a tool is not found.
 type NoSuchToolError struct {
 	ToolName string
+	// Available lists the tool names that were callable, when known (set
+	// when the error is reported to the model as a tool result).
+	Available []string
 }
 
 // Error implements the error interface.
 func (e *NoSuchToolError) Error() string {
+	if len(e.Available) > 0 {
+		return fmt.Sprintf("no such tool: %s (available tools: %s)", e.ToolName, strings.Join(e.Available, ", "))
+	}
 	return fmt.Sprintf("no such tool: %s", e.ToolName)
 }
 
