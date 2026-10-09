@@ -113,3 +113,19 @@ Audit of HEAD against the issues' acceptance criteria (verified in code): Codex 
 - **D) Leave both open**, no work now.
 
 **Decided: A)** Build all gaps — public device-code login, Codex auto-refresh, public 0600/0700 file credential store for both providers; then close #4 and #5.
+
+## #35 public OpenAI-compatible provider: package name and option shape?
+
+- **A) `providers/openaicompatible`** with `New(baseURL string, opts ...Option)` (`WithAPIKey`, `WithHeader`, `WithHTTPClient`, `WithName`), and model accessors `Chat`, `Embedding`, `Speech`, `Transcription`, `Rerank` (shape selectable: OpenAI/vLLM `/v1/rerank` or TEI `/rerank`). Thin public wrapper over `internal/openaicompat`; no default base URL. Recorded in an ADR. (Default.)
+- **B) `providers/openaicompat`** — same shape, shorter name mirroring the internal package.
+- **C) Separate packages** per server family (`providers/vllm`, `providers/tei`, `providers/ollama`) each wrapping the internal package.
+
+**Decided: A) (2026-10-09).** `providers/openaicompatible`, option shape as listed, ADR recorded.
+
+## "Breeze" voice support: what does it mean concretely?
+
+- **A) MediaTek Breeze models (Breeze-ASR-25 STT, BreezyVoice TTS) served behind OpenAI-compatible `/v1/audio/transcriptions` and `/v1/audio/speech`** — covered by Speech/Transcription on the #35 provider, with a contract test and README example naming them. No dedicated package. (Default.)
+- **B) Same, plus a thin `providers/breeze` package** with defaults for those model ids.
+- **C) Something else** (a different "Breeze" product/API).
+
+**Decided: A) (2026-10-09).** Breeze voice goes through the openaicompatible provider's Speech/Transcription; no dedicated package.
