@@ -192,10 +192,10 @@ On `429` and `503` responses carrying a valid `Retry-After` header (integer
 seconds or an HTTP-date), the retry wrapper waits that long instead of the
 computed backoff. `*APICallError` exposes it as `RetryAfter() (time.Duration,
 bool)`. A missing or invalid header falls back to the backoff above; other
-statuses (e.g. `500`) ignore the header. The hint is not capped, so the
-`Timeout` budget is the bound: if the context deadline (the binding `Total`
-or `Step` budget) cannot cover the requested wait, no sleep happens and the
-call returns `*ai.RetryAfterExceedsBudgetError` (fields `Requested`,
+statuses (e.g. `500`) ignore the header. The wait is bounded by 60 seconds
+and by the `Timeout` budget: if the requested wait exceeds 60s, or the context
+deadline (the binding `Total` or `Step` budget) cannot cover it, no sleep
+happens and the call returns `*ai.RetryAfterExceedsBudgetError` (fields `Requested`,
 `Remaining`, `LastErr`; unwraps to the last `*APICallError`):
 
 ```go

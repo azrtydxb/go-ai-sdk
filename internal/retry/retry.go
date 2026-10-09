@@ -41,14 +41,19 @@ type RetryAfterer interface {
 	RetryAfter() (time.Duration, bool)
 }
 
+// maxRetryAfter caps how long Do honours a server's Retry-After, so a
+// context without a deadline cannot be parked for an hour by one header.
+const maxRetryAfter = 60 * time.Second
+
 // RetryAfterExceedsBudgetError is returned when the server asked for a wait
-// (Retry-After) that the context deadline cannot cover. Do returns it
+// (Retry-After) longer than maxRetryAfter or than the context deadline can
+// cover. Do returns it
 // immediately, without sleeping, wrapping the last attempt's error.
 type RetryAfterExceedsBudgetError struct {
 	// Requested is the wait the server asked for.
 	Requested time.Duration
-	// Remaining is the time left before the context deadline when the
-	// wait was refused.
+	// Remaining is the wait Do was willing to allow: the time left before
+	// the context deadline, at most maxRetryAfter.
 	Remaining time.Duration
 	// LastErr is the error from the last attempt.
 	LastErr error
@@ -147,11 +152,13 @@ func Do[T any](ctx context.Context, maxRetries int, fn func() (T, error)) (T, er
 		hinted := false
 		if errors.As(err, &ra) {
 			if d, ok := ra.RetryAfter(); ok && d > 0 {
+				budget := maxRetryAfter
 				if dl, has := ctx.Deadline(); has {
-					if remaining := time.Until(dl); remaining < d {
-						var zero T
-						return zero, &RetryAfterExceedsBudgetError{Requested: d, Remaining: remaining, LastErr: err}
-					}
+					budget = min(budget, time.Until(dl))
+				}
+				if d > budget {
+					var zero T
+					return zero, &RetryAfterExceedsBudgetError{Requested: d, Remaining: budget, LastErr: err}
 				}
 				delay = d
 				hinted = true

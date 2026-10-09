@@ -12,7 +12,7 @@ once it reaches 1.0.
 
 - **`Retry-After` is honoured on 429 and 503.** Retries wait the server's
   hint (seconds or HTTP-date) instead of exponential backoff, and never
-  sleep past the context deadline: an unaffordable wait returns the new
+  sleep past the context deadline or 60s: an unaffordable wait returns the new
   `*ai.RetryAfterExceedsBudgetError` exposing the requested wait. (#37)
 
 ### Changed

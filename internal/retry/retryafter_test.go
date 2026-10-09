@@ -100,3 +100,17 @@ func TestDoRetryAfterExceedsBudgetDoesNotSleep(t *testing.T) {
 		t.Fatalf("slept despite insufficient budget: %v", time.Since(start))
 	}
 }
+
+func TestDoRetryAfterAboveCapWithoutDeadlineDoesNotSleep(t *testing.T) {
+	start := time.Now()
+	_, err := Do(t.Context(), 3, func() (int, error) {
+		return 0, &hintErr{d: time.Hour, ok: true}
+	})
+	var be *RetryAfterExceedsBudgetError
+	if !errors.As(err, &be) || be.Remaining != maxRetryAfter {
+		t.Fatalf("err=%v; want RetryAfterExceedsBudgetError capped at %v", err, maxRetryAfter)
+	}
+	if time.Since(start) > 100*time.Millisecond {
+		t.Fatalf("slept on an over-cap hint: %v", time.Since(start))
+	}
+}
