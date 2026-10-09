@@ -210,7 +210,7 @@ searchTool := ai.NewTool("search", "Search the knowledge base",
 - **`RepairToolCall`** retries re-fire `OnInputAvailable` for the repaired
   tool/args, immediately before the repaired `Execute` attempt.
 - **Never fires** for a call that never reaches `Execute` at all — an
-  unresolved unknown-tool call, or an approval-denied call (see
+  unresolved unknown-tool call (the error is recorded instead), or an approval-denied call (see
   [Approvals for tool execution](#approvals-for-tool-execution) below) —
   nor for the `Output` tool-mode fallback's synthetic forced call (see
   [Generating text § Output modes](generating-text.md#output-modes)),
@@ -246,9 +246,11 @@ Three typed errors cover everything that can go wrong with a tool call:
 - **`*ai.ToolExecutionError`** — the handler function itself returned a
   non-nil error; `Execute` wraps it, preserving the original as `.Cause`.
 - **`*ai.NoSuchToolError`** — the model requested a tool name that isn't in
-  `Tools` (or isn't in the active set — see `ActiveTools` below). This one
-  aborts the whole tool-call batch rather than being recorded per-call: see
-  [Generating text](generating-text.md) for how `GenerateText` handles it.
+  `Tools` (or isn't in the active set — see `ActiveTools` below). By default
+  (`ToolNotFound: ai.ToolNotFoundReport`) it is recorded on that call's
+  result and sent to the model as an error tool result listing the
+  available tools, and the loop continues. With `ai.ToolNotFoundFail` it
+  aborts the whole tool-call batch and the run returns the error.
 - **`*ai.ToolApprovalDeniedError`** — recorded the same way as
   `*ai.ToolExecutionError`/`*ai.InvalidToolArgumentsError` (on
   `ToolResultRecord.Err`, never returned/raised directly) when a call
@@ -286,7 +288,7 @@ Inside the tool loop, `GenerateText`/`StreamText` never let an
 record it on that call's `ToolResultRecord.Err` instead, and send the
 model a `provider.ToolResultPart` with `IsError: true` and the error's
 `.Error()` string as the result, so the model sees the failure and can
-retry or adapt. Only an unresolved `*NoSuchToolError` aborts the batch.
+retry or adapt. An unresolved `*NoSuchToolError` is handled the same way unless `ToolNotFound` is `ai.ToolNotFoundFail`, which aborts the batch.
 
 ## ActiveTools
 
@@ -332,8 +334,8 @@ RepairToolCall: func(ctx context.Context, call ai.ToolCallRecord, toolErr error)
 (and, for bad-args repairs, re-executed) exactly once. If the repaired call
 fails again — still an unknown tool, or `Execute` fails again —
 `RepairToolCall` is _not_ invoked a second time for that original call; the
-second failure's normal semantics apply (`*NoSuchToolError` aborts the
-batch, `*InvalidToolArgumentsError` is recorded on the result).
+second failure's normal semantics apply (`*NoSuchToolError` is reported to the model, or aborts the
+batch under `ToolNotFoundFail`; `*InvalidToolArgumentsError` is recorded on the result).
 
 **Repair × approval ordering.** A bad-args repair is re-checked against
 `ApprovalRequirer` using the _repaired_ call's tool and args, before it

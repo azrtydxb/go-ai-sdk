@@ -289,7 +289,7 @@ at its source page.
    executable."** Vercel's `activeTools` is documented as narrowing which
    tools are sent to the model. `go-ai-sdk`'s `ActiveTools` does that
    _and_ treats a tool named outside the active set as **unknown**
-   (`*ai.NoSuchToolError`) if the model calls it anyway — even though the
+   (`*ai.NoSuchToolError`, reported back to the model as an error tool result) if the model calls it anyway — even though the
    tool is present in `Tools` and would otherwise execute fine. A `nil`
    `ActiveTools` means every tool in `Tools` is active; a non-nil, even
    empty, slice replaces the active set entirely (`ActiveTools: []string{}`

@@ -8,6 +8,15 @@ once it reaches 1.0.
 
 ## [Unreleased]
 
+### Changed
+
+- **A call to an unknown tool no longer aborts the run.** The model now
+  receives an error tool result (`no such tool: <name> (available tools: ...)`,
+  a `*ai.NoSuchToolError` on the step's `ToolResultRecord.Err`) and the loop
+  continues, in both `GenerateText` and `StreamText`. `RepairToolCall` still
+  runs first. Set `ToolNotFound: ai.ToolNotFoundFail` on `GenerateTextOpts`
+  (or `agent.Agent`) to keep the old hard failure. (#13)
+
 ## 0.6.0 (2026-09-21)
 
 Subscription auth becomes self-contained — the SDK can now store credentials,

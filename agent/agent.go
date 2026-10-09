@@ -71,6 +71,10 @@ type Agent struct {
 	// ApproveToolCall, when set, is passed through to
 	// ai.GenerateTextOpts.ApproveToolCall unchanged.
 	ApproveToolCall func(ctx context.Context, req ai.ApprovalRequest) (ai.ApprovalDecision, bool)
+	// ToolNotFound is passed through to ai.GenerateTextOpts.ToolNotFound:
+	// the zero value reports an unknown tool call to the model as an error
+	// tool result and continues; ai.ToolNotFoundFail aborts the run.
+	ToolNotFound ai.ToolNotFoundPolicy
 	// PrepareOpts, when set, receives the fully-assembled GenerateTextOpts
 	// before each run for arbitrary customization (settings, callbacks,
 	// ProviderOptions). It runs last — after every other field above has
@@ -113,6 +117,7 @@ func (a *Agent) buildOpts(run RunOpts) ai.GenerateTextOpts {
 		RuntimeContext:  a.RuntimeContext,
 		ApproveToolCall: a.ApproveToolCall,
 		Approvals:       run.Approvals,
+		ToolNotFound:    a.ToolNotFound,
 	}
 
 	if a.PrepareOpts != nil {

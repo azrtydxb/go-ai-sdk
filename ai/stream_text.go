@@ -1017,7 +1017,8 @@ func (s *TextStream) Output() (any, error) {
 
 // Err returns the error, if any, that ended iteration abnormally: a
 // *RetryError if a subsequent step's stream could not start, a
-// *NoSuchToolError if an unknown tool was requested, or the underlying
+// *NoSuchToolError if an unknown tool was requested under
+// ToolNotFoundFail, or the underlying
 // provider stream's mid-stream error.
 func (s *TextStream) Err() error { return s.err }
 
@@ -1032,7 +1033,7 @@ func (s *TextStream) ReasoningText() string { return s.lastReasoning }
 func (s *TextStream) Sources() []provider.SourcePart { return s.lastSources }
 
 // Steps returns the steps executed so far. If iteration stopped because of a
-// *NoSuchToolError (an unknown tool was requested), the step in which that
+// *NoSuchToolError (ToolNotFoundFail only), the step in which that
 // happened is still appended, with its ToolCalls populated but ToolResults
 // nil (execution never ran) — check Err() to detect this case rather than
 // assuming every step in Steps() completed successfully.

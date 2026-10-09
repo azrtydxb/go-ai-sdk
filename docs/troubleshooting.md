@@ -122,7 +122,9 @@ for the full per-provider `NativeJSON` table.
 ## Tool-calling issues
 
 - **`*ai.NoSuchToolError`** — the model requested a tool name that isn't in
-  `Tools`, or isn't in the active set. If you're using `ActiveTools` to
+  `Tools`, or isn't in the active set. By default the model is told via an
+  error tool result and the run continues; the error only aborts the run
+  with `ToolNotFound: ai.ToolNotFoundFail`. If you're using `ActiveTools` to
   restrict which tools are offered, remember a tool listed in `Tools` but
   excluded from `ActiveTools` is treated as unknown if the model somehow
   still calls it — a `nil` `ActiveTools` (the default) means every tool in
@@ -131,7 +133,7 @@ for the full per-provider `NativeJSON` table.
   when set, gets exactly one chance to fix a failing call; whatever it
   returns is re-validated once, but `RepairToolCall` is _not_ invoked a
   second time for that original call. If the repaired call also fails,
-  normal failure semantics apply (`*NoSuchToolError` aborts the batch;
+  normal failure semantics apply (`*NoSuchToolError` is reported to the model, or aborts the batch under `ToolNotFoundFail`;
   other errors are recorded and the loop continues).
 - See [Tools](core/tools.md#activetools) for the full error taxonomy and
   the `RepairToolCall` single-shot rule.
