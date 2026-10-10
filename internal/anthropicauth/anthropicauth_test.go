@@ -295,7 +295,7 @@ func TestOAuthTokenSource_TokenEndpoint5xxIsRetryable(t *testing.T) {
 }
 
 func TestTokenEndpointError_Error(t *testing.T) {
-	tee := &TokenEndpointError{StatusCode: 400, URL: "https://test.com", Body: "bad request"}
+	tee := &TokenEndpointError{StatusCode: 400, URL: "https://test.com", ErrorCode: "invalid_grant", ErrorDescription: "bad request"}
 	s := tee.Error()
 	if !strings.Contains(s, "400") {
 		t.Errorf("error string should contain status code, got %q", s)

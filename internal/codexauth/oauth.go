@@ -120,6 +120,25 @@ func generatePKCE() (verifier, challenge string, err error) {
 	return verifier, challenge, nil
 }
 
+// oauthErrorMessage extracts an error code and optional description from a
+// JSON error response (RFC 6749 section 5.2), or returns a sanitized fallback
+// that does not leak raw response bodies (which may contain tokens or other
+// secrets) into log output.
+func oauthErrorMessage(body []byte) string {
+	var errResp struct {
+		Error            string `json:"error"`
+		ErrorDescription string `json:"error_description"`
+	}
+	if json.Unmarshal(body, &errResp) == nil && errResp.Error != "" {
+		msg := "oauth error " + errResp.Error
+		if errResp.ErrorDescription != "" {
+			msg += ": " + errResp.ErrorDescription
+		}
+		return msg
+	}
+	return "oauth error (status " + strconv.Itoa(0) + ")" // placeholder, caller provides status
+}
+
 // generateState returns a random 16-byte hex string for CSRF prevention.
 func generateState() string {
 	raw := make([]byte, 16)
@@ -210,7 +229,7 @@ func credentialFromTokenResponse(ctx context.Context, client *http.Client, code,
 		return Credential{}, fmt.Errorf("codexauth: read token response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return Credential{}, fmt.Errorf("codexauth: token exchange returned status %d: %s", resp.StatusCode, string(body))
+		return Credential{}, fmt.Errorf("codexauth: token exchange returned status %d: %s", resp.StatusCode, oauthErrorMessage(body))
 	}
 
 	var tr tokenResponse
@@ -251,7 +270,7 @@ func refreshTokenResponse(ctx context.Context, client *http.Client, refreshToken
 		return Credential{}, fmt.Errorf("codexauth: read refresh response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return Credential{}, fmt.Errorf("codexauth: token refresh returned status %d: %s", resp.StatusCode, string(body))
+		return Credential{}, fmt.Errorf("codexauth: token refresh returned status %d: %s", resp.StatusCode, oauthErrorMessage(body))
 	}
 
 	var tr tokenResponse

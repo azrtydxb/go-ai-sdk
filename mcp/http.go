@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -221,12 +222,13 @@ type httpTransport struct {
 	// by WithCheckRedirect. Nil means the client's default behavior applies.
 	checkRedirect func(req *http.Request, via []*http.Request) error
 
-	// mu guards sessionID, openBodies, and closedFlag together: trackBody
+	// mu guards openBodies and closedFlag together: trackBody
 	// must check closedFlag and register the body (plus drainWG.Add) as one
 	// atomic step, so Close's body sweep can never miss a body whose Send
 	// raced it (see trackBody's doc for why).
+	sessionID atomic.Pointer[string]
+
 	mu         sync.Mutex
-	sessionID  string
 	openBodies map[io.Closer]struct{}
 	closedFlag bool
 
@@ -665,13 +667,12 @@ func (t *httpTransport) Close() error {
 		for b := range t.openBodies {
 			bodies = append(bodies, b)
 		}
-		sid := t.sessionID
 		t.mu.Unlock()
 		close(t.closed)
 		for _, b := range bodies {
 			_ = b.Close()
 		}
-		if sid != "" {
+		if sid := t.getSessionID(); sid != "" {
 			t.terminateSession(sid)
 		}
 	})
@@ -743,18 +744,15 @@ func (t *httpTransport) terminateSession(sid string) {
 func (t *httpTransport) SelfSerializes() bool { return true }
 
 func (t *httpTransport) getSessionID() string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.sessionID
+	p := t.sessionID.Load()
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
-// setSessionID is safe under concurrent Send (mu-guarded), but if the server
-// rotates the session mid-flight, concurrent responses can race here and the
-// last write wins arbitrarily — a benign, pre-existing race window that
-// SelfSerializes' removal of Client's write lock does not change the nature
-// of (session id was never ordered against Send in the first place).
 func (t *httpTransport) setSessionID(id string) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.sessionID = id
+	p := new(string)
+	*p = id
+	t.sessionID.Store(p)
 }
