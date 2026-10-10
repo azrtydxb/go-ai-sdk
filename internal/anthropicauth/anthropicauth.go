@@ -326,7 +326,8 @@ func (t *OAuthTokenSource) exchangeCode(ctx context.Context, code, state, verifi
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, &TokenEndpointError{StatusCode: resp.StatusCode, URL: tokenURL, Body: string(body)}
+		code, desc := extractOAuthError(body)
+		return nil, &TokenEndpointError{StatusCode: resp.StatusCode, URL: tokenURL, ErrorCode: code, ErrorDescription: desc}
 	}
 
 	var tr tokenResponse
@@ -391,7 +392,8 @@ func (t *OAuthTokenSource) doRefresh(ctx context.Context) (string, error) {
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", &TokenEndpointError{StatusCode: resp.StatusCode, URL: tokenURL, Body: string(body)}
+		code, desc := extractOAuthError(body)
+		return "", &TokenEndpointError{StatusCode: resp.StatusCode, URL: tokenURL, ErrorCode: code, ErrorDescription: desc}
 	}
 
 	var tr tokenResponse
@@ -520,18 +522,47 @@ func openBrowser(ctx context.Context, urlStr string) error {
 type TokenEndpointError struct {
 	StatusCode int
 	URL        string
-	Body       string
+	// ErrorCode is the RFC 6749 error code (e.g. "invalid_grant"), empty when
+	// the response is not a JSON OAuth error.
+	ErrorCode string
+	// ErrorDescription is the RFC 6749 error_description, empty when
+	// absent. Neither ErrorCode nor ErrorDescription is redacted — they are
+	// standard OAuth error strings, not credentials.
+	ErrorDescription string
 }
 
 // Error implements the error interface.
 func (e *TokenEndpointError) Error() string {
-	return fmt.Sprintf("anthropicauth: token endpoint %s returned status %d: %s", e.URL, e.StatusCode, e.Body)
+	msg := fmt.Sprintf("anthropicauth: token endpoint %s returned status %d", e.URL, e.StatusCode)
+	if e.ErrorCode != "" {
+		msg += ": " + e.ErrorCode
+		if e.ErrorDescription != "" {
+			msg += ": " + e.ErrorDescription
+		}
+	}
+	return msg
 }
 
 // IsRetryable reports whether the failure is likely transient. 429, 408,
 // and 5xx are retryable.
 func (e *TokenEndpointError) IsRetryable() bool {
 	return e.StatusCode == 429 || e.StatusCode == 408 || e.StatusCode >= 500
+}
+
+// extractOAuthError parses an RFC 6749 OAuth error response body and returns
+// an error code and description. It returns ("", "") when the body is not
+// valid JSON or contains no error field — the caller then has the raw body
+// and can decide what to do (typically: log it themselves after stripping
+// secrets).
+func extractOAuthError(body []byte) (code, desc string) {
+	var errResp struct {
+		Error            string `json:"error"`
+		ErrorDescription string `json:"error_description"`
+	}
+	if err := jsonDecode(body, &errResp); err == nil && errResp.Error != "" {
+		return errResp.Error, errResp.ErrorDescription
+	}
+	return "", ""
 }
 
 // ---------------------------------------------------------------------------
