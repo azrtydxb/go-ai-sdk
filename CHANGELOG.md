@@ -6,14 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 once it reaches 1.0.
 
-## [Unreleased]
+## 0.8.0 (2026-10-10)
 
-### Changed
+### Added
 
-- `ai.CosineSimilarity`, `ai.SmoothStream`, `ai.SmoothOpts` and the
-  `Chunking*` constants moved to the new `ai/embedding` package (#59). The
-  `ai.` names remain as deprecated wrappers and will be removed in a
-  future major version. `embedding.DotProduct` is new.
+- `ai/embedding` package: `CosineSimilarity`, `DotProduct`, `SmoothStream`
+  and options, moved out of `ai` (#59). The `ai.` names remain as
+  deprecated wrappers. (#59)
+- Public token-source API: `providers/anthropic.TokenSource` interface and
+  `WithOAuthCredentials(auth.Credentials)`; `providers/vertex.TokenSource`;
+  `codex.Credential` is now `auth.Credentials`, so `auth.Login` output
+  plugs straight into the provider (#54).
+- `mcp.ValidateURL` and `mcp.PinnedTransport` — public SSRF helpers for
+  `WithCheckRedirect`, previously only reachable via an internal package
+  (#54).
+- Cluster map of the `ai` package in `ai/doc.go` (#51), a ProviderOptions
+  note documenting that structural wire keys are overridable per call
+  (#52), and a middleware composition-order inversion warning (#56).
+- Shared fixture-server scaffolding in `internal/testserver`; json_schema
+  passthrough contract tests for baseten, cerebras, lmstudio and gateway;
+  ten copy-pasted provider max_tokens tests reduced to their
+  preset-specific pin (#57, #58).
+- Security hardening carried from this branch: input sanitization, upload
+  guards, SSRF/exec validators (#48), tool-name mismatch fix and sanitized
+  tool error messages (#49), session-ID race and credential-leak fixes.
 
 ## 0.7.1 (2026-10-09)
 
