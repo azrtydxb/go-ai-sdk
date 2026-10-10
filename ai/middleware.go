@@ -3,9 +3,11 @@ package ai
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"iter"
 	"maps"
 	"strings"
+	"unicode"
 
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -76,7 +78,7 @@ func foldToolInputExamples(call provider.Call) provider.Call {
 			if j > 0 {
 				b.WriteString("\n")
 			}
-			b.Write(ex)
+			b.Write(sanitizeExampleJSON(ex))
 		}
 		t.Description = b.String()
 		t.InputExamples = nil
@@ -84,6 +86,31 @@ func foldToolInputExamples(call provider.Call) provider.Call {
 	}
 	call.Tools = tools
 	return call
+}
+
+// maxExampleBytes caps the bytes added from each InputExample to the tool
+// description (prevents DoS via a single gigantic example).
+const maxExampleBytes = 64 * 1024
+
+// sanitizeExampleJSON strips control characters from a JSON example (keeping
+// only \n, \t, and space which are valid JSON whitespace) and truncates to
+// maxExampleBytes. This prevents prompt injection via adversarial example
+// content that would otherwise reach the LLM as part of the tool description.
+func sanitizeExampleJSON(b json.RawMessage) []byte {
+	if len(b) == 0 {
+		return b
+	}
+	if len(b) > maxExampleBytes {
+		b = b[:maxExampleBytes]
+	}
+	out := make([]byte, 0, len(b))
+	for i := 0; i < len(b); i++ {
+		c := b[i]
+		if c == '\n' || c == '\t' || c == ' ' || !unicode.IsControl(rune(c)) {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // ---------------------------------------------------------------------
