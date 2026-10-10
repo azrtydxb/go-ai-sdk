@@ -3,7 +3,8 @@
 `ai.StreamText` returns a `*ai.TextStream`, a single-use iterator over
 `provider.StreamPart` values plus accessors for the accumulated result once
 iteration ends. This page covers the part types, the iterator/`Err`/`Close`
-contract, and `ai.SmoothStream`. For `StreamText`'s options (`OnChunk`,
+contract, and `embedding.SmoothStream` (moved from `ai`; the
+`ai.SmoothStream` wrapper remains, deprecated). For `StreamText`'s options (`OnChunk`,
 `OnStepFinish`, etc.) see [Generating text](generating-text.md).
 
 ## StreamPart reference
@@ -186,14 +187,14 @@ distinction.
 
 ## SmoothStream
 
-`ai.SmoothStream(parts iter.Seq[provider.StreamPart], opts ai.SmoothOpts) iter.Seq[provider.StreamPart]`
+`embedding.SmoothStream(parts iter.Seq[provider.StreamPart], opts embedding.SmoothOpts) iter.Seq[provider.StreamPart]`
 re-chunks `TextDelta`s into smaller, more evenly sized deltas for driving a
 UI at a steady cadence — it doesn't change the total text, only how it's
 broken into deltas over time. Apply it downstream of `stream.Parts()`:
 
 ```go
-smoothed := ai.SmoothStream(stream.Parts(), ai.SmoothOpts{
-	Chunking: ai.ChunkingWord, // or ai.ChunkingLine
+smoothed := embedding.SmoothStream(stream.Parts(), embedding.SmoothOpts{
+	Chunking: embedding.ChunkingWord, // or embedding.ChunkingLine
 	Delay:    50 * time.Millisecond,
 })
 for part := range smoothed {
@@ -203,8 +204,8 @@ for part := range smoothed {
 }
 ```
 
-- **`Chunking`** — `ai.ChunkingWord` (default when empty) splits on
-  whitespace boundaries; `ai.ChunkingLine` splits on newlines. Any
+- **`Chunking`** — `embedding.ChunkingWord` (default when empty) splits on
+  whitespace boundaries; `embedding.ChunkingLine` splits on newlines. Any
   unrecognized value falls back to word chunking. Each emitted chunk is the
   content unit _plus_ its trailing delimiter — word mode emits `"hello "`
   (not `"hello"` then `" "` separately), line mode emits `"first line\n"`.

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
+	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -249,7 +250,7 @@ func convertMessages(msgs []provider.Message) (system string, out []wireContent,
 	for _, m := range msgs {
 		switch m.Role {
 		case provider.RoleSystem:
-			systemParts = append(systemParts, textContent(m.Content))
+			systemParts = append(systemParts, providerutil.TextContent(m.Content))
 
 		case provider.RoleUser:
 			parts, uerr := userParts(m.Content)
@@ -277,16 +278,6 @@ func convertMessages(msgs []provider.Message) (system string, out []wireContent,
 		}
 	}
 	return strings.Join(systemParts, "\n\n"), out, nil
-}
-
-func textContent(parts []provider.ContentPart) string {
-	var s string
-	for _, part := range parts {
-		if tp, ok := part.(provider.TextPart); ok {
-			s += tp.Text
-		}
-	}
-	return s
 }
 
 func userParts(parts []provider.ContentPart) ([]wirePart, error) {

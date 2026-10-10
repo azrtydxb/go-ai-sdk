@@ -11,8 +11,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
+	"github.com/azrtydxb/go-ai-sdk/auth"
 	"github.com/azrtydxb/go-ai-sdk/internal/anthropicauth"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 	"github.com/azrtydxb/go-ai-sdk/provider/providertest"
@@ -1739,12 +1741,63 @@ func TestOAuthAuth_TokenRefreshOnExpiry(t *testing.T) {
 func TestAuthProviderMode(t *testing.T) {
 	p1 := New(WithAPIKey("k"))
 	if got := p1.AuthMode(); got != "api-key" {
-		t.Errorf("AuthMode with API key = %q, want api-key", got)
+		t.Errorf("WithAPIKey: AuthMode = %q, want api-key", got)
 	}
 
 	p2 := New(WithOAuthTokenSource(anthropicauth.StaticTokenSource("tok")))
 	if got := p2.AuthMode(); got != "oauth" {
-		t.Errorf("AuthMode with OAuth = %q, want oauth", got)
+		t.Errorf("WithOAuthTokenSource: AuthMode = %q, want oauth", got)
+	}
+}
+
+// TestTokenSourceInterfaceAcceptance verifies that a custom type with only
+// a Token method satisfies the public TokenSource interface, and that the
+// internal anthropicauth implementation satisfies it too, so existing
+// callers need no changes.
+func TestTokenSourceInterfaceAcceptance(t *testing.T) {
+	var _ TokenSource = anthropicauth.StaticTokenSource("tok")
+	var _ TokenSource = &refreshingTokenSource{}
+
+	p := New(WithOAuthTokenSource(&refreshingTokenSource{nextToken: "tok"}))
+	if got := p.AuthMode(); got != "oauth" {
+		t.Errorf("AuthMode = %q, want oauth", got)
+	}
+}
+
+// TestWithOAuthCredentials verifies that pre-obtained auth.Credentials —
+// the public output of auth.Login/auth.Load — switch the provider into
+// OAuth mode and are used as the Bearer token on requests.
+func TestWithOAuthCredentials(t *testing.T) {
+	authSeen := ""
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authSeen = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{
+			"id":"msg-1","type":"message","role":"assistant",
+			"content":[{"type":"text","text":"ok"}],
+			"model":"claude-test","stop_reason":"end_turn","stop_sequence":null,
+			"usage":{"input_tokens":5,"output_tokens":3}
+		}`))
+	}))
+	defer srv.Close()
+
+	creds := auth.Credentials{
+		Access:  "cred-access",
+		Refresh: "cred-refresh",
+		Expires: time.Now().Add(time.Hour),
+	}
+	p := New(WithOAuthCredentials(creds), WithBaseURL(srv.URL))
+	if got := p.AuthMode(); got != "oauth" {
+		t.Errorf("AuthMode = %q, want oauth", got)
+	}
+
+	_, err := p.Model("claude-test").Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{provider.UserText("hello")},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if authSeen != "Bearer cred-access" {
+		t.Errorf("Authorization = %q, want Bearer cred-access", authSeen)
 	}
 }
 

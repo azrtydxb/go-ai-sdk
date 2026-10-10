@@ -7,6 +7,7 @@ import (
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
 	"github.com/azrtydxb/go-ai-sdk/ai/aitest"
+	"github.com/azrtydxb/go-ai-sdk/ai/embedding"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -230,11 +231,11 @@ func ExampleEmbedMany() {
 }
 
 func ExampleCosineSimilarity() {
-	same, err := ai.CosineSimilarity([]float64{1, 0, 0}, []float64{1, 0, 0})
+	same, err := embedding.CosineSimilarity([]float64{1, 0, 0}, []float64{1, 0, 0})
 	if err != nil {
 		log.Fatal(err)
 	}
-	orthogonal, err := ai.CosineSimilarity([]float64{1, 0, 0}, []float64{0, 1, 0})
+	orthogonal, err := embedding.CosineSimilarity([]float64{1, 0, 0}, []float64{0, 1, 0})
 	if err != nil {
 		log.Fatal(err)
 	}

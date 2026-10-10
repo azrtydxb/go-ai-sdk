@@ -54,6 +54,75 @@ func TestAuthHeaderAndModelSent(t *testing.T) {
 	}
 }
 
+// TestResponseFormatJSONSchemaPassthrough asserts LM Studio's distinguishing
+// wire knob: its NativeJSON:true preset (no JSONObjectOnly) sends a JSON
+// response_format with a schema through to the wire verbatim as
+// {"type":"json_schema","json_schema":{...,"strict":true}} — the local
+// server's structured-output support is treated as native, and callers whose
+// loaded model rejects json_schema can drop to json_object via
+// ProviderOptions.
+func TestResponseFormatJSONSchemaPassthrough(t *testing.T) {
+	srv := compattest.NewFixtureServer(t, "lmstudio")
+	defer srv.Close()
+	m := New(WithAPIKey("k"), WithBaseURL(srv.URL)).Model("local-model")
+
+	if _, err := m.Generate(t.Context(), provider.Call{
+		Messages: []provider.Message{provider.UserText("simple")},
+		ResponseFormat: &provider.ResponseFormat{
+			Type:   "json",
+			Name:   "weather_schema",
+			Schema: json.RawMessage(`{"type":"object"}`),
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var rf responseFormat
+	if err := json.Unmarshal(responseFormatRaw(t, srv), &rf); err != nil {
+		t.Fatalf("decode response_format: %v", err)
+	}
+	if rf.Type != "json_schema" {
+		t.Errorf("response_format.type = %q, want json_schema", rf.Type)
+	}
+	if rf.JSONSchema == nil {
+		t.Fatalf("response_format missing json_schema: %s", responseFormatRaw(t, srv))
+	}
+	if rf.JSONSchema.Name != "weather_schema" {
+		t.Errorf("json_schema.name = %q, want weather_schema", rf.JSONSchema.Name)
+	}
+	if !rf.JSONSchema.Strict {
+		t.Error("json_schema.strict = false, want true")
+	}
+	if string(rf.JSONSchema.Schema) != `{"type":"object"}` {
+		t.Errorf("json_schema.schema = %s, want {\"type\":\"object\"}", rf.JSONSchema.Schema)
+	}
+}
+
+// responseFormat is the wire shape of the OpenAI response_format field.
+type responseFormat struct {
+	Type       string `json:"type"`
+	JSONSchema *struct {
+		Name   string          `json:"name"`
+		Schema json.RawMessage `json:"schema"`
+		Strict bool            `json:"strict"`
+	} `json:"json_schema"`
+}
+
+// responseFormatRaw extracts the raw response_format field from the single
+// request the fixture server has recorded.
+func responseFormatRaw(t *testing.T, srv *compattest.Server) json.RawMessage {
+	t.Helper()
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(srv.Requests()[0], &raw); err != nil {
+		t.Fatalf("decode raw request: %v", err)
+	}
+	rf, ok := raw["response_format"]
+	if !ok {
+		t.Fatalf("request missing response_format field: %s", srv.Requests()[0])
+	}
+	return rf
+}
+
 // TestEmptyAPIKeyStillWorks verifies LM Studio's local-first default (no API
 // key configured) still sends a well-formed request: openaicompat sends
 // "Authorization: Bearer " with an empty key, which LM Studio ignores, but

@@ -8,16 +8,20 @@
 // produce, which keeps it usable as a true black-box fixture of "whatever
 // speaks the OpenAI wire format" rather than being coupled to openaicompat's
 // internals.
+//
+// The generic recording-server scaffolding (recording log, body reading,
+// SSE framing, canned error scenarios) lives in internal/testserver; this
+// package adds only the OpenAI wire-format handlers and scenario mapping.
 package compattest
 
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"net/http/httptest"
-	"sync"
+	"sync/atomic"
 	"testing"
+
+	"github.com/azrtydxb/go-ai-sdk/internal/testserver"
 )
 
 // onePixelPNGBase64 is a 1x1 transparent PNG, base64-encoded — used as the
@@ -113,69 +117,12 @@ type embeddingResponse struct {
 }
 
 // Server is a fixture httptest.Server speaking the OpenAI chat-completions
-// and embeddings wire format. Callers must Close it (or rely on the
-// t.Cleanup registered by NewFixtureServer).
-type Server struct {
-	*httptest.Server
-
-	mu       sync.Mutex
-	requests [][]byte
-	headers  []http.Header
-}
-
-// Requests returns the raw JSON bodies of every chat/embeddings request
-// received so far, in arrival order.
-func (s *Server) Requests() [][]byte {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([][]byte, len(s.requests))
-	copy(out, s.requests)
-	return out
-}
-
-// AuthHeaders returns the Authorization header value of every
-// chat/embeddings request received so far, in arrival order (one entry per
-// Requests() entry).
-func (s *Server) AuthHeaders() []string {
-	return s.HeaderValues("Authorization")
-}
-
-// HeaderValues returns the named header's value for every chat/embeddings
-// request received so far, in arrival order (one entry per Requests()
-// entry). Missing headers yield "" for that entry.
-func (s *Server) HeaderValues(name string) []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]string, len(s.headers))
-	for i, h := range s.headers {
-		out[i] = h.Get(name)
-	}
-	return out
-}
-
-func (s *Server) record(raw []byte, header http.Header) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.requests = append(s.requests, raw)
-	s.headers = append(s.headers, header)
-}
-
-// readBody reads r's body, reporting via t.Errorf and writing a 500
-// response on failure. It returns ok=false when the caller (a handler
-// running on its own goroutine) should stop processing the request; t.Fatalf
-// is not goroutine-safe per the testing docs, so handler code must use this
-// pattern instead of failing the test directly.
-func readBody(t *testing.T, w http.ResponseWriter, r *http.Request) (buf []byte, ok bool) {
-	t.Helper()
-	buf, err := io.ReadAll(r.Body)
-	if err != nil {
-		msg := fmt.Sprintf("compattest: read body: %v", err)
-		t.Errorf("%s", msg)
-		http.Error(w, msg, 500)
-		return nil, false
-	}
-	return buf, true
-}
+// and embeddings wire format. It reuses the recording log from
+// internal/testserver: Requests() returns every request body in arrival
+// order, HeaderValues(name) the matching header values, AuthHeaders() the
+// Authorization values. Callers must Close it (or rely on the t.Cleanup
+// registered by NewFixtureServer).
+type Server = testserver.Server
 
 // lastUserText extracts the text of the last user message's Content field,
 // which the fixtures below always send as a plain JSON string.
@@ -193,10 +140,11 @@ func lastUserText(req chatRequest) string {
 	return ""
 }
 
+// writeSSE frames v as a single "data:" SSE event and flushes — a thin
+// wrapper over internal/testserver keeping the handler bodies below
+// readable.
 func writeSSE(w http.ResponseWriter, flusher http.Flusher, v any) {
-	b, _ := json.Marshal(v)
-	_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
-	flusher.Flush()
+	testserver.WriteSSE(w, flusher, v)
 }
 
 // NewFixtureServer returns an httptest.Server speaking the OpenAI
@@ -206,196 +154,166 @@ func writeSSE(w http.ResponseWriter, flusher http.Flusher, v any) {
 // (handled automatically via t.Cleanup).
 func NewFixtureServer(t *testing.T, providerName string) *Server {
 	t.Helper()
-	s := &Server{}
 
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+	// sPtr is an atomic pointer so mux handlers can safely read s even
+	// if httptest.NewServer starts accepting requests before we assign
+	// the real value below.
+	var sPtr atomic.Pointer[testserver.Server]
+
+	// All handlers read sPtr.Load() at call time, so they always see the
+	// latest value, even if testserver.New starts its goroutine before
+	// the sPtr.Store call below completes.
+	handleChat := func(w http.ResponseWriter, r *http.Request) {
+		s := sPtr.Load()
 		var req chatRequest
-		raw, ok := readBody(t, w, r)
-		if !ok {
+		if !testserver.DecodeAndRecord(t, s, w, r, &req) {
 			return
 		}
-		if err := json.Unmarshal(raw, &req); err != nil {
-			msg := fmt.Sprintf("compattest: decode request: %v", err)
-			t.Errorf("%s", msg)
-			http.Error(w, msg, 500)
-			return
-		}
-		s.record(raw, r.Header.Clone())
+		chatImpl(t, w, r, req, providerName)
+	}
 
-		text := lastUserText(req)
-
-		switch text {
-		case "fail 429":
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(429)
-			_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
-			return
-		case "fail 400":
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(400)
-			_, _ = w.Write([]byte(`{"error":{"message":"bad request"}}`))
-			return
-		}
-
-		if req.Stream {
-			flusher, flushOK := w.(http.Flusher)
-			if !flushOK {
-				msg := "compattest: ResponseWriter does not support flushing"
-				t.Errorf("%s", msg)
-				http.Error(w, msg, 500)
-				return
-			}
-			w.Header().Set("Content-Type", "text/event-stream")
-			w.WriteHeader(http.StatusOK)
-
-			switch text {
-			case "stream simple":
-				writeSSE(w, flusher, chatStreamChunk{Choices: []chatStreamChoice{{Delta: chatStreamDelta{Content: "Hel"}}}})
-				writeSSE(w, flusher, chatStreamChunk{Choices: []chatStreamChoice{{Delta: chatStreamDelta{Content: "lo!"}}}})
-				stop := "stop"
-				writeSSE(w, flusher, chatStreamChunk{Choices: []chatStreamChoice{{FinishReason: &stop}}})
-				writeSSE(w, flusher, chatStreamChunk{Usage: &wireUsage{PromptTokens: 5, CompletionTokens: 2, TotalTokens: 7}})
-				_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
-				flusher.Flush()
-			case "stream tool":
-				writeSSE(w, flusher, chatStreamChunk{Choices: []chatStreamChoice{{Delta: chatStreamDelta{
-					ToolCalls: []wireToolCallDelta{{Index: 0, ID: "call_1", Type: "function", Function: wireToolCallFunc{Name: "get_weather", Arguments: ""}}},
-				}}}})
-				writeSSE(w, flusher, chatStreamChunk{Choices: []chatStreamChoice{{Delta: chatStreamDelta{
-					ToolCalls: []wireToolCallDelta{{Index: 0, Function: wireToolCallFunc{Arguments: `{"city":`}}},
-				}}}})
-				writeSSE(w, flusher, chatStreamChunk{Choices: []chatStreamChoice{{Delta: chatStreamDelta{
-					ToolCalls: []wireToolCallDelta{{Index: 0, Function: wireToolCallFunc{Arguments: `"Ghent"}`}}},
-				}}}})
-				toolCalls := "tool_calls"
-				writeSSE(w, flusher, chatStreamChunk{Choices: []chatStreamChoice{{FinishReason: &toolCalls}}})
-				writeSSE(w, flusher, chatStreamChunk{Usage: &wireUsage{PromptTokens: 8, CompletionTokens: 4, TotalTokens: 12}})
-				_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
-				flusher.Flush()
-			default:
-				// Response headers (200 OK, text/event-stream) are already
-				// flushed by this point, so we can't switch to a 500; just
-				// report the failure and write an SSE comment so the client
-				// gets a deterministic (if wrong) response instead of a
-				// hang.
-				t.Errorf("compattest: unknown streaming scenario %q", text)
-				_, _ = fmt.Fprintf(w, ": compattest: unknown streaming scenario %q\n\n", text)
-				flusher.Flush()
-			}
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-
-		switch text {
-		case "simple":
-			content := fmt.Sprintf("Hello from %s!", providerName)
-			resp := chatResponse{
-				Choices: []chatResponseChoice{{
-					Message:      chatResponseMessage{Content: &content},
-					FinishReason: "stop",
-				}},
-				Usage: wireUsage{PromptTokens: 5, CompletionTokens: 3, TotalTokens: 8},
-			}
-			_ = json.NewEncoder(w).Encode(resp)
-		case "tool":
-			resp := chatResponse{
-				Choices: []chatResponseChoice{{
-					Message: chatResponseMessage{
-						ToolCalls: []wireToolCall{{
-							ID:   "call_1",
-							Type: "function",
-							Function: wireToolCallFunc{
-								Name:      "get_weather",
-								Arguments: `{"city":"Ghent"}`,
-							},
-						}},
-					},
-					FinishReason: "tool_calls",
-				}},
-				Usage: wireUsage{PromptTokens: 6, CompletionTokens: 4, TotalTokens: 10},
-			}
-			_ = json.NewEncoder(w).Encode(resp)
-		default:
-			msg := fmt.Sprintf("compattest: unknown scenario %q", text)
-			t.Errorf("%s", msg)
-			http.Error(w, msg, 500)
-		}
-	})
-
+	mux.HandleFunc("/chat/completions", handleChat)
 	mux.HandleFunc("/embeddings", func(w http.ResponseWriter, r *http.Request) {
+		s := sPtr.Load()
 		var req embeddingRequest
-		raw, ok := readBody(t, w, r)
-		if !ok {
+		if !testserver.DecodeAndRecord(t, s, w, r, &req) {
 			return
 		}
-		if err := json.Unmarshal(raw, &req); err != nil {
-			msg := fmt.Sprintf("compattest: decode embedding request: %v", err)
-			t.Errorf("%s", msg)
-			http.Error(w, msg, 500)
-			return
-		}
-		s.record(raw, r.Header.Clone())
-
-		data := make([]embeddingData, len(req.Input))
-		total := 0
-		for i, v := range req.Input {
-			data[i] = embeddingData{
-				Index:     i,
-				Embedding: []float64{float64(i), float64(len(v))},
-			}
-			total += len(v)
-		}
-
-		resp := embeddingResponse{
-			Data:  data,
-			Usage: wireUsage{PromptTokens: total, TotalTokens: total},
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(resp)
+		embedImpl(w, req)
 	})
-
 	mux.HandleFunc("/images/generations", func(w http.ResponseWriter, r *http.Request) {
-		raw, ok := readBody(t, w, r)
+		s := sPtr.Load()
+		raw, ok := testserver.ReadBody(t, w, r)
 		if !ok {
 			return
 		}
-		s.record(raw, r.Header.Clone())
-
+		s.Record(raw, r.Header.Clone())
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprintf(w, `{"data":[{"b64_json":%q}]}`, onePixelPNGBase64)
 	})
-
 	mux.HandleFunc("/audio/speech", func(w http.ResponseWriter, r *http.Request) {
-		raw, ok := readBody(t, w, r)
+		s := sPtr.Load()
+		raw, ok := testserver.ReadBody(t, w, r)
 		if !ok {
 			return
 		}
-		s.record(raw, r.Header.Clone())
-
+		s.Record(raw, r.Header.Clone())
 		w.Header().Set("Content-Type", "application/octet-stream")
 		_, _ = w.Write([]byte("FAKEAUDIO"))
 	})
-
 	mux.HandleFunc("/audio/transcriptions", func(w http.ResponseWriter, r *http.Request) {
-		raw, ok := readBody(t, w, r)
+		s := sPtr.Load()
+		raw, ok := testserver.ReadBody(t, w, r)
 		if !ok {
 			return
 		}
-		// Record the raw multipart body along with the Content-Type header
-		// (which carries the boundary) so tests can re-parse it with
-		// mime/multipart.
-		s.record(raw, r.Header.Clone())
-
+		s.Record(raw, r.Header.Clone())
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"text":"hello world","language":"en","duration":1.5,`+
 			`"segments":[{"text":"hello","start":0,"end":0.5},{"text":"world","start":0.5,"end":1.5}]}`)
 	})
 
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-	s.Server = srv
+	s := testserver.New(t, mux)
+	sPtr.Store(s)
 	return s
+}
+
+func chatImpl(t *testing.T, w http.ResponseWriter, r *http.Request, req chatRequest, providerName string) {
+	text := lastUserText(req)
+
+	if testserver.ErrorScenario(w, text) {
+		return
+	}
+
+	if req.Stream {
+		flusher, ok := testserver.StartSSE(t, w)
+		if !ok {
+			return
+		}
+
+		switch text {
+		case "stream simple":
+			writeSSE(w, flusher, chatStreamChunk{Choices: []chatStreamChoice{{Delta: chatStreamDelta{Content: "Hel"}}}})
+			writeSSE(w, flusher, chatStreamChunk{Choices: []chatStreamChoice{{Delta: chatStreamDelta{Content: "lo!"}}}})
+			stop := "stop"
+			writeSSE(w, flusher, chatStreamChunk{Choices: []chatStreamChoice{{FinishReason: &stop}}})
+			writeSSE(w, flusher, chatStreamChunk{Usage: &wireUsage{PromptTokens: 5, CompletionTokens: 2, TotalTokens: 7}})
+			_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+			flusher.Flush()
+		case "stream tool":
+			writeSSE(w, flusher, chatStreamChunk{Choices: []chatStreamChoice{{Delta: chatStreamDelta{
+				ToolCalls: []wireToolCallDelta{{Index: 0, ID: "call_1", Type: "function", Function: wireToolCallFunc{Name: "get_weather", Arguments: ""}}},
+			}}}})
+			writeSSE(w, flusher, chatStreamChunk{Choices: []chatStreamChoice{{Delta: chatStreamDelta{
+				ToolCalls: []wireToolCallDelta{{Index: 0, Function: wireToolCallFunc{Arguments: `{"city":`}}},
+			}}}})
+			writeSSE(w, flusher, chatStreamChunk{Choices: []chatStreamChoice{{Delta: chatStreamDelta{
+				ToolCalls: []wireToolCallDelta{{Index: 0, Function: wireToolCallFunc{Arguments: `"Ghent"}`}}},
+			}}}})
+			toolCalls := "tool_calls"
+			writeSSE(w, flusher, chatStreamChunk{Choices: []chatStreamChoice{{FinishReason: &toolCalls}}})
+			writeSSE(w, flusher, chatStreamChunk{Usage: &wireUsage{PromptTokens: 8, CompletionTokens: 4, TotalTokens: 12}})
+			_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+			flusher.Flush()
+		default:
+			testserver.SSEUnknownScenario(t, w, flusher, text)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	switch text {
+	case "simple":
+		content := fmt.Sprintf("Hello from %s!", providerName)
+		resp := chatResponse{
+			Choices: []chatResponseChoice{{
+				Message:      chatResponseMessage{Content: &content},
+				FinishReason: "stop",
+			}},
+			Usage: wireUsage{PromptTokens: 5, CompletionTokens: 3, TotalTokens: 8},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	case "tool":
+		resp := chatResponse{
+			Choices: []chatResponseChoice{{
+				Message: chatResponseMessage{
+					ToolCalls: []wireToolCall{{
+						ID:   "call_1",
+						Type: "function",
+						Function: wireToolCallFunc{
+							Name:      "get_weather",
+							Arguments: `{"city":"Ghent"}`,
+						},
+					}},
+				},
+				FinishReason: "tool_calls",
+			}},
+			Usage: wireUsage{PromptTokens: 6, CompletionTokens: 4, TotalTokens: 10},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	default:
+		testserver.JSONUnknownScenario(t, w, text)
+	}
+}
+
+func embedImpl(w http.ResponseWriter, req embeddingRequest) {
+	data := make([]embeddingData, len(req.Input))
+	total := 0
+	for i, v := range req.Input {
+		data[i] = embeddingData{
+			Index:     i,
+			Embedding: []float64{float64(i), float64(len(v))},
+		}
+		total += len(v)
+	}
+
+	resp := embeddingResponse{
+		Data:  data,
+		Usage: wireUsage{PromptTokens: total, TotalTokens: total},
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
 }

@@ -4,10 +4,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"mime"
-	"strings"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
+	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -314,7 +313,7 @@ func convertMessages(msgs []provider.Message) ([]wireMessage, error) {
 	for _, m := range msgs {
 		switch m.Role {
 		case provider.RoleSystem:
-			text := textContent(m.Content)
+			text := providerutil.TextContent(m.Content)
 			b, _ := json.Marshal(text)
 			out = append(out, wireMessage{Role: "system", Content: b})
 
@@ -414,29 +413,6 @@ func toolResultForWire(result any) any {
 	}
 }
 
-func textContent(parts []provider.ContentPart) string {
-	var s string
-	for _, part := range parts {
-		if tp, ok := part.(provider.TextPart); ok {
-			s += tp.Text
-		}
-	}
-	return s
-}
-
-// isPDFMediaType reports whether mediaType names application/pdf, ignoring
-// case and any parameters (e.g. "Application/PDF" or
-// "application/pdf; name=x" both match) — mirrors how MIME type matching is
-// expected to behave per RFC 2045 rather than a strict string comparison
-// against the exact wire value.
-func isPDFMediaType(mediaType string) bool {
-	base, _, err := mime.ParseMediaType(mediaType)
-	if err != nil {
-		return strings.EqualFold(mediaType, "application/pdf")
-	}
-	return strings.EqualFold(base, "application/pdf")
-}
-
 // userContent builds the content field for a user message. Text-only
 // messages are sent as a plain JSON string; mixed content (images, or
 // multiple parts) is sent as a parts array.
@@ -449,7 +425,7 @@ func userContent(parts []provider.ContentPart) (json.RawMessage, error) {
 		}
 	}
 	if textOnly {
-		b, err := json.Marshal(textContent(parts))
+		b, err := json.Marshal(providerutil.TextContent(parts))
 		return b, err
 	}
 
@@ -492,7 +468,7 @@ func userContent(parts []provider.ContentPart) (json.RawMessage, error) {
 			case p.URL != "":
 				return nil, fmt.Errorf("openaicompat: unsupported content part %T with URL set in user message (file URLs are not supported; use FileID or inline Data)", part)
 			default:
-				if !isPDFMediaType(p.MediaType) {
+				if !providerutil.IsPDFMediaType(p.MediaType) {
 					return nil, fmt.Errorf("openaicompat: unsupported content part %T with media type %q in user message (only application/pdf is supported)", part, p.MediaType)
 				}
 				filename := p.Filename

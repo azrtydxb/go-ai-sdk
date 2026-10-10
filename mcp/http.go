@@ -122,15 +122,13 @@ func withStaticHeaders(headers map[string]string) HTTPOption {
 // from fn aborts the request.
 //
 // This is the recommended way to add SSRF protection to the transport: the
-// fetchmedia package exposes ValidateURL and PinnedTransport for this purpose.
+// mcp package exposes ValidateURL and PinnedTransport for this purpose.
 // Example:
 //
-//	import "github.com/azrtydxb/go-ai-sdk/internal/fetchmedia"
-//
 //	httpClient := &http.Client{
-//		Transport: fetchmedia.PinnedTransport(http.DefaultTransport),
+//		Transport: mcp.PinnedTransport(http.DefaultTransport),
 //		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-//			if err := fetchmedia.ValidateURL(req.Context(), req.URL.String()); err != nil {
+//			if err := mcp.ValidateURL(req.Context(), req.URL.String()); err != nil {
 //				return err
 //			}
 //			return nil

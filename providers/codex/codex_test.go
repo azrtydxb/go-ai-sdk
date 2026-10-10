@@ -23,14 +23,14 @@ func fakeJWT(claims map[string]any) string {
 	return h + "." + p + "."
 }
 
-func testCodexCred(accountID string) codexauth.Credential {
+func testCodexCred(accountID string) Credential {
 	claims := map[string]any{
 		"sub": "user123",
 		"https://api.openai.com/auth": map[string]any{
 			"chatgpt_account_id": accountID,
 		},
 	}
-	return codexauth.Credential{
+	return Credential{
 		Access:    fakeJWT(claims),
 		Refresh:   "refresh-test",
 		Expires:   future(),
@@ -66,6 +66,35 @@ func TestNew_Model(t *testing.T) {
 	}
 	if m.ProviderName() != "openai-codex" {
 		t.Errorf("ProviderName() = %q, want openai-codex", m.ProviderName())
+	}
+}
+
+// TestAuthCredentialsRoundTrip verifies that the public Credential (an
+// alias of auth.Credentials) survives the WithCredentials → internal
+// codexauth conversion: with a refresh token present, New wires the
+// internal refreshable source, and the source returns all four fields
+// unchanged.
+func TestAuthCredentialsRoundTrip(t *testing.T) {
+	creds := Credential{
+		Access:    "access-rt",
+		Refresh:   "refresh-rt",
+		Expires:   future(),
+		AccountID: "acc-rt",
+	}
+	p := New(WithCredentials(creds))
+
+	if p.credentialSource == nil {
+		t.Fatal("WithCredentials with a refresh token did not wire the internal refreshable credential source")
+	}
+	got, err := p.credentialSource(context.Background())
+	if err != nil {
+		t.Fatalf("credentialSource: %v", err)
+	}
+	if got != (Credential{Access: "access-rt", Refresh: "refresh-rt", Expires: creds.Expires, AccountID: "acc-rt"}) {
+		t.Errorf("credentialSource = %+v, want the WithCredentials input", got)
+	}
+	if want := (codexauth.Credential{Access: "access-rt", Refresh: "refresh-rt", Expires: creds.Expires, AccountID: "acc-rt"}); p.credential != want {
+		t.Errorf("internal credential = %+v, want %+v", p.credential, want)
 	}
 }
 

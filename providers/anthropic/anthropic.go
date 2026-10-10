@@ -38,9 +38,11 @@
 package anthropic
 
 import (
+	"context"
 	"net/http"
 	"os"
 
+	"github.com/azrtydxb/go-ai-sdk/auth"
 	"github.com/azrtydxb/go-ai-sdk/internal/anthropicauth"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -59,7 +61,7 @@ type Provider struct {
 
 	// oauthTokenSource, when non-nil, is used instead of apiKey for
 	// authentication. It supplies Bearer tokens via PKCE OAuth.
-	oauthTokenSource anthropicauth.TokenSource
+	oauthTokenSource TokenSource
 }
 
 // Option configures a Provider.
@@ -82,13 +84,32 @@ func WithHTTPClient(c *http.Client) Option {
 	return func(p *Provider) { p.httpClient = c }
 }
 
-// WithOAuthTokenSource configures this Provider to use the given
-// anthropicauth.TokenSource for authentication instead of an API key.
-// When set, requests are sent with an Authorization: Bearer header
-// rather than an x-api-key header. Use this for Claude Pro/Max
-// subscription access obtained via PKCE OAuth from claude.ai.
-func WithOAuthTokenSource(ts anthropicauth.TokenSource) Option {
+// TokenSource yields a bearer access token for the Anthropic Messages API.
+type TokenSource interface {
+	Token(ctx context.Context) (string, error)
+}
+
+// WithOAuthTokenSource configures this Provider to use the given TokenSource
+// for authentication instead of an API key. When set, requests are sent with
+// an Authorization: Bearer header rather than an x-api-key header. Use this
+// for Claude Pro/Max subscription access obtained via PKCE OAuth from
+// claude.ai.
+func WithOAuthTokenSource(ts TokenSource) Option {
 	return func(p *Provider) { p.oauthTokenSource = ts }
+}
+
+// WithOAuthCredentials configures this Provider to use pre-obtained OAuth
+// credentials — typically the result of auth.Login(ctx, "anthropic", ...)
+// or auth.Load — for authentication instead of an API key. The credentials
+// are refreshed automatically once the access token expires. This gives
+// users a complete public path from auth.Login/auth.Load to
+// OAuth-authenticated requests without importing any internal package.
+func WithOAuthCredentials(creds auth.Credentials) Option {
+	return WithOAuthTokenSource(anthropicauth.NewOAuthTokenSourceWithCredentials(anthropicauth.Credentials{
+		Access:  creds.Access,
+		Refresh: creds.Refresh,
+		Expires: creds.Expires,
+	}))
 }
 
 // AuthMode returns the authentication mode used by this provider:

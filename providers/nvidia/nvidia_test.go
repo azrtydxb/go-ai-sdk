@@ -104,9 +104,12 @@ func TestMaxTokensUsesMaxTokensField(t *testing.T) {
 	if err := json.Unmarshal(srv.Requests()[0], &raw); err != nil {
 		t.Fatalf("decode raw request: %v", err)
 	}
-	var n int
-	if err := json.Unmarshal(raw["max_tokens"], &n); err != nil || n != 42 {
-		t.Errorf("max_tokens = %s, want 42", raw["max_tokens"])
+	// The knob mechanics (field-name selection, value passthrough, absence
+	// of the other field name) are covered once by openaicompat's
+	// table-driven TestRequestShapeMaxTokensParam; this test pins only this
+	// preset's choice of the legacy "max_tokens" wire name.
+	if _, ok := raw["max_tokens"]; !ok {
+		t.Errorf("request missing max_tokens field: %s", srv.Requests()[0])
 	}
 	if _, ok := raw["max_completion_tokens"]; ok {
 		t.Errorf("request unexpectedly contains max_completion_tokens: %s", srv.Requests()[0])
