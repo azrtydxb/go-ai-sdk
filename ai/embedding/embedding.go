@@ -1,11 +1,64 @@
-package ai
+// Package embedding provides utilities for working with embedding vectors:
+// cosine similarity, dot product, and text stream smoothing for UI presentation.
+//
+// These functions are independent of the core ai/generation package and
+// can be used with any []float64 embedding output.
+package embedding
 
 import (
+	"fmt"
 	"iter"
+	"math"
 	"time"
 
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
+
+// -----------------------------------------------------------------------
+// Similarity
+// -----------------------------------------------------------------------
+
+// CosineSimilarity returns the cosine similarity of two equal-length
+// vectors: dot(a, b) / (||a|| * ||b||). It errors if a and b differ in
+// length, or if either vector has zero magnitude (cosine similarity is
+// undefined for a zero vector).
+func CosineSimilarity(a, b []float64) (float64, error) {
+	if len(a) != len(b) {
+		return 0, fmt.Errorf("embedding: cosine similarity vectors have different lengths (%d != %d)", len(a), len(b))
+	}
+
+	var dot, magA, magB float64
+	for i := range a {
+		dot += a[i] * b[i]
+		magA += a[i] * a[i]
+		magB += b[i] * b[i]
+	}
+	magA = math.Sqrt(magA)
+	magB = math.Sqrt(magB)
+
+	if magA == 0 || magB == 0 {
+		return 0, fmt.Errorf("embedding: cosine similarity undefined for zero-magnitude vector")
+	}
+
+	return dot / (magA * magB), nil
+}
+
+// DotProduct returns the dot product of two equal-length vectors.
+// It errors if a and b differ in length.
+func DotProduct(a, b []float64) (float64, error) {
+	if len(a) != len(b) {
+		return 0, fmt.Errorf("embedding: dot product vectors have different lengths (%d != %d)", len(a), len(b))
+	}
+	var dot float64
+	for i := range a {
+		dot += a[i] * b[i]
+	}
+	return dot, nil
+}
+
+// -----------------------------------------------------------------------
+// Stream Smoothing
+// -----------------------------------------------------------------------
 
 // ChunkingWord and ChunkingLine are the recognized values for
 // SmoothOpts.Chunking. Any other value (including the empty string) falls
@@ -53,9 +106,9 @@ type SmoothOpts struct {
 // flushed as a final TextDelta before SmoothStream itself ends.
 //
 // Callers typically apply SmoothStream to the iter.Seq[provider.StreamPart]
-// obtained from a TextStream, downstream of anything CallOpts.OnChunk
-// observed: OnChunk always sees the provider's original, unsmoothed parts,
-// never these re-chunked ones.
+// obtained from a TextStream, downstream of anything OnChunk observed:
+// OnChunk always sees the provider's original, unsmoothed parts, never
+// these re-chunked ones.
 func SmoothStream(parts iter.Seq[provider.StreamPart], opts SmoothOpts) iter.Seq[provider.StreamPart] {
 	chunking := opts.Chunking
 	if chunking == "" {
