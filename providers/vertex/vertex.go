@@ -46,16 +46,20 @@ func WithProject(p string) Option { return func(pr *Provider) { pr.project = p }
 // os.Getenv("GOOGLE_VERTEX_LOCATION"), or "us-central1" if that is unset.
 func WithLocation(l string) Option { return func(pr *Provider) { pr.location = l } }
 
-// WithTokenSource sets the gauth.TokenSource used to authorize requests,
-// taking precedence over automatic GOOGLE_APPLICATION_CREDENTIALS
-// discovery.
-func WithTokenSource(ts gauth.TokenSource) Option {
+// TokenSource yields an OAuth2 bearer access token used to authorize
+// requests against the Vertex AI API.
+type TokenSource interface {
+	Token(ctx context.Context) (string, error)
+}
+
+// WithTokenSource sets the TokenSource used to authorize requests, taking
+// precedence over automatic GOOGLE_APPLICATION_CREDENTIALS discovery.
+func WithTokenSource(ts TokenSource) Option {
 	return func(pr *Provider) { pr.tokenSource = ts }
 }
 
-// WithAccessToken configures a fixed bearer token (wrapped in a
-// gauth.StaticTokenSource), useful for tests or short-lived tokens
-// obtained out of band.
+// WithAccessToken configures a fixed bearer token, useful for tests or
+// short-lived tokens obtained out of band.
 func WithAccessToken(token string) Option {
 	return func(pr *Provider) { pr.tokenSource = gauth.StaticTokenSource(token) }
 }

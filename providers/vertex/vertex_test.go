@@ -295,6 +295,39 @@ func TestWithTokenSource(t *testing.T) {
 	}
 }
 
+// customTokenSource is a minimal type implementing only the public
+// TokenSource interface, to verify WithTokenSource accepts any
+// externally-defined implementation.
+type customTokenSource struct {
+	token string
+}
+
+// Token returns the fixed token; it never errors.
+func (s customTokenSource) Token(context.Context) (string, error) {
+	return s.token, nil
+}
+
+// TestWithCustomTokenSource verifies that a custom implementation of the
+// public TokenSource interface is accepted by WithTokenSource and used to
+// authorize requests.
+func TestWithCustomTokenSource(t *testing.T) {
+	const token = "custom-source-token"
+	srv := newFixtureServer(t, token)
+	p := New(
+		WithProject(testProject),
+		WithLocation(testLocation),
+		WithBaseURL(srv.URL),
+		WithTokenSource(customTokenSource{token: token}),
+	)
+
+	_, err := p.Model(testModel).Generate(context.Background(), provider.Call{
+		Messages: []provider.Message{provider.UserText("simple")},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+}
+
 func TestDefaultLocation(t *testing.T) {
 	p := New(WithProject(testProject))
 	if p.location != "us-central1" {

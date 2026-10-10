@@ -16,7 +16,10 @@ import (
 )
 
 // Credential holds Codex OAuth tokens, expiry, and the ChatGPT account ID.
-type Credential = codexauth.Credential
+// It is an alias of auth.Credentials, so the output of
+// auth.Login(ctx, "codex", ...) or auth.Load plugs directly into
+// WithCredentials.
+type Credential = auth.Credentials
 
 // Provider is a Codex (ChatGPT Plus/Pro) LanguageModel factory.
 type Provider struct {
@@ -35,7 +38,7 @@ type Option func(*Provider)
 // automatically, in memory only: rotated tokens are not persisted, so prefer
 // WithCredentialFile for anything longer-lived than one process.
 func WithCredentials(cred Credential) Option {
-	return func(p *Provider) { p.credential = cred }
+	return func(p *Provider) { p.credential = toInternalCredential(cred) }
 }
 
 // WithCredentialSource resolves credentials on every Generate and Stream call.
@@ -84,8 +87,7 @@ func New(opts ...Option) *Provider {
 			if setErr != nil {
 				return Credential{}, setErr
 			}
-			c, err := source.Credentials(ctx)
-			return Credential(c), err
+			return source.Credentials(ctx)
 		}
 	}
 	return p
@@ -118,7 +120,7 @@ func (m *credentialModel) resolve(ctx context.Context) (provider.LanguageModel, 
 		return nil, err
 	}
 	cfg := m.config
-	cfg.Credential = credential
+	cfg.Credential = toInternalCredential(credential)
 	return codextransport.NewModelWithOptions(cfg), nil
 }
 
@@ -142,4 +144,16 @@ func (m *credentialModel) Stream(ctx context.Context, call provider.Call) (provi
 // Codex uses OAuth subscription credentials, not API keys.
 func WithAPIKey(k string) Option {
 	return func(p *Provider) { _ = k }
+}
+
+// toInternalCredential converts a public Credential into the internal
+// codexauth.Credential used by the transport (which carries a Valid method).
+// The two types have identical fields, so this is a straight 4-field copy.
+func toInternalCredential(c Credential) codexauth.Credential {
+	return codexauth.Credential{
+		Access:    c.Access,
+		Refresh:   c.Refresh,
+		Expires:   c.Expires,
+		AccountID: c.AccountID,
+	}
 }
