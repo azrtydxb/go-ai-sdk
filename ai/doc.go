@@ -27,6 +27,30 @@
 // parts as an iter.Seq, consumed with a plain for range (Go's
 // range-over-func iterators, package iter in the standard library).
 //
+// # Layout
+//
+// The package is one API on purpose: ai.* is the public entry point for
+// every capability, and the files cluster by capability rather than by
+// package. The clusters, with the narrow shared plumbing between them:
+//
+//   - Text generation/streaming: generate_text.go, stream_text.go, plus
+//     smooth.go and timeout.go.
+//   - Structured output: output.go, generate_object.go, stream_object.go,
+//     middleware_json.go.
+//   - Media: generate_image.go, generate_speech.go, generate_video.go,
+//     transcribe.go, stream_transcribe.go, translate.go, upload_file.go.
+//   - Embed/rerank: embed.go, rerank.go, similarity.go.
+//   - Cross-cutting: options.go (Opts structs + buildCall), middleware.go,
+//     telemetry.go, registry.go, tool.go, errors.go, approval.go,
+//     runtime_context.go, partial_tracker.go.
+//
+// The only genuinely load-bearing coupling is ~300 lines of shared
+// helpers — buildCall, partialTracker/repairPartial, translateRetryErr,
+// RuntimeContextFrom — which every capability's paths converge on. Those
+// helpers are why the code lives in one package: splitting ai/text,
+// ai/object, ai/media, ... would hoist them into an internal package
+// without removing any coupling, while breaking every import of ai.*.
+//
 // See the package README and docs/ for the full guide set, and
 // docs/architecture.md for how this package relates to provider and
 // providers/*.

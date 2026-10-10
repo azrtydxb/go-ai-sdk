@@ -200,6 +200,13 @@ call before anything else runs; put response-shaping middleware
 (`ExtractReasoningMiddleware`, `SimulateStreamingMiddleware`) closest to the
 real model, since they interpret that specific model's raw output format.
 
+> **Watch the inversion between the two styles.** With manual
+> wrapping/WrapModel, the middleware you apply **last** is outermost and
+> runs first. With `ChainMiddleware`, the middleware you list **first** is
+> outermost and runs first. Both match the same mental model ("outermost
+> runs first") — it's only which end of your list that determines it that
+> flips. If your chain behaves one layer off, check which style you used.
+
 ## ChainMiddleware
 
 `ChainMiddleware` is a convenience for the composition pattern above when

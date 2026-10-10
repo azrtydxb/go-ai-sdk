@@ -35,6 +35,14 @@ so option entries win over SDK-set fields. `{"anthropic": {"temperature":
 0.9}}` overrides `Call.Temperature`. Keys not otherwise exposed as a typed
 field (e.g. `{"anthropic": {"top_k": 5}}`) pass through untouched.
 
+"Win over SDK-set fields" extends to the structural wire keys too: an
+entry keyed `system`, `messages`, `tools`, or `tool_choice` replaces the
+system prompt, message array, or tool list the SDK built **for that one
+call**. This is deliberate — it is the escape hatch for shapes the typed
+API doesn't expose — and it is scoped strictly to the call: the merge
+copies into a fresh per-request map, so nothing you pass in
+`ProviderOptions` is mutated and no state leaks between calls.
+
 Critically, the value on each key is the **raw wire key name** for that
 provider's API — not a Go-idiomatic or camelCased name the SDK translates
 for you. The anthropic thinking example from [Reasoning](reasoning.md) uses
