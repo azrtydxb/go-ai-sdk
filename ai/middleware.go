@@ -12,6 +12,28 @@ import (
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
+// Middleware is a function that wraps a provider.LanguageModel, modifying
+// its behavior (e.g. adding telemetry, extracting reasoning text, stripping
+// markdown fences). Wrapping is composable: the outer middleware sees the
+// input first (it receives the original Call), the inner model executes,
+// and the outer middleware sees the output last (it receives the raw
+// Response from the inner model).
+//
+// Example:
+//
+//	wrapped := TelemetryMiddleware(TimeoutMiddleware(baseModel))
+//	// TelemetryMiddleware is the OUTER layer: it sees the Call first,
+//	// the Response last. TimeoutMiddleware is the INNER layer: it sees
+//	// the Call after Telemetry, the Response before Telemetry.
+//
+// To apply multiple middleware with a single model, chain them as shown
+// above, or use [ChainMiddleware], whose first-listed middleware is the
+// outer layer.
+//
+// Middleware must be safe for concurrent use: the wrapped model may be
+// called from multiple goroutines, so any state the middleware adds must
+// be goroutine-safe.
+
 // ---------------------------------------------------------------------
 // AddToolInputExamplesMiddleware
 // ---------------------------------------------------------------------
