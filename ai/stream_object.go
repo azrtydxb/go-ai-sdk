@@ -16,6 +16,7 @@ type ObjectStream[T any] struct {
 	ctx      context.Context
 	stream   provider.StreamResponse
 	toolMode bool
+	toolName string
 
 	started bool
 	closed  bool
@@ -56,6 +57,7 @@ func StreamObject[T any](ctx context.Context, opts GenerateObjectOpts) (*ObjectS
 		ctx:      ctx,
 		stream:   stream,
 		toolMode: toolName != "",
+		toolName: toolName,
 	}, nil
 }
 
@@ -108,12 +110,22 @@ func (s *ObjectStream[T]) Partials() iter.Seq[T] {
 				}
 			case provider.ToolCallEnd:
 				if s.toolMode {
+					if s.toolName != "" && part.Call.Name != s.toolName {
+						s.finalErr = &NoObjectGeneratedError{
+							Cause: errors.New("model called an unexpected tool, not the object tool"),
+						}
+						abandoned = true
+						break
+					}
 					// The assembled call carries the authoritative args, so it
 					// supersedes the deltas rather than extending them.
 					v, ok = tracker.replace(part.Call.Args, decode)
 				}
 			case provider.FinishPart:
 				s.usage = part.Usage
+			}
+			if abandoned {
+				break
 			}
 
 			if ok {

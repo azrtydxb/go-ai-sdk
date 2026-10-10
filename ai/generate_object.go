@@ -147,7 +147,14 @@ func GenerateObject[T any](ctx context.Context, opts GenerateObjectOpts) (*Gener
 				Cause:   errors.New("model did not call the object tool"),
 			}
 		}
-		rawText = string(calls[0].Args)
+		if tc, ok := findToolCallByName(calls, toolName); ok {
+			rawText = string(tc.Args)
+		} else {
+			return nil, &NoObjectGeneratedError{
+				RawText: resp.Text(),
+				Cause:   errors.New("model called an unexpected tool, not the object tool"),
+			}
+		}
 	} else {
 		rawText = resp.Text()
 	}

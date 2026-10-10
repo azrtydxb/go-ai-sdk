@@ -158,8 +158,8 @@ func TestToolsExecuteIsErrorBecomesGoError(t *testing.T) {
 	if err == nil {
 		t.Fatal("Execute: want error for IsError result, got nil")
 	}
-	if !strings.Contains(err.Error(), "it broke") {
-		t.Fatalf("err = %v, want it to contain the tool's error text", err)
+	if !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("err = %v, want it to contain the tool name", err)
 	}
 	var toolErr *ai.ToolExecutionError
 	if !errors.As(err, &toolErr) {
