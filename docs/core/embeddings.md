@@ -1,7 +1,9 @@
 # Embeddings
 
 `ai.Embed` and `ai.EmbedMany` turn text into vectors using any
-`provider.EmbeddingModel`. `ai.CosineSimilarity` compares two vectors.
+`provider.EmbeddingModel`. `embedding.CosineSimilarity` compares two
+vectors (moved from `ai` in v0.8.0; the `ai.CosineSimilarity` wrapper
+remains, deprecated).
 `ai.Rerank` ranks documents by relevance using a `provider.RerankingModel`
 (see [Reranking](#reranking) below).
 
@@ -180,14 +182,16 @@ if _, ok := vm.(provider.EmbeddingModelWithOptions); ok {
 ## CosineSimilarity
 
 ```go
-sim, err := ai.CosineSimilarity([]float64{1, 0, 0}, []float64{0.5, 0.5, 0})
+import "github.com/azrtydxb/go-ai-sdk/ai/embedding"
+
+sim, err := embedding.CosineSimilarity([]float64{1, 0, 0}, []float64{0.5, 0.5, 0})
 if err != nil {
 	log.Fatal(err)
 }
 fmt.Println(sim) // 0.7071067811865475
 ```
 
-`CosineSimilarity(a, b []float64) (float64, error)` computes
+`embedding.CosineSimilarity(a, b []float64) (float64, error)` computes
 `dot(a, b) / (||a|| * ||b||)`. It returns an error if `a` and `b` have
 different lengths, or if either vector has zero magnitude (cosine
 similarity is undefined for a zero vector) — it never panics or silently

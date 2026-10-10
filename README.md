@@ -155,7 +155,8 @@ gained a leading `ctx context.Context` parameter and `ai.SpanInfo` gained
   `Output` is set). See
   [Generating text § Output modes](docs/core/generating-text.md#output-modes).
 - **Streaming** — a `StreamPart` sequence (`iter.Seq`) covering text, tool
-  calls, reasoning, and sources uniformly, plus `ai.SmoothStream` for
+  calls, reasoning, and sources uniformly, plus `embedding.SmoothStream`
+  (package `ai/embedding`) for
   steady-cadence UI rendering. See [Streaming](docs/core/streaming.md).
 - **Reasoning/thinking** — surfaced uniformly as `ReasoningPart`/
   `ReasoningDelta`/`ReasoningEnd` across every provider that supports it,
@@ -165,7 +166,7 @@ gained a leading `ctx context.Context` parameter and `ai.SpanInfo` gained
   `additionalModelRequestFields.thinking`). See
   [Reasoning](docs/core/reasoning.md).
 - **Embeddings** — `ai.Embed`/`ai.EmbedMany` with automatic batching and
-  `ai.CosineSimilarity`. See [Embeddings](docs/core/embeddings.md).
+  `embedding.CosineSimilarity` (package `ai/embedding`). See [Embeddings](docs/core/embeddings.md).
 - **Reranking** — `ai.Rerank` ranks documents by relevance to a query via
   `provider.RerankingModel` (Cohere, Voyage, Mixedbread, and self-hosted
   vLLM/TEI endpoints via the OpenAI-compatible provider). See

@@ -8,6 +8,13 @@ once it reaches 1.0.
 
 ## [Unreleased]
 
+### Changed
+
+- `ai.CosineSimilarity`, `ai.SmoothStream`, `ai.SmoothOpts` and the
+  `Chunking*` constants moved to the new `ai/embedding` package (#59). The
+  `ai.` names remain as deprecated wrappers and will be removed in a
+  future major version. `embedding.DotProduct` is new.
+
 ## 0.7.1 (2026-10-09)
 
 ### Fixed
