@@ -115,6 +115,33 @@ func withStaticHeaders(headers map[string]string) HTTPOption {
 	return func(t *httpTransport) { t.headers = headers }
 }
 
+// WithCheckRedirect installs fn as the http.Client's CheckRedirect callback,
+// overriding any existing redirect checker. fn is called with the request URL
+// before each redirect hop (including the initial request). A non-nil error
+// from fn aborts the request.
+//
+// This is the recommended way to add SSRF protection to the transport: the
+// fetchmedia package exposes ValidateURL and PinnedTransport for this purpose.
+// Example:
+//
+//	import "github.com/azrtydxb/go-ai-sdk/internal/fetchmedia"
+//
+//	httpClient := &http.Client{
+//		Transport: fetchmedia.PinnedTransport(http.DefaultTransport),
+//		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+//			if err := fetchmedia.ValidateURL(req.Context(), req.URL.String()); err != nil {
+//				return err
+//			}
+//			return nil
+//		},
+//	}
+func WithCheckRedirect(fn func(req *http.Request, via []*http.Request) error) HTTPOption {
+	return func(t *httpTransport) {
+		t.checkRedirect = fn
+		t.client.CheckRedirect = fn
+	}
+}
+
 // recvQueueSize bounds the number of received-but-not-yet-drained messages
 // an httpTransport will buffer. It's generous relative to how many messages
 // a single Send's response can realistically carry (an SSE response with a
@@ -189,6 +216,10 @@ type httpTransport struct {
 
 	maxRetries     int           // 0 disables retrying (default)
 	retryBaseDelay time.Duration // base delay for capped exponential backoff; 0 means defaultRetryBaseDelay
+
+	// checkRedirect is the http.Client's CheckRedirect callback, installed
+	// by WithCheckRedirect. Nil means the client's default behavior applies.
+	checkRedirect func(req *http.Request, via []*http.Request) error
 
 	// mu guards sessionID, openBodies, and closedFlag together: trackBody
 	// must check closedFlag and register the body (plus drainWG.Add) as one

@@ -275,6 +275,15 @@ type StdioOptions struct {
 	Dir        string            // working directory; empty uses the caller's directory
 	Stderr     io.Writer         // nil discards stderr; must not block indefinitely
 	InheritEnv bool              // false starts with an empty environment
+	// ExecValidator, when set, is called with the command path before the
+	// child process starts. A non-nil error from fn aborts the transport
+	// constructor. This is the recommended way to add allowlist-based
+	// validation: the stdlib exec.Command does not invoke a shell, so the
+	// command path is executed directly (not parsed for shell metacharacters),
+	// but an attacker who can influence the path could still execute arbitrary
+	// binaries. Validate the path (e.g., check it's under /usr/local/bin)
+	// to restrict which binaries the transport may launch.
+	ExecValidator func(cmdPath string) error
 }
 
 // NewStdioTransportWithOptions launches command directly as argv, without a shell.
@@ -284,6 +293,11 @@ type StdioOptions struct {
 // waits for cleanup; neither option provides process-tree or filesystem isolation.
 // The command is trusted configuration: callers must authorize it before calling.
 func NewStdioTransportWithOptions(ctx context.Context, command []string, opts StdioOptions) (Transport, error) {
+	if opts.ExecValidator != nil {
+		if err := opts.ExecValidator(command[0]); err != nil {
+			return nil, err
+		}
+	}
 	env := make([]string, 0, len(opts.Env))
 	if opts.InheritEnv {
 		env = os.Environ()

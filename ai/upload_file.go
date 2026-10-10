@@ -3,6 +3,9 @@ package ai
 import (
 	"context"
 	"errors"
+	"fmt"
+	"mime"
+	"strings"
 
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
@@ -20,6 +23,27 @@ var ErrFilenameRequired = errors.New("ai: filename is required")
 // ErrIDRequired is returned when ID is empty in DeleteFileOpts.
 var ErrIDRequired = errors.New("ai: id is required")
 
+// ErrDataTooLarge is returned when Data exceeds UploadFileOpts.MaxBytes.
+var ErrDataTooLarge = errors.New("ai: data exceeds MaxBytes")
+
+// ErrMediaTypeForbidden is returned when MediaType is set and does not pass
+// the Allowlist filter (when UploadFileOpts.MediaTypeAllowlist is set).
+var ErrMediaTypeForbidden = errors.New("ai: media type not in allowlist")
+
+// maxUploadBytes is the default ceiling when UploadFileOpts.MaxBytes is zero.
+const maxUploadBytes int64 = 256 << 20 // 256 MiB
+
+// sanitizeMediaType lowercases the type and subtype of mt and strips any
+// parameters (e.g. "; charset=binary") so that allowlist matching is
+// case-insensitive and parameter-agnostic. Returns "" on parse failure.
+func sanitizeMediaType(mt string) string {
+	base, _, err := mime.ParseMediaType(mt)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(base)
+}
+
 // UploadFileOpts options for the UploadFile function.
 type UploadFileOpts struct {
 	Store           provider.FileStore // required
@@ -29,6 +53,12 @@ type UploadFileOpts struct {
 	Purpose         string
 	MaxRetries      *int
 	ProviderOptions map[string]any
+	// MaxBytes is the ceiling on Data; zero means maxUploadBytes (256 MiB).
+	MaxBytes int64
+	// MediaTypeAllowlist, when non-empty, restricts uploads to the listed
+	// media types (case-insensitive, parameters stripped). An empty allowlist
+	// means all media types are permitted.
+	MediaTypeAllowlist []string
 
 	// Headers carries extra HTTP headers to send with the request; threaded
 	// through to provider.FileUploadCall.Headers unchanged — see that
@@ -50,6 +80,28 @@ func UploadFile(ctx context.Context, opts UploadFileOpts) (*provider.FileInfo, e
 	if opts.Filename == "" {
 		return nil, ErrFilenameRequired
 	}
+
+	maxBytes := opts.MaxBytes
+	if maxBytes <= 0 {
+		maxBytes = maxUploadBytes
+	}
+	if int64(len(opts.Data)) > maxBytes {
+		return nil, ErrDataTooLarge
+	}
+
+	if len(opts.MediaTypeAllowlist) > 0 {
+		st := sanitizeMediaType(opts.MediaType)
+		if st == "" {
+			return nil, fmt.Errorf("ai: parse media type: %w", ErrMediaTypeForbidden)
+		}
+		for _, allow := range opts.MediaTypeAllowlist {
+			if st == sanitizeMediaType(allow) {
+				goto ok
+			}
+		}
+		return nil, ErrMediaTypeForbidden
+	}
+ok:
 
 	call := provider.FileUploadCall{
 		Data:            opts.Data,
