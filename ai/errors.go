@@ -94,9 +94,9 @@ type NoSuchToolError struct {
 // Error implements the error interface.
 func (e *NoSuchToolError) Error() string {
 	if len(e.Available) > 0 {
-		return fmt.Sprintf("no such tool: %s (available tools: %s)", e.ToolName, strings.Join(e.Available, ", "))
+		return fmt.Sprintf("no such tool %q: available tools: %s", e.ToolName, strings.Join(e.Available, ", "))
 	}
-	return fmt.Sprintf("no such tool: %s", e.ToolName)
+	return fmt.Sprintf("no such tool %q", e.ToolName)
 }
 
 // InvalidToolArgumentsError is returned when tool arguments are invalid.
@@ -108,7 +108,7 @@ type InvalidToolArgumentsError struct {
 
 // Error implements the error interface.
 func (e *InvalidToolArgumentsError) Error() string {
-	return fmt.Sprintf("invalid arguments for tool %s: %v", e.ToolName, e.Cause)
+	return fmt.Sprintf("invalid arguments for tool %q", e.ToolName)
 }
 
 // Unwrap implements the error unwrapping interface.
@@ -133,7 +133,7 @@ type ToolExecutionError struct {
 
 // Error implements the error interface.
 func (e *ToolExecutionError) Error() string {
-	return fmt.Sprintf("tool execution error in %s: %v", e.ToolName, e.Cause)
+	return fmt.Sprintf("tool execution error in %s", e.ToolName)
 }
 
 // Unwrap implements the error unwrapping interface.
@@ -153,9 +153,9 @@ type ToolApprovalDeniedError struct {
 // when empty.
 func (e *ToolApprovalDeniedError) Error() string {
 	if e.Reason == "" {
-		return fmt.Sprintf("ai: tool %q execution denied", e.ToolName)
+		return fmt.Sprintf("tool %q execution denied", e.ToolName)
 	}
-	return fmt.Sprintf("ai: tool %q execution denied: %s", e.ToolName, e.Reason)
+	return fmt.Sprintf("tool %q execution denied: %s", e.ToolName, e.Reason)
 }
 
 // TimeoutError is returned when one of Timeout's SDK-imposed bounds (Total,

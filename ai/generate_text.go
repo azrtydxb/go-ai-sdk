@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"runtime/debug"
 	"sort"
+	"strings"
 
 	"github.com/azrtydxb/go-ai-sdk/internal/retry"
 	"github.com/azrtydxb/go-ai-sdk/provider"
@@ -444,12 +445,44 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 }
 
 // toolResultValue returns the value to send to the model for a tool result:
-// the error string when the tool call failed, otherwise the tool's result.
+// a sanitized error message when the tool call failed, otherwise the tool's
+// result. The error is sanitized to prevent leaking internal details (stack
+// traces, file paths, etc.) into the model's context.
 func toolResultValue(r ToolResultRecord) any {
 	if r.Err != nil {
-		return r.Err.Error()
+		return sanitizeToolResultErr(r.Err)
 	}
 	return r.Result
+}
+
+// sanitizeToolResultErr returns a safe error message for tool result errors
+// sent back to the model. It strips internal details (stack traces, file
+// paths, goroutine IDs) from error strings that could leak into the
+// conversation.
+func sanitizeToolResultErr(err error) string {
+	var tee *ToolExecutionError
+	if errors.As(err, &tee) {
+		return fmt.Sprintf("ai: tool %s execution failed", tee.ToolName)
+	}
+	var iae *InvalidToolArgumentsError
+	if errors.As(err, &iae) {
+		return fmt.Sprintf("ai: tool %s: invalid arguments", iae.ToolName)
+	}
+	var nte *NoSuchToolError
+	if errors.As(err, &nte) {
+		if len(nte.Available) > 0 {
+			return fmt.Sprintf("ai: no such tool: %s (available tools: %s)", nte.ToolName, strings.Join(nte.Available, ", "))
+		}
+		return fmt.Sprintf("ai: no such tool: %s", nte.ToolName)
+	}
+	var tade *ToolApprovalDeniedError
+	if errors.As(err, &tade) {
+		if tade.Reason == "" {
+			return fmt.Sprintf("ai: tool %q execution denied", tade.ToolName)
+		}
+		return fmt.Sprintf("ai: tool %q execution denied: %s", tade.ToolName, tade.Reason)
+	}
+	return fmt.Sprintf("ai: tool execution failed: %s", err.Error())
 }
 
 // repairFunc matches GenerateTextOpts.RepairToolCall's signature; named here
