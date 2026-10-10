@@ -4,10 +4,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"mime"
 	"strings"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
+	"github.com/azrtydxb/go-ai-sdk/internal/providerutil"
 	"github.com/azrtydxb/go-ai-sdk/provider"
 )
 
@@ -243,7 +243,7 @@ func convertMessages(msgs []provider.Message) (system string, out []wireMessage,
 	for _, m := range msgs {
 		switch m.Role {
 		case provider.RoleSystem:
-			systemParts = append(systemParts, textContent(m.Content))
+			systemParts = append(systemParts, providerutil.TextContent(m.Content))
 
 		case provider.RoleUser:
 			blocks, uerr := userBlocks(m.Content)
@@ -271,29 +271,6 @@ func convertMessages(msgs []provider.Message) (system string, out []wireMessage,
 		}
 	}
 	return strings.Join(systemParts, "\n\n"), out, nil
-}
-
-func textContent(parts []provider.ContentPart) string {
-	var s string
-	for _, part := range parts {
-		if tp, ok := part.(provider.TextPart); ok {
-			s += tp.Text
-		}
-	}
-	return s
-}
-
-// isPDFMediaType reports whether mediaType names application/pdf, ignoring
-// case and any parameters (e.g. "Application/PDF" or
-// "application/pdf; charset=binary" both match) — mirrors how MIME type
-// matching is expected to behave per RFC 2045 rather than a strict string
-// comparison against the exact wire value.
-func isPDFMediaType(mediaType string) bool {
-	base, _, err := mime.ParseMediaType(mediaType)
-	if err != nil {
-		return strings.EqualFold(mediaType, "application/pdf")
-	}
-	return strings.EqualFold(base, "application/pdf")
 }
 
 func userBlocks(parts []provider.ContentPart) ([]wireContentBlock, error) {
@@ -347,7 +324,7 @@ func userBlocks(parts []provider.ContentPart) ([]wireContentBlock, error) {
 					Source: &wireImageSource{Type: "url", URL: p.URL},
 				})
 			default:
-				if !isPDFMediaType(p.MediaType) {
+				if !providerutil.IsPDFMediaType(p.MediaType) {
 					return nil, fmt.Errorf("anthropic: unsupported content part %T with media type %q in user message (only application/pdf is supported)", part, p.MediaType)
 				}
 				out = append(out, wireContentBlock{
