@@ -1,33 +1,32 @@
 name: CI
 
+# Migrated to the azrtydxb CI standard (azrtydxb/.github/docs/ci-standard.md).
 on:
   push:
     branches: [main]
   pull_request:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  test:
+  go:
+    uses: azrtydxb/.github/.github/workflows/reusable-go.yml@main
+    with:
+      working-directory: .
+      race: false
+      lint: false
+
+  gate:
+    if: always()
+    needs: [go]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: "1.26.x"
-
-      - name: Gofmt
-        run: test -z "$(gofmt -l .)"
-
-      - name: Vet
-        run: go vet ./...
-
-      - name: Build
-        run: go build ./...
-
-      - name: Test
-        run: go test ./...
+      - name: Verify
+        run: |
+          [ "${{ needs.go.result }}" = "success" ] || exit 1
