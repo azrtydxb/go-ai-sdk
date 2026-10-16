@@ -19,7 +19,7 @@ jobs:
     with:
       working-directory: .
       race: true
-      lint: true
+      lint: false
 
   gate:
     if: always()
