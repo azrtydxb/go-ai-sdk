@@ -17,6 +17,7 @@ jobs:
   go:
     uses: azrtydxb/.github/.github/workflows/reusable-go.yml@main
     with:
+      tier: unit
       working-directory: .
       race: false
       lint: false

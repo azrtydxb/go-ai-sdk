@@ -1,0 +1,25 @@
+# Release full tier — copy to <repo>/.github/workflows/release.yml
+#
+# The full suite (unit + integration + e2e/race/coverage) runs once, on a
+# versioned tag, before anything is published. Swap the language workflow
+# (`reusable-go.yml` ↔ reusable-node/rust/python) as needed.
+name: release-full
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  full:
+    uses: azrtydxb/.github/.github/workflows/reusable-go.yml@main
+    with:
+      tier: full
+      working-directory: .
