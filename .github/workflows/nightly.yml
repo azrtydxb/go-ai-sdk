@@ -1,0 +1,26 @@
+# Nightly integration tier — copy to <repo>/.github/workflows/nightly.yml
+#
+# Runs the integration suite once a night, off the PR critical path. Swap the
+# language workflow (`reusable-go.yml` ↔ reusable-node/rust/python) and keep the
+# `with:` block in sync with your ci.yml caller.
+name: nightly-integration
+
+on:
+  schedule:
+    # 02:17 UTC daily (offset from the hour to avoid the fleet's top-of-hour crush).
+    - cron: "17 2 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  integration:
+    uses: azrtydxb/.github/.github/workflows/reusable-go.yml@main
+    with:
+      tier: integration
+      working-directory: .
