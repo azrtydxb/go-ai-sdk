@@ -635,7 +635,7 @@ func TestStdioOptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer parentStderr.Close()
+	defer func() { _ = parentStderr.Close() }()
 	originalStderr := os.Stderr
 	os.Stderr = parentStderr
 	defer func() { os.Stderr = originalStderr }()
@@ -671,7 +671,7 @@ func TestStdioOptions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer tr.Close()
+			defer func() { _ = tr.Close() }()
 			receiveCtx, receiveCancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer receiveCancel()
 			raw, err := tr.Receive(receiveCtx)

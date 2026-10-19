@@ -62,7 +62,7 @@ func TestAgentPrepareOptsReasoning(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					defer s.Close()
+					defer func() { _ = s.Close() }()
 					for range s.Parts() {
 					}
 					if err := s.Err(); err != nil {

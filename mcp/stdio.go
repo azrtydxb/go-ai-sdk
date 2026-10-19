@@ -337,7 +337,7 @@ func newStdioTransport(ctx context.Context, cmd []string, env []string, dir stri
 	}
 
 	closeFn := func() error {
-		defer stdout.Close()
+		defer func() { _ = stdout.Close() }()
 		done := make(chan error, 1)
 		go func() { done <- c.Wait() }()
 		select {
@@ -345,7 +345,7 @@ func newStdioTransport(ctx context.Context, cmd []string, env []string, dir stri
 			return err
 		case <-time.After(200 * time.Millisecond):
 			_ = c.Process.Kill()
-			<-done
+			<-done //nolint:errcheck // Wait after Kill reports the kill; not an error here
 			return nil
 		}
 	}

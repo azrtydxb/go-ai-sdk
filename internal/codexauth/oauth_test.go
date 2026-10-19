@@ -293,15 +293,15 @@ func TestPollDeviceCode_Complete(t *testing.T) {
 	callCount := 0
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
-		switch {
-		case callCount == 1:
+		switch callCount {
+		case 1:
 			resp := map[string]any{
 				"authorization_code": "auth-code-123",
 				"code_verifier":      "verifier-456",
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(resp)
-		case callCount == 2:
+		case 2:
 			resp := map[string]any{
 				"access_token":  fakeToken,
 				"refresh_token": "final-refresh",
@@ -310,7 +310,7 @@ func TestPollDeviceCode_Complete(t *testing.T) {
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(resp)
-		case callCount == 3:
+		case 3:
 			t.Error("unexpected third poll")
 			w.WriteHeader(500)
 		}

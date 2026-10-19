@@ -265,7 +265,7 @@ func (t *OAuthTokenSource) CompletePKCE(ctx context.Context, inter *Interaction)
 
 	// Print a message so the user knows what to do.
 	if inter.Stderr != nil {
-		fmt.Fprintf(inter.Stderr(), "anthropicauth: please complete login in your browser.\nWaiting for callback on %s\n", authURL)
+		_, _ = fmt.Fprintf(inter.Stderr(), "anthropicauth: please complete login in your browser.\nWaiting for callback on %s\n", authURL)
 	}
 
 	result, err := oauthflow.Wait(ctx, results, inter.Prompt,

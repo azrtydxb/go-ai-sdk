@@ -130,7 +130,7 @@ func TestCodex_StreamText(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer sr.Close()
+	defer func() { _ = sr.Close() }()
 
 	var texts []provider.TextDelta
 	for part := range sr.Parts() {

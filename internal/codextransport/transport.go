@@ -643,7 +643,6 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 				toolCallArgs.Reset()
 
 				currentItemType = ""
-				currentItemID = ""
 				toolCallID = ""
 				toolCallName = ""
 

@@ -86,7 +86,7 @@ func TestCompletePKCEOccupiedPortManualFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer occupied.Close()
+	defer func() { _ = occupied.Close() }()
 	old := listenCallback
 	listenCallback = func(network, _ string) (net.Listener, error) { return net.Listen(network, occupied.Addr().String()) }
 	defer func() { listenCallback = old }()

@@ -199,7 +199,7 @@ func TestStreamResponse_parseSimpleText(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer sr.Close()
+	defer func() { _ = sr.Close() }()
 
 	var textParts []provider.TextDelta
 	var finishes []provider.FinishPart
@@ -273,7 +273,7 @@ func TestStreamResponse_parseToolCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer sr.Close()
+	defer func() { _ = sr.Close() }()
 
 	var toolEnds []provider.ToolCallEnd
 	for part := range sr.Parts() {
@@ -366,7 +366,7 @@ func TestStreamResponse_parsePiShapedResponsesEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer sr.Close()
+	defer func() { _ = sr.Close() }()
 
 	var text strings.Builder
 	var finish provider.FinishPart
@@ -409,7 +409,7 @@ func TestStreamResponse_parsePiShapedToolCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	defer sr.Close()
+	defer func() { _ = sr.Close() }()
 
 	var end provider.ToolCallEnd
 	for part := range sr.Parts() {

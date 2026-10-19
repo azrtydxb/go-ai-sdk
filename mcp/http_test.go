@@ -292,10 +292,11 @@ func TestHTTPTransportCloseInterruptsStalled202Body(t *testing.T) {
 	}
 
 	select {
-	case <-sendDone:
+	case err := <-sendDone:
 		// Either a nil (the read simply got cut off cleanly, which is fine —
 		// Send never enqueues a message on a 202 either way) or a non-nil
 		// error is acceptable; what matters is that it returned at all.
+		_ = err
 	case <-time.After(testTimeout):
 		t.Fatal("Send (blocked reading a stalled 202 body) did not return after Close")
 	}

@@ -72,22 +72,6 @@ func newErrorTokenServer(t *testing.T, statusCode int, bodyStr string) *httptest
 	}))
 }
 
-func newCallbackServer(t *testing.T, code, state string) *httptest.Server {
-	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != callbackPath {
-			http.NotFound(w, r)
-			return
-		}
-		q := r.URL.Query()
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte("<html><body>OK</body></html>"))
-		_ = q
-		_ = code
-		_ = state
-	}))
-}
-
 // ---- tests ----
 
 func TestGeneratePKCE(t *testing.T) {
@@ -431,7 +415,7 @@ func TestCallbackServer_StateMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET callback: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("callback status = %d, want 400", resp.StatusCode)
 	}
