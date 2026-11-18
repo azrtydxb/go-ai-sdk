@@ -22,9 +22,10 @@ policy = "block"
 policy = "block"
 
 [ci]
-# ci.yml already pins every action to a commit SHA. Tags can be silently
-# repointed, so keep new ones from arriving unpinned.
-pin_actions_policy = "block"
+# Org CI standard (2026-11-06, #72): actions use their major tag and the
+# azrtydxb/.github shared workflows use @main, so releases apply without a
+# bump PR per repo. Mutable refs are therefore expected; keep them reported.
+pin_actions_policy = "report"
 
 [release]
 # The version-bearing files `procoder release` checks for sync. There is
