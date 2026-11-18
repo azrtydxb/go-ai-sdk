@@ -289,19 +289,13 @@ func TestTranscriptionBreeze(t *testing.T) {
 		if _, ok := r.Header["Authorization"]; ok {
 			t.Error("Authorization sent without key")
 		}
-		if err := r.ParseMultipartForm(1 << 20); err != nil {
-			t.Fatal(err)
-		}
+		parts := readParts(t, r)
+		fileLen = len(parts["file"])
+		delete(parts, "file")
 		fields = map[string]string{}
-		for k, v := range r.MultipartForm.Value {
-			fields[k] = v[0]
+		for k, v := range parts {
+			fields[k] = string(v)
 		}
-		f, _, err := r.FormFile("file")
-		if err != nil {
-			t.Fatal(err)
-		}
-		b, _ := io.ReadAll(f)
-		fileLen = len(b)
 		_, _ = io.WriteString(w, `{"text":"你好世界","language":"zh","duration":2.5,"segments":[{"text":"你好","start":0,"end":1.2},{"text":"世界","start":1.2,"end":2.5}]}`)
 	}))
 	defer srv.Close()
@@ -324,8 +318,7 @@ func TestTranscriptionBreeze(t *testing.T) {
 func TestTranscriptionFormatOverride(t *testing.T) {
 	var format string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseMultipartForm(1 << 20)
-		format = r.FormValue("response_format")
+		format = string(readParts(t, r)["response_format"])
 		_, _ = io.WriteString(w, `{"text":"hi"}`)
 	}))
 	defer srv.Close()
@@ -333,5 +326,64 @@ func TestTranscriptionFormatOverride(t *testing.T) {
 	res, err := m.Transcribe(t.Context(), provider.TranscriptionCall{Audio: []byte("x"), MediaType: "audio/mpeg"})
 	if err != nil || res.Text != "hi" || format != "json" {
 		t.Fatalf("res=%+v err=%v format=%q", res, err, format)
+	}
+}
+
+func TestWithLenientStreamingAndNullContentWiring(t *testing.T) {
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: nope\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n")
+	}))
+	defer srv.Close()
+
+	m := New(srv.URL, WithLenientStreaming(), WithNullAssistantContent()).Chat("m")
+	s, err := m.Stream(context.Background(), provider.Call{Messages: []provider.Message{
+		provider.UserText("go"),
+		{Role: provider.RoleAssistant, Content: []provider.ContentPart{provider.ToolCallPart{ID: "c", Name: "f"}}},
+		{Role: provider.RoleTool, Content: []provider.ContentPart{provider.ToolResultPart{ToolCallID: "c", Result: provider.RawContent("ok")}}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	var finished bool
+	for p := range s.Parts() {
+		_, ok := p.(provider.FinishPart)
+		finished = finished || ok
+	}
+	if s.Err() != nil || !finished {
+		t.Errorf("err=%v finished=%v", s.Err(), finished)
+	}
+	if !strings.Contains(string(body), `"content":null`) {
+		t.Errorf("request lacks null content: %s", body)
+	}
+}
+
+// readParts streams a multipart request body (each part capped at 1 MiB) into
+// a name -> content map, so test handlers never buffer an unbounded form.
+func readParts(t *testing.T, r *http.Request) map[string][]byte {
+	t.Helper()
+	mr, err := r.MultipartReader()
+	if err != nil {
+		t.Errorf("multipart: %v", err)
+		return nil
+	}
+	out := map[string][]byte{}
+	for {
+		p, err := mr.NextPart()
+		if errors.Is(err, io.EOF) {
+			return out
+		}
+		if err != nil {
+			t.Errorf("multipart part: %v", err)
+			return out
+		}
+		b, err := io.ReadAll(io.LimitReader(p, 1<<20))
+		if err != nil {
+			t.Errorf("multipart read: %v", err)
+		}
+		out[p.FormName()] = b
 	}
 }

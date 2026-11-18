@@ -79,6 +79,18 @@ type Config struct {
 	// for gpt-4o models). Use "json" for servers that lack verbose_json;
 	// "text" is also understood (the body becomes TranscriptionResponse.Text).
 	TranscriptionFormat string
+
+	// NullAssistantContent sends "content":null on assistant messages that
+	// carry tool calls and no text, instead of omitting the key, for
+	// servers that require the field to be present.
+	NullAssistantContent bool
+
+	// LenientStream makes chat streaming tolerant: data lines that are not
+	// JSON are skipped, and a body that ends cleanly without finish_reason
+	// or [DONE] finishes with FinishOther (after the accumulated
+	// ToolCallEnds) instead of failing with an error. Off by default
+	// because a silently truncated stream then looks like a finished one.
+	LenientStream bool
 }
 
 // client returns the configured *http.Client, falling back to

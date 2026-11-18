@@ -17,9 +17,9 @@ func TestEmbedMissingIndexErrors(t *testing.T) {
 		// index 0 and omits index 1 entirely, leaving a nil slot.
 		resp := embeddingResponse{
 			Data: []embeddingData{
-				{Index: 0, Embedding: []float64{0.1, 0.1}},
-				{Index: 0, Embedding: []float64{0.1, 0.1}},
-				{Index: 2, Embedding: []float64{0.3, 0.3}},
+				{Index: intPtr(0), Embedding: []float64{0.1, 0.1}},
+				{Index: intPtr(0), Embedding: []float64{0.1, 0.1}},
+				{Index: intPtr(2), Embedding: []float64{0.3, 0.3}},
 			},
 			Usage: wireUsage{PromptTokens: 9, TotalTokens: 9},
 		}
@@ -37,3 +37,5 @@ func TestEmbedMissingIndexErrors(t *testing.T) {
 		t.Errorf("error = %q, want it to mention missing index 1", err.Error())
 	}
 }
+
+func intPtr(i int) *int { return &i }

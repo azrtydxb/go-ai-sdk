@@ -69,6 +69,10 @@ func (SourceEvent) isStreamPart() {}
 type FinishPart struct {
 	Reason FinishReason
 	Usage  Usage
+	// HasUsage reports that the stream carried a usage block, so a zero
+	// Usage can be told from "nothing reported". Providers that cannot make
+	// the distinction leave it false regardless of Usage.
+	HasUsage bool
 
 	// ProviderMetadata carries provider-specific response data that has no
 	// home in the fields above, namespaced by provider name — the streaming

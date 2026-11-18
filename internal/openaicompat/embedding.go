@@ -79,11 +79,15 @@ func (m *embeddingModel) EmbedCall(ctx context.Context, call provider.EmbeddingC
 	}
 
 	embeddings := make([][]float64, len(wr.Data))
-	for _, d := range wr.Data {
-		if d.Index < 0 || d.Index >= len(embeddings) {
-			return nil, fmt.Errorf("openaicompat: embedding index %d out of range [0,%d)", d.Index, len(embeddings))
+	for pos, d := range wr.Data {
+		idx := pos // servers that omit data[].index return array order
+		if d.Index != nil {
+			idx = *d.Index
 		}
-		embeddings[d.Index] = d.Embedding
+		if idx < 0 || idx >= len(embeddings) {
+			return nil, fmt.Errorf("openaicompat: embedding index %d out of range [0,%d)", idx, len(embeddings))
+		}
+		embeddings[idx] = d.Embedding
 	}
 	for i, e := range embeddings {
 		if e == nil {
