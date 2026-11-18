@@ -29,7 +29,17 @@ type Event struct {
 // Scan yields events until EOF or read error. Per SSE spec: blank line
 // dispatches the event; lines starting with ':' are comments (skipped);
 // "data: [DONE]" is yielded like any event (callers decide).
-func Scan(r io.Reader) iter.Seq2[Event, error] {
+//
+// Lines may end in LF or CRLF. An event still pending at EOF is discarded;
+// use ScanLenient to dispatch it.
+func Scan(r io.Reader) iter.Seq2[Event, error] { return scan(r, false) }
+
+// ScanLenient is Scan, except that an event still pending at a clean EOF (a
+// final `data:` line with no terminating blank line) is dispatched, as a
+// hand-written fetch reader would. After a read error nothing is flushed.
+func ScanLenient(r io.Reader) iter.Seq2[Event, error] { return scan(r, true) }
+
+func scan(r io.Reader, flushAtEOF bool) iter.Seq2[Event, error] {
 	return func(yield func(Event, error) bool) {
 		scanner := bufio.NewScanner(r)
 		// Buffer up to 10MB for lines
@@ -97,7 +107,12 @@ func Scan(r io.Reader) iter.Seq2[Event, error] {
 			return
 		}
 
-		// Per SSE spec, events are only dispatched on blank line.
-		// Do not flush trailing unterminated events at EOF.
+		// Per SSE spec, events are only dispatched on blank line, so strict
+		// mode discards a trailing unterminated event. Lenient mode
+		// dispatches it.
+		if flushAtEOF && (len(dataLines) > 0 || currentEvent.Event != "") {
+			currentEvent.Data = strings.Join(dataLines, "\n")
+			yield(currentEvent, nil)
+		}
 	}
 }

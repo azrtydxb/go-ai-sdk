@@ -178,7 +178,11 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 		hasUsage := false
 		var systemFingerprint string
 
-		for ev, err := range sse.Scan(s.body) {
+		scan := sse.Scan
+		if s.lenient {
+			scan = sse.ScanLenient
+		}
+		for ev, err := range scan(s.body) {
 			if err != nil {
 				s.err = fmt.Errorf("openaicompat: stream read: %w", err)
 				return
