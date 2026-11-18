@@ -33,6 +33,10 @@ the client used for requests.
 - **Tool calling** — standard `provider.Call.Tools` / `ToolChoice`.
 - **Embeddings** — `gateway.New().EmbeddingModel(slug)`,
   `MaxBatchSize() == 1` (`openaicompat.Config.EmbedBatch: 1`).
+- **Model listing** — `gateway.New().ModelLister()` → `provider.ModelLister`
+  over `GET /models`, with name, description and context window; pricing
+  and model type are in `ModelInfo.Raw`. See
+  [Model listing and key checks](../core/models-and-keys.md).
 
 Not wired for this preset: no image, speech, or transcription support.
 

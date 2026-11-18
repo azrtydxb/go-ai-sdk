@@ -10,7 +10,9 @@
 // It covers chat (streaming, with usage in the final part), embeddings,
 // speech (/audio/speech), transcription (/audio/transcriptions) and
 // reranking in the vLLM/OpenAI shape (/rerank) or the Hugging Face TEI
-// shape (/rerank).
+// shape (/rerank). Provider-level, it lists models (/models, including
+// OpenRouter's modalities and supported_voices) and checks the API key
+// (OpenRouter's /key, falling back to an authenticated /models).
 package openaicompatible
 
 import (
@@ -27,6 +29,10 @@ const (
 	// defaultEmbedBatch is a conservative batch size: TEI's default
 	// max-client-batch-size is 32.
 	defaultEmbedBatch = 32
+
+	// defaultKeyInfoPath is OpenRouter's key-info endpoint; other servers
+	// answer it with 404 and CheckKey falls back to /models.
+	defaultKeyInfoPath = "/key"
 )
 
 // Provider builds models against one OpenAI-compatible endpoint.
@@ -41,6 +47,7 @@ type Provider struct {
 	maxTokensKey string
 	nullContent  bool
 	lenient      bool
+	keyInfoPath  string
 }
 
 // Option configures a Provider.
@@ -102,16 +109,22 @@ func WithNullAssistantContent() Option { return func(p *Provider) { p.nullConten
 // truncated stream then looks like a finished one.
 func WithLenientStreaming() Option { return func(p *Provider) { p.lenient = true } }
 
+// WithKeyInfoPath sets the key-info endpoint KeyChecker reads, relative to
+// the base URL (default "/key", OpenRouter's). An empty path skips it, so
+// CheckKey only validates the key with an authenticated GET /models.
+func WithKeyInfoPath(path string) Option { return func(p *Provider) { p.keyInfoPath = path } }
+
 // New creates a Provider for the endpoint at baseURL, the URL that
 // precedes the OpenAI paths, normally ending in /v1 (for example
 // "http://vllm:8000/v1"). baseURL is required; an empty value makes every
 // model call return an error.
 func New(baseURL string, opts ...Option) *Provider {
 	p := &Provider{
-		name:       defaultName,
-		baseURL:    strings.TrimRight(baseURL, "/"),
-		httpClient: http.DefaultClient,
-		embedBatch: defaultEmbedBatch,
+		name:        defaultName,
+		baseURL:     strings.TrimRight(baseURL, "/"),
+		httpClient:  http.DefaultClient,
+		embedBatch:  defaultEmbedBatch,
+		keyInfoPath: defaultKeyInfoPath,
 	}
 	for _, o := range opts {
 		o(p)
@@ -158,4 +171,21 @@ func (p *Provider) Speech(modelID string) provider.SpeechModel {
 // (/audio/transcriptions), e.g. "MediaTek-Research/Breeze-ASR-25".
 func (p *Provider) Transcription(modelID string) provider.TranscriptionModel {
 	return openaicompat.NewTranscriptionModel(p.config(), modelID)
+}
+
+// ModelLister returns a provider.ModelLister over GET {base}/models, for
+// ai.ListModels. A ModelListCall.OutputModality is sent as OpenRouter's
+// output_modalities query parameter and also applied client-side; servers
+// that report no modalities (vLLM, Ollama) are not filtered.
+func (p *Provider) ModelLister() provider.ModelLister {
+	return openaicompat.NewModelLister(p.config(), "output_modalities")
+}
+
+// KeyChecker returns a provider.KeyChecker for the configured API key, for
+// ai.CheckKey. It reads the key-info endpoint (WithKeyInfoPath, default
+// OpenRouter's "/key"), which reports the key's label, limit and usage; a
+// server without one (404 or 405) is asked for GET {base}/models instead,
+// which proves the key only where /models requires authentication.
+func (p *Provider) KeyChecker() provider.KeyChecker {
+	return openaicompat.NewKeyChecker(p.config(), p.keyInfoPath)
 }

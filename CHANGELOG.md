@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 once it reaches 1.0.
 
+## Unreleased
+
+### Added
+
+- Model listing: `provider.ModelLister`, `provider.ModelListCall`,
+  `provider.ModelInfo` and `ai.ListModels`. `ModelInfo` carries id, name,
+  description, owner, created, context length, input/output modalities,
+  voices for speech models, and the raw JSON. Output and input modality
+  filters are included. Implemented as `ModelLister()` on
+  `providers/openaicompatible` (with OpenRouter's `output_modalities`
+  filter and `supported_voices`), `providers/openai` and
+  `providers/gateway`. (#73)
+- API key check: `provider.KeyChecker`, `provider.KeyCheckCall`,
+  `provider.KeyInfo` and `ai.CheckKey`. A rejected key is an
+  `*ai.APICallError` (401/403). `openaicompatible.KeyChecker()` reads
+  OpenRouter's `GET /key` (label, limit, usage), falls back to an
+  authenticated `GET /models`, and its path is configurable with
+  `WithKeyInfoPath`. `openai.KeyChecker()` validates by listing. (#73)
+- `aitest.MockModelLister` and `aitest.MockKeyChecker`. (#73)
+
 ## 0.9.1 (2026-11-18)
 
 ### Fixed

@@ -54,6 +54,11 @@ true`, so `ResponseFormat` requests use `json_schema`, not just
 - **Files** — `p.Files()` → `provider.FileStore`, for uploading files to
   reference from a later prompt via `provider.FilePart.FileID`. See
   [Files](#files) below.
+- **Model listing and key check** — `p.ModelLister()` →
+  `provider.ModelLister` over `GET /models`, and `p.KeyChecker()` →
+  `provider.KeyChecker`, which validates the key with that same
+  authenticated request (OpenAI has no key-info endpoint). See
+  [Model listing and key checks](../core/models-and-keys.md).
 
 ## Quirks and notes
 

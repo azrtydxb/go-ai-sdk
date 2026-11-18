@@ -28,7 +28,8 @@ rr := p.Rerank("BAAI/bge-reranker-v2-m3")         // ai.Rerank
 
 Other options: `WithHTTPClient`, `WithHeaders`, `WithEmbeddingBatchSize`
 (default 32, TEI's default client batch limit), `WithTranscriptionFormat`,
-`WithMaxTokensParam`, `WithNullAssistantContent`, `WithLenientStreaming`.
+`WithMaxTokensParam`, `WithNullAssistantContent`, `WithLenientStreaming`,
+`WithKeyInfoPath` (default `"/key"`, see below).
 
 ### Wire fidelity
 
@@ -70,6 +71,18 @@ Other options: `WithHTTPClient`, `WithHeaders`, `WithEmbeddingBatchSize`
   text.
 - **Rerank** — two selectable wire shapes, both through `ai.Rerank`, results
   sorted by score descending and `TopN` enforced client-side.
+- **Model listing** — `p.ModelLister()` over `GET /models`, through
+  `ai.ListModels`. It reads the OpenAI shape plus OpenRouter's name,
+  description, `context_length`, `architecture` modalities and
+  `supported_voices`, and vLLM's `max_model_len`. `OutputModality` is sent as
+  OpenRouter's `output_modalities` query parameter and also applied
+  client-side.
+- **Key check** — `p.KeyChecker()`, through `ai.CheckKey`. It reads
+  OpenRouter's `GET /key` (label, limit, usage, limit remaining, free tier).
+  A server without that endpoint answers 404 or 405, and the key is then
+  checked with an authenticated `GET /models`.
+  `WithKeyInfoPath("")` skips the key-info request. See
+  [Model listing and key checks](../core/models-and-keys.md).
 
 ## Reranking
 

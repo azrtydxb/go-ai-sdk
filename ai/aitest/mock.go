@@ -569,3 +569,71 @@ func (s *MockTranscriptionStream) Close() error {
 	s.closed = true
 	return nil
 }
+
+// MockModelLister is a provider.ModelLister test double that returns a
+// scripted model list, or fails every call with Err if set.
+type MockModelLister struct {
+	Models []provider.ModelInfo
+	Err    error // if set, every ListModels call fails with it
+	// Calls records every ListModels call. Direct access is safe only from
+	// a single goroutine; read via RecordedCalls otherwise.
+	Calls []provider.ModelListCall
+
+	mu sync.Mutex
+}
+
+// RecordedCalls returns a locked copy of Calls.
+func (m *MockModelLister) RecordedCalls() []provider.ModelListCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]provider.ModelListCall(nil), m.Calls...)
+}
+
+// ListModels implements provider.ModelLister. It records the call, then
+// returns Err if set, otherwise Models.
+func (m *MockModelLister) ListModels(ctx context.Context, call provider.ModelListCall) ([]provider.ModelInfo, error) {
+	m.mu.Lock()
+	m.Calls = append(m.Calls, call)
+	m.mu.Unlock()
+	if m.Err != nil {
+		return nil, m.Err
+	}
+	return m.Models, nil
+}
+
+// ProviderName implements provider.ModelLister.
+func (m *MockModelLister) ProviderName() string { return "aitest" }
+
+// MockKeyChecker is a provider.KeyChecker test double that returns a
+// scripted KeyInfo, or fails every call with Err if set.
+type MockKeyChecker struct {
+	Info *provider.KeyInfo
+	Err  error // if set, every CheckKey call fails with it
+	// Calls records every CheckKey call. Direct access is safe only from a
+	// single goroutine; read via RecordedCalls otherwise.
+	Calls []provider.KeyCheckCall
+
+	mu sync.Mutex
+}
+
+// RecordedCalls returns a locked copy of Calls.
+func (m *MockKeyChecker) RecordedCalls() []provider.KeyCheckCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]provider.KeyCheckCall(nil), m.Calls...)
+}
+
+// CheckKey implements provider.KeyChecker. It records the call, then
+// returns Err if set, otherwise Info.
+func (m *MockKeyChecker) CheckKey(ctx context.Context, call provider.KeyCheckCall) (*provider.KeyInfo, error) {
+	m.mu.Lock()
+	m.Calls = append(m.Calls, call)
+	m.mu.Unlock()
+	if m.Err != nil {
+		return nil, m.Err
+	}
+	return m.Info, nil
+}
+
+// ProviderName implements provider.KeyChecker.
+func (m *MockKeyChecker) ProviderName() string { return "aitest" }

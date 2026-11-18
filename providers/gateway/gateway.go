@@ -81,3 +81,16 @@ func (p *Provider) EmbeddingModel(id string) provider.EmbeddingModel {
 		EmbedBatch: 1,
 	}, id)
 }
+
+// ModelLister returns a provider.ModelLister over the Gateway's
+// GET {base}/models, for ai.ListModels. ModelInfo carries the name,
+// description and context window the Gateway reports; its pricing and type
+// are in ModelInfo.Raw.
+func (p *Provider) ModelLister() provider.ModelLister {
+	return openaicompat.NewModelLister(openaicompat.Config{
+		Name:       "gateway",
+		APIKey:     p.apiKey,
+		BaseURL:    p.baseURL,
+		HTTPClient: p.httpClient,
+	}, "")
+}
