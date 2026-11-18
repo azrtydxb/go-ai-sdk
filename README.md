@@ -195,6 +195,12 @@ gained a leading `ctx context.Context` parameter and `ai.SpanInfo` gained
   `provider.FilePart.FileID`; Anthropic's Skills API
   (`(*anthropic.Provider).UploadSkill`) is a distinct, Anthropic-only
   capability. See [Media § Files and skills](docs/core/media.md#files-and-skills).
+- **Model listing and key checks** — `ai.ListModels`/`provider.ModelLister`
+  (models with modalities and, for speech models, voices; filterable by
+  output modality) and `ai.CheckKey`/`provider.KeyChecker` (OpenRouter's
+  key info, or validation by an authenticated request) for
+  `openaicompatible`, `openai` and `gateway`. See
+  [Model listing and key checks](docs/core/models-and-keys.md).
 - **Middleware and registry** — compose behavior onto any
   `provider.LanguageModel` (`ExtractReasoningMiddleware`,
   `SimulateStreamingMiddleware`, `DefaultSettingsMiddleware`,
@@ -264,6 +270,7 @@ See [OpenAI-compatible](docs/providers/openaicompatible.md) and
   [Structured output](docs/core/structured-output.md) ·
   [Agents](docs/core/agents.md) · [Code Mode](docs/core/code-mode.md) ·
   [Embeddings](docs/core/embeddings.md) · [Media](docs/core/media.md) ·
+  [Model listing and key checks](docs/core/models-and-keys.md) ·
   [Streaming](docs/core/streaming.md) · [Reasoning](docs/core/reasoning.md) ·
   [Middleware and registry](docs/core/middleware-and-registry.md) ·
   [Provider options](docs/core/provider-options.md) ·

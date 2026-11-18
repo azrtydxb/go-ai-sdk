@@ -108,3 +108,17 @@ func (p *Provider) TranscriptionModel(id string) provider.TranscriptionModel {
 func (p *Provider) TranslationModel(id string) provider.TranslationModel {
 	return openaicompat.NewTranslationModel(p.config(), id)
 }
+
+// ModelLister returns a provider.ModelLister over GET {base}/models, for
+// ai.ListModels. OpenAI reports id, created and owned_by only, so modality
+// filters in a ModelListCall keep every model.
+func (p *Provider) ModelLister() provider.ModelLister {
+	return openaicompat.NewModelLister(p.config(), "")
+}
+
+// KeyChecker returns a provider.KeyChecker for the configured API key, for
+// ai.CheckKey. OpenAI has no key-info endpoint, so it validates the key
+// with an authenticated GET {base}/models; the KeyInfo is not Detailed.
+func (p *Provider) KeyChecker() provider.KeyChecker {
+	return openaicompat.NewKeyChecker(p.config(), "")
+}
