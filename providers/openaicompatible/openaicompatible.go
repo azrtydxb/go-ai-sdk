@@ -39,6 +39,8 @@ type Provider struct {
 	embedBatch   int
 	sttFormat    string
 	maxTokensKey string
+	nullContent  bool
+	lenient      bool
 }
 
 // Option configures a Provider.
@@ -88,6 +90,18 @@ func WithTranscriptionFormat(f string) Option { return func(p *Provider) { p.stt
 // "max_completion_tokens"; older servers want "max_tokens").
 func WithMaxTokensParam(name string) Option { return func(p *Provider) { p.maxTokensKey = name } }
 
+// WithNullAssistantContent sends "content":null on assistant messages that
+// carry tool calls and no text, instead of omitting the key, for servers
+// that require it.
+func WithNullAssistantContent() Option { return func(p *Provider) { p.nullContent = true } }
+
+// WithLenientStreaming makes chat streaming tolerant of sloppy servers and
+// proxies: data lines that are not JSON are skipped, and a body that ends
+// without finish_reason or [DONE] yields the accumulated ToolCallEnds and a
+// FinishPart with FinishOther instead of an error. It is opt-in because a
+// truncated stream then looks like a finished one.
+func WithLenientStreaming() Option { return func(p *Provider) { p.lenient = true } }
+
 // New creates a Provider for the endpoint at baseURL, the URL that
 // precedes the OpenAI paths, normally ending in /v1 (for example
 // "http://vllm:8000/v1"). baseURL is required; an empty value makes every
@@ -117,6 +131,9 @@ func (p *Provider) config() openaicompat.Config {
 		OmitEmptyAuth:       true,
 		Headers:             p.headers,
 		TranscriptionFormat: p.sttFormat,
+
+		NullAssistantContent: p.nullContent,
+		LenientStream:        p.lenient,
 	}
 }
 

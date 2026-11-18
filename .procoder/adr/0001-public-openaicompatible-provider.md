@@ -31,7 +31,7 @@ Add `providers/openaicompatible`, a thin public wrapper over
   and `WithMaxTokensParam` for server quirks.
 - Model accessors: `Chat`, `Embedding`, `Speech`, `Transcription`, and
   `Rerank(modelID, ...RerankOption)` with `WithRerankShape(RerankOpenAI |
-  RerankTEI)`.
+RerankTEI)`.
 - No dedicated Breeze package; Breeze models are reached through
   `Transcription` and `Speech`.
 

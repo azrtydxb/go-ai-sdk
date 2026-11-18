@@ -28,7 +28,27 @@ rr := p.Rerank("BAAI/bge-reranker-v2-m3")         // ai.Rerank
 
 Other options: `WithHTTPClient`, `WithHeaders`, `WithEmbeddingBatchSize`
 (default 32, TEI's default client batch limit), `WithTranscriptionFormat`,
-`WithMaxTokensParam`.
+`WithMaxTokensParam`, `WithNullAssistantContent`, `WithLenientStreaming`.
+
+### Wire fidelity
+
+- **Tool results.** A `ToolResultPart.Result` is JSON-encoded and sent as the
+  tool message's string content, so a string arrives quoted and escaped. Use
+  `provider.RawContent("...")` as the `Result` to send the text unchanged.
+- **Null assistant content.** `WithNullAssistantContent()` sends
+  `"content":null` on assistant messages that have tool calls and no text;
+  by default the key is omitted.
+- **Provider options.** `ProviderOptions[name]` is merged at the top level of
+  the request body. The SDK-built values stay byte-for-byte (nested key order,
+  integer text); a `json.RawMessage` option value is kept verbatim too.
+- **Usage presence.** `Response.HasUsage` / `FinishPart.HasUsage` say whether
+  the server sent a `usage` block, so zero usage can be told from none.
+- **Streaming.** Assembled tool calls are ordered by the deltas' `index`, and
+  are emitted as `ToolCallEnd` on `[DONE]` even when no `finish_reason` was
+  sent. `WithLenientStreaming()` additionally skips non-JSON `data:` lines and
+  finishes (`FinishOther`) a stream that ends with neither `finish_reason` nor
+  `[DONE]`, instead of returning an error.
+- **Embeddings.** When the server omits `data[].index`, array order is used.
 
 ## Capabilities
 

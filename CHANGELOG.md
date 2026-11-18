@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 once it reaches 1.0.
 
+## Unreleased
+
+### Added
+
+- `provider.RawContent`: a `ToolResultPart.Result` sent verbatim as the
+  OpenAI-compatible tool message content instead of JSON-encoded (#74).
+- `openaicompatible.WithNullAssistantContent()` sends `"content":null` on
+  tool-call-only assistant messages (#74).
+- `Response.HasUsage` and `FinishPart.HasUsage` tell "no usage block" from
+  zero usage; set by the OpenAI-compatible providers (#75).
+- `openaicompatible.WithLenientStreaming()`: skip non-JSON `data:` lines and
+  finish a stream that ends without `finish_reason`/`[DONE]` (#77).
+
+### Fixed
+
+- `ProviderOptions` merging no longer round-trips the whole request body
+  through `map[string]any`: nested key order and large integers built by the
+  SDK survive, and `json.RawMessage` option values pass through (#74).
+- OpenAI-compatible streaming orders assembled tool calls by the deltas'
+  `index` and emits their `ToolCallEnd`s on `[DONE]` even without a
+  `finish_reason` (#77).
+- OpenAI-compatible embeddings accept responses without `data[].index`
+  (array order is used) (#78).
+
 ## 0.8.0 (2026-10-10)
 
 ### Added

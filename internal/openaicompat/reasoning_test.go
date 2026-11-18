@@ -30,7 +30,7 @@ func TestGenerateReasoningContent(t *testing.T) {
 				},
 				FinishReason: "stop",
 			}},
-			Usage: wireUsage{
+			Usage: &wireUsage{
 				PromptTokens:            10,
 				CompletionTokens:        5,
 				TotalTokens:             15,

@@ -9,6 +9,7 @@ import (
 	"io"
 	"iter"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
@@ -114,7 +115,7 @@ func (m *languageModel) Stream(ctx context.Context, call provider.Call) (provide
 		return nil, apiError(resp, body)
 	}
 
-	return &streamResponse{body: resp.Body, providerName: m.cfg.Name}, nil
+	return &streamResponse{body: resp.Body, providerName: m.cfg.Name, lenient: m.cfg.LenientStream}, nil
 }
 
 // ---- Streaming ----
@@ -128,6 +129,7 @@ type toolCallAccumulator struct {
 type streamResponse struct {
 	body         io.ReadCloser
 	providerName string
+	lenient      bool
 	err          error
 	used         bool
 	closed       bool
@@ -141,10 +143,39 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 		s.used = true
 
 		toolAcc := map[int]*toolCallAccumulator{}
-		var toolOrder []int
+		toolsEnded := false
+		// endTools emits ToolCallEnd for every accumulated call, ordered by
+		// the deltas' index, once per stream.
+		endTools := func() bool {
+			if toolsEnded {
+				return true
+			}
+			toolsEnded = true
+			idxs := make([]int, 0, len(toolAcc))
+			for idx := range toolAcc {
+				idxs = append(idxs, idx)
+			}
+			slices.Sort(idxs)
+			for _, idx := range idxs {
+				acc := toolAcc[idx]
+				args := acc.args.String()
+				if args == "" {
+					args = "{}"
+				}
+				if !yield(provider.ToolCallEnd{Call: provider.ToolCallPart{
+					ID:   acc.id,
+					Name: acc.name,
+					Args: json.RawMessage(args),
+				}}) {
+					return false
+				}
+			}
+			return true
+		}
 		var finishReason provider.FinishReason
 		haveFinish := false
 		var usage provider.Usage
+		hasUsage := false
 		var systemFingerprint string
 
 		for ev, err := range sse.Scan(s.body) {
@@ -162,14 +193,18 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 				if !haveFinish {
 					reason = provider.FinishOther
 				}
-				if !yield(provider.FinishPart{Reason: reason, Usage: usage, ProviderMetadata: s.fingerprintMetadata(systemFingerprint)}) {
+				if !endTools() {
 					return
 				}
+				yield(provider.FinishPart{Reason: reason, Usage: usage, HasUsage: hasUsage, ProviderMetadata: s.fingerprintMetadata(systemFingerprint)})
 				return
 			}
 
 			var chunk chatStreamChunk
 			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+				if s.lenient {
+					continue // keep-alive text, partial proxy line, ...
+				}
 				s.err = fmt.Errorf("openaicompat: decode stream chunk: %w", err)
 				return
 			}
@@ -197,7 +232,6 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 					if !ok {
 						acc = &toolCallAccumulator{}
 						toolAcc[d.Index] = acc
-						toolOrder = append(toolOrder, d.Index)
 					}
 					if d.ID != "" {
 						acc.id = d.ID
@@ -220,36 +254,15 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 					finishReason = mapFinishReason(*choice.FinishReason)
 					haveFinish = true
 
-					for _, idx := range toolOrder {
-						acc := toolAcc[idx]
-						args := acc.args.String()
-						if args == "" {
-							args = "{}"
-						}
-						end := provider.ToolCallEnd{Call: provider.ToolCallPart{
-							ID:   acc.id,
-							Name: acc.name,
-							Args: json.RawMessage(args),
-						}}
-						if !yield(end) {
-							return
-						}
+					if !endTools() {
+						return
 					}
 				}
 			}
 
 			if chunk.Usage != nil {
-				usage = provider.Usage{
-					InputTokens:  chunk.Usage.PromptTokens,
-					OutputTokens: chunk.Usage.CompletionTokens,
-					TotalTokens:  chunk.Usage.TotalTokens,
-				}
-				if chunk.Usage.PromptTokensDetails != nil {
-					usage.CachedInputTokens = chunk.Usage.PromptTokensDetails.CachedTokens
-				}
-				if chunk.Usage.CompletionTokensDetails != nil {
-					usage.ReasoningTokens = chunk.Usage.CompletionTokensDetails.ReasoningTokens
-				}
+				usage = convertUsage(*chunk.Usage)
+				hasUsage = true
 			}
 		}
 
@@ -264,8 +277,14 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 		// "exactly ONE FinishPart" contract (zero is preferable to a
 		// fabricated one here).
 		if haveFinish {
-			if !yield(provider.FinishPart{Reason: finishReason, Usage: usage, ProviderMetadata: s.fingerprintMetadata(systemFingerprint)}) {
-				return
+			yield(provider.FinishPart{Reason: finishReason, Usage: usage, HasUsage: hasUsage, ProviderMetadata: s.fingerprintMetadata(systemFingerprint)})
+			return
+		}
+		if s.lenient {
+			// Clean EOF with no finish_reason: flush what accumulated and
+			// finish with FinishOther rather than losing it to an error.
+			if endTools() {
+				yield(provider.FinishPart{Reason: provider.FinishOther, Usage: usage, HasUsage: hasUsage, ProviderMetadata: s.fingerprintMetadata(systemFingerprint)})
 			}
 			return
 		}

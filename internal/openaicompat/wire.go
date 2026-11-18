@@ -165,7 +165,9 @@ func (r chatRequest) MarshalJSON() ([]byte, error) {
 
 type chatResponse struct {
 	Choices []chatResponseChoice `json:"choices"`
-	Usage   wireUsage            `json:"usage"`
+	// Usage is nil when the response carries no usage block (or null), so
+	// absence can be told from zero usage.
+	Usage *wireUsage `json:"usage"`
 	// SystemFingerprint identifies the backend configuration that served
 	// this response. Surfaced via
 	// Response.ProviderMetadata["<cfg.Name>"]["system_fingerprint"] when
@@ -248,7 +250,7 @@ type wireToolCallDelta struct {
 // ---- Request building ----
 
 func buildChatRequest(cfg Config, modelID string, call provider.Call, stream bool) (chatRequest, error) {
-	messages, err := convertMessages(call.Messages)
+	messages, err := convertMessages(call.Messages, cfg.NullAssistantContent)
 	if err != nil {
 		return chatRequest{}, err
 	}
@@ -308,7 +310,7 @@ func buildChatRequest(cfg Config, modelID string, call provider.Call, stream boo
 	return req, nil
 }
 
-func convertMessages(msgs []provider.Message) ([]wireMessage, error) {
+func convertMessages(msgs []provider.Message, nullAssistantContent bool) ([]wireMessage, error) {
 	var out []wireMessage
 	for _, m := range msgs {
 		switch m.Role {
@@ -360,6 +362,8 @@ func convertMessages(msgs []provider.Message) ([]wireMessage, error) {
 			if haveText {
 				b, _ := json.Marshal(text)
 				wm.Content = b
+			} else if nullAssistantContent && len(wm.ToolCalls) > 0 {
+				wm.Content = json.RawMessage("null")
 			}
 			out = append(out, wm)
 
@@ -369,15 +373,22 @@ func convertMessages(msgs []provider.Message) ([]wireMessage, error) {
 				if !ok {
 					return nil, fmt.Errorf("openaicompat: unsupported content part %T in tool message", part)
 				}
-				resultJSON, err := json.Marshal(toolResultForWire(trp.Result))
-				if err != nil {
-					return nil, fmt.Errorf("openaicompat: marshal tool result: %w", err)
+				var content []byte
+				if raw, ok := trp.Result.(provider.RawContent); ok {
+					// Verbatim: the caller's text is the tool message
+					// content, not a JSON encoding of it.
+					content, _ = json.Marshal(string(raw))
+				} else {
+					resultJSON, err := json.Marshal(toolResultForWire(trp.Result))
+					if err != nil {
+						return nil, fmt.Errorf("openaicompat: marshal tool result: %w", err)
+					}
+					content, _ = json.Marshal(string(resultJSON))
 				}
 				// trp.IsError is intentionally not encoded: OpenAI's "tool"
 				// message wire format has no dedicated error slot — the
 				// content is always plain text/JSON regardless of whether
 				// the tool call succeeded or failed.
-				content, _ := json.Marshal(string(resultJSON))
 				out = append(out, wireMessage{
 					Role:       "tool",
 					ToolCallID: trp.ToolCallID,
@@ -575,21 +586,27 @@ func mapFinishReason(reason string) provider.FinishReason {
 	}
 }
 
-func convertResponse(wr chatResponse, raw []byte, providerName string) *provider.Response {
+// convertUsage maps a wire usage block onto provider.Usage.
+func convertUsage(u wireUsage) provider.Usage {
 	usage := provider.Usage{
-		InputTokens:  wr.Usage.PromptTokens,
-		OutputTokens: wr.Usage.CompletionTokens,
-		TotalTokens:  wr.Usage.TotalTokens,
+		InputTokens:  u.PromptTokens,
+		OutputTokens: u.CompletionTokens,
+		TotalTokens:  u.TotalTokens,
 	}
-	if wr.Usage.PromptTokensDetails != nil {
-		usage.CachedInputTokens = wr.Usage.PromptTokensDetails.CachedTokens
+	if u.PromptTokensDetails != nil {
+		usage.CachedInputTokens = u.PromptTokensDetails.CachedTokens
 	}
-	if wr.Usage.CompletionTokensDetails != nil {
-		usage.ReasoningTokens = wr.Usage.CompletionTokensDetails.ReasoningTokens
+	if u.CompletionTokensDetails != nil {
+		usage.ReasoningTokens = u.CompletionTokensDetails.ReasoningTokens
 	}
-	resp := &provider.Response{
-		Raw:   json.RawMessage(raw),
-		Usage: usage,
+	return usage
+}
+
+func convertResponse(wr chatResponse, raw []byte, providerName string) *provider.Response {
+	resp := &provider.Response{Raw: json.RawMessage(raw)}
+	if wr.Usage != nil {
+		resp.Usage = convertUsage(*wr.Usage)
+		resp.HasUsage = true
 	}
 
 	if wr.SystemFingerprint != "" {
@@ -636,5 +653,7 @@ type embeddingResponse struct {
 
 type embeddingData struct {
 	Embedding []float64 `json:"embedding"`
-	Index     int       `json:"index"`
+	// Index is nil when the server omits data[].index; the entry's array
+	// position is used instead.
+	Index *int `json:"index"`
 }

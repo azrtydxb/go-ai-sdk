@@ -7,7 +7,6 @@ package providerutil
 import (
 	"encoding/json"
 	"fmt"
-	"maps"
 )
 
 // wireError is the superset of the error-body shapes the supported
@@ -65,10 +64,20 @@ func ApplyProviderOptions(reqBytes []byte, providerOptions map[string]any, name 
 	if len(opts) == 0 {
 		return reqBytes, nil
 	}
-	var m map[string]any
+	// Merge at the top level only, keeping the SDK-built values as raw JSON
+	// so nested key order and number text (tool schemas, large integers)
+	// survive. Option values that are json.RawMessage are likewise kept
+	// verbatim (compacted); other values are marshaled normally.
+	var m map[string]json.RawMessage
 	if err := json.Unmarshal(reqBytes, &m); err != nil {
 		return nil, fmt.Errorf("%s: unmarshal request for provider options merge: %w", name, err)
 	}
-	maps.Copy(m, opts)
+	for k, v := range opts {
+		b, err := json.Marshal(v)
+		if err != nil {
+			return nil, fmt.Errorf("%s: marshal provider option %q: %w", name, k, err)
+		}
+		m[k] = b
+	}
 	return json.Marshal(m)
 }

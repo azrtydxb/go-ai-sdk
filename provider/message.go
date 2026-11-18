@@ -124,6 +124,14 @@ type ToolResultPart struct {
 
 func (ToolResultPart) isContentPart() {}
 
+// RawContent is a ToolResultPart.Result that a provider should send as the
+// tool message's text exactly as written, instead of JSON-encoding it first.
+// A plain string Result reaches OpenAI-compatible servers as a quoted,
+// escaped JSON string ("\"{\\\"a\\\":1}\""); wrap text (including text that is
+// already JSON) in RawContent to send it unchanged. Providers that do not
+// special-case it encode it like any other string.
+type RawContent string
+
 // ReasoningPart is a reasoning/thinking content part. Signature and
 // Redacted are Anthropic-specific fields: Signature preserves the
 // cryptographic signature Anthropic attaches to a visible thinking block,
