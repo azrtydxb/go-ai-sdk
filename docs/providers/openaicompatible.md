@@ -47,7 +47,11 @@ Other options: `WithHTTPClient`, `WithHeaders`, `WithEmbeddingBatchSize`
   are emitted as `ToolCallEnd` on `[DONE]` even when no `finish_reason` was
   sent. `WithLenientStreaming()` additionally skips non-JSON `data:` lines and
   finishes (`FinishOther`) a stream that ends with neither `finish_reason` nor
-  `[DONE]`, instead of returning an error.
+  `[DONE]`, instead of returning an error. It also dispatches a final event
+  that reaches EOF without its terminating blank line (some servers and
+  proxies close right after the last `data:` line); by default such an
+  event is discarded, as the SSE spec says. CRLF line endings and `:`
+  comment lines are accepted in both modes.
 - **Embeddings.** When the server omits `data[].index`, array order is used.
 
 ## Capabilities

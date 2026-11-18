@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 once it reaches 1.0.
 
+## Unreleased
+
+### Fixed
+
+- `openaicompat.WithLenientStreaming()` now also dispatches a final `data:`
+  event that is followed by EOF without a blank line, instead of dropping it
+  and truncating the text (#82). Strict mode still discards it, per the SSE
+  spec. CRLF line endings and `:` comment lines are handled in both modes.
+
 ## 0.9.0 (2026-11-18)
 
 ### Added

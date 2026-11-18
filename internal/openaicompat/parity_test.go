@@ -305,3 +305,40 @@ func TestEmbedWithoutIndexUsesArrayOrder(t *testing.T) {
 		t.Errorf("embeddings = %v", resp.Embeddings)
 	}
 }
+
+func streamText(parts []provider.StreamPart) string {
+	var b strings.Builder
+	for _, p := range parts {
+		if d, ok := p.(provider.TextDelta); ok {
+			b.WriteString(d.Text)
+		}
+	}
+	return b.String()
+}
+
+func TestStreamFinalEventWithoutBlankLine(t *testing.T) {
+	body := "data: {\"choices\":[{\"delta\":{\"content\":\"A\"}}]}\r\n\r\n: ping\r\ndata: {\"choices\":[{\"delta\":{\"content\":\"B\"}}]}\r\n\r\n" +
+		"data: {\"choices\":[{\"delta\":{\"content\":\"C\"}}]}"
+	for _, tc := range []struct {
+		name    string
+		lenient bool
+		want    string
+	}{
+		{"lenient flushes at EOF", true, "ABC"},
+		{"strict discards per spec", false, "AB"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := recordServer(t, "text/event-stream", body)
+			model := NewLanguageModel(Config{Name: "t", BaseURL: srv.URL, LenientStream: tc.lenient}, "m")
+			s, err := model.Stream(context.Background(), provider.Call{Messages: []provider.Message{provider.UserText("x")}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = s.Close() }()
+			parts := drain(t, s)
+			if got := streamText(parts); got != tc.want {
+				t.Errorf("text = %q, want %q (Err=%v)", got, tc.want, s.Err())
+			}
+		})
+	}
+}

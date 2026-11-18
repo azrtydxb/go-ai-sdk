@@ -59,7 +59,7 @@ func TestScanPartialEventWithReadError(t *testing.T) {
 	for _, err := range Scan(src) {
 		eventCount++
 		if err != nil {
-			if err != errTest {
+			if !errors.Is(err, errTest) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			// Consumer breaks on first non-nil error (the idiomatic pattern).
@@ -140,6 +140,77 @@ func TestScanUnderMaxEventBytesStillAssembles(t *testing.T) {
 	// A large-but-under-ceiling multi-line event still assembles correctly.
 	evs := collect(t, "data: a\ndata: b\ndata: c\n\n")
 	if len(evs) != 1 || evs[0].Data != "a\nb\nc" {
+		t.Fatalf("evs = %#v", evs)
+	}
+}
+
+func collectLenient(t *testing.T, input string) []Event {
+	t.Helper()
+	var out []Event
+	for ev, err := range ScanLenient(strings.NewReader(input)) {
+		if err != nil {
+			t.Fatalf("scan error: %v", err)
+		}
+		out = append(out, ev)
+	}
+	return out
+}
+
+func TestScanLenientFlushesTrailingEvent(t *testing.T) {
+	for name, in := range map[string]string{
+		"no newline":      "data: a\n\ndata: tail",
+		"single newline":  "data: a\n\ndata: tail\n",
+		"crlf":            "data: a\r\n\r\ndata: tail\r\n",
+		"comment between": "data: a\n\n: ping\ndata: tail\n: ping",
+	} {
+		t.Run(name, func(t *testing.T) {
+			evs := collectLenient(t, in)
+			if len(evs) != 2 || evs[0].Data != "a" || evs[1].Data != "tail" {
+				t.Fatalf("evs = %#v", evs)
+			}
+		})
+	}
+}
+
+func TestScanLenientFlushesNamedTrailingEvent(t *testing.T) {
+	evs := collectLenient(t, "event: delta\ndata: a\ndata: b")
+	if len(evs) != 1 || evs[0].Event != "delta" || evs[0].Data != "a\nb" {
+		t.Fatalf("evs = %#v", evs)
+	}
+}
+
+func TestScanLenientNothingPendingYieldsNothing(t *testing.T) {
+	for _, in := range []string{"", "\n", "data: a\n\n", ": only a comment", ": c\r\n\r\n"} {
+		evs := collectLenient(t, in)
+		want := 0
+		if in == "data: a\n\n" {
+			want = 1
+		}
+		if len(evs) != want {
+			t.Errorf("%q: evs = %#v", in, evs)
+		}
+	}
+}
+
+func TestScanLenientNoFlushAfterReadError(t *testing.T) {
+	errTest := errors.New("boom")
+	var events int
+	var gotErr error
+	for _, err := range ScanLenient(&errorReader{data: "data: partial", err: errTest}) {
+		if err != nil {
+			gotErr = err
+			break
+		}
+		events++
+	}
+	if events != 0 || !errors.Is(gotErr, errTest) {
+		t.Fatalf("events=%d err=%v", events, gotErr)
+	}
+}
+
+func TestScanStrictCRLFAndComments(t *testing.T) {
+	evs := collect(t, ": hi\r\nevent: e\r\ndata: a\r\n: mid\r\ndata: b\r\n\r\n: bye\r\n\r\ndata: tail\r\n")
+	if len(evs) != 1 || evs[0].Event != "e" || evs[0].Data != "a\nb" {
 		t.Fatalf("evs = %#v", evs)
 	}
 }
