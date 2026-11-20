@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 once it reaches 1.0.
 
+## Unreleased
+
+### Documented
+
+- Disabling retries per call: `MaxRetries` on `ai.GenerateTextOpts`,
+  `ai.GenerateObjectOpts` (also used by `StreamObject`) and the embedding
+  options is one shared switch. A pointer to `0` makes exactly one request
+  and returns the provider's original error unwrapped (an
+  `*ai.APICallError`, never an `*ai.RetryError`), so a caller that fails over
+  between models does not wait out the SDK's backoff. `nil` keeps the default
+  of 2 retries. No new API was needed; httptest-based tests now pin this for
+  `GenerateText`, `StreamText`, `GenerateObject` and `StreamObject` against
+  503 and 429 responses.
+
 ## 0.11.0 (2026-11-20)
 
 ### Added

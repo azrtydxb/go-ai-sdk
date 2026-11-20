@@ -749,6 +749,22 @@ second, err := ai.GenerateText(ctx, ai.GenerateTextOpts{
 
 ## Retries and RetryError
 
+To fail over to another model immediately instead of waiting out the
+retries, disable them for the call by pointing `MaxRetries` at `0`. The
+call then makes exactly one request and returns the provider's original
+error (for example an `*ai.APICallError` with `StatusCode` 503 or 429),
+never wrapped in a `*ai.RetryError`. This holds for `GenerateText`,
+`StreamText`, `GenerateObject` and `StreamObject`, exactly as for `Embed`:
+
+```go
+zero := 0
+_, err := ai.GenerateText(ctx, ai.GenerateTextOpts{
+	Model:      primary,
+	Prompt:     "Hello",
+	MaxRetries: &zero, // one attempt, then fail over yourself
+})
+```
+
 Every model call goes through a retry wrapper: `MaxRetries` (default 2) is
 the number of retries attempted after the first failure, using the
 provider's error to decide retryability (see

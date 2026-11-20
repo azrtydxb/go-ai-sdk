@@ -229,6 +229,9 @@ If `MaxRetries` is `0`, a failing call's original error is returned
 unchanged — it is never wrapped in a `*RetryError`, since there was nothing
 to retry.
 
+This is the per-call way to turn retries off for any of these calls, chat
+and streaming included: set `MaxRetries` to a pointer to `0`.
+
 ## Timeouts: set a ctx deadline
 
 The SDK relies on the caller's `context.Context` for hard time bounds —
