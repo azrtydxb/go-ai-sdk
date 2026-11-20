@@ -89,6 +89,15 @@ OpenAI-only and also not `ai.Registry`-backed; `provider.FileStore`
 likewise outside the registry. See [Media](../core/media.md) for all of
 these.
 
+Classification (`ai.Classify`, `provider.ClassificationModel`) is implemented
+by the [OpenAI-compatible](openaicompatible.md#classification) provider (vLLM
+`/classify` and Hugging Face TEI `/predict` shapes) — see
+[Classification](../core/classification.md). Structured output through
+`provider.ResponseFormat` and token logprobs (`Call.Logprobs`) are covered in
+[Structured output](../core/structured-output.md#requesting-a-response-format-directly)
+and [Logprobs](../core/logprobs.md), including which providers return
+`*provider.UnsupportedFeatureError`.
+
 Reranking (`ai.Rerank`, `provider.RerankingModel`) is implemented by Cohere,
 Voyage, Mixedbread, and the [OpenAI-compatible](openaicompatible.md#reranking) provider (vLLM and TEI shapes) — see [Reranking](../core/embeddings.md#reranking),
 [Cohere § Reranking](cohere.md#reranking),

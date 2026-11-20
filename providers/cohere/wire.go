@@ -189,6 +189,10 @@ func buildChatRequest(modelID string, call provider.Call, stream bool) (chatRequ
 		}
 	}
 
+	if call.Logprobs || call.TopLogprobs != nil {
+		return chatRequest{}, &provider.UnsupportedFeatureError{Provider: "cohere", Feature: "Logprobs", Detail: "log probabilities are not mapped for the Cohere provider"}
+	}
+
 	if call.ResponseFormat != nil {
 		rf, err := convertResponseFormat(*call.ResponseFormat)
 		if err != nil {
@@ -342,6 +346,9 @@ func convertTools(tools []provider.ToolDef) []wireTool {
 func convertResponseFormat(rf provider.ResponseFormat) (any, error) {
 	switch rf.Type {
 	case "json":
+		if len(rf.Schema) > 0 && !rf.StrictValue() {
+			return nil, &provider.UnsupportedFeatureError{Provider: "cohere", Feature: "ResponseFormat.Strict=false", Detail: "response_format schemas are always enforced"}
+		}
 		return wireResponseFormat{Type: "json_object", Schema: rf.Schema}, nil
 	case "text", "":
 		// "text" (or unset) is the default; omit response_format entirely

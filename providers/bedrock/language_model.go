@@ -27,9 +27,12 @@ type languageModel struct {
 func (m *languageModel) ModelID() string      { return m.modelID }
 func (m *languageModel) ProviderName() string { return providerName }
 func (m *languageModel) Capabilities() provider.Capabilities {
-	// Bedrock's Converse API has no schema-constrained JSON response mode;
-	// the ai core falls back to tool-mode object generation.
-	return provider.Capabilities{NativeJSON: false}
+	// NativeJSON stays false: structured outputs (outputConfig.textFormat)
+	// depend on the model, so the ai core keeps using tool-mode object
+	// generation and a caller opts in via Call.ResponseFormat. NoJSONObject:
+	// there is no schemaless JSON mode; a schemaless ResponseFormat returns
+	// *provider.UnsupportedFeatureError.
+	return provider.Capabilities{NativeJSON: false, NoJSONObject: true}
 }
 
 func (m *languageModel) modelPath(suffix string) string {

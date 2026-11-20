@@ -97,6 +97,8 @@ type wireGenerationConfig struct {
 	Seed             *int64              `json:"seed,omitempty"`
 	StopSequences    []string            `json:"stopSequences,omitempty"`
 	ThinkingConfig   *wireThinkingConfig `json:"thinkingConfig,omitempty"`
+	ResponseLogprobs bool                `json:"responseLogprobs,omitempty"`
+	Logprobs         *int                `json:"logprobs,omitempty"`
 }
 
 // wireThinkingConfig is Gemini's generationConfig.thinkingConfig block.
@@ -124,9 +126,48 @@ type generateContentResponse struct {
 }
 
 type wireCandidate struct {
-	Content           wireContent        `json:"content"`
-	FinishReason      string             `json:"finishReason,omitempty"`
-	GroundingMetadata *wireGroundingMeta `json:"groundingMetadata,omitempty"`
+	Content           wireContent         `json:"content"`
+	FinishReason      string              `json:"finishReason,omitempty"`
+	GroundingMetadata *wireGroundingMeta  `json:"groundingMetadata,omitempty"`
+	LogprobsResult    *wireLogprobsResult `json:"logprobsResult,omitempty"`
+}
+
+// wireLogprobsResult is candidates[].logprobsResult: chosenCandidates holds
+// the generated token at each decoding step and topCandidates the ranked
+// alternatives at the same step.
+type wireLogprobsResult struct {
+	TopCandidates    []wireTopCandidates     `json:"topCandidates"`
+	ChosenCandidates []wireLogprobsCandidate `json:"chosenCandidates"`
+}
+
+type wireTopCandidates struct {
+	Candidates []wireLogprobsCandidate `json:"candidates"`
+}
+
+type wireLogprobsCandidate struct {
+	Token          string  `json:"token"`
+	TokenID        int     `json:"tokenId"`
+	LogProbability float64 `json:"logProbability"`
+}
+
+// convertLogprobsResult maps a candidate's logprobsResult onto provider
+// types: one TokenLogprob per chosen candidate, with the same step's
+// topCandidates as its alternatives. Gemini reports no byte arrays.
+func convertLogprobsResult(lr *wireLogprobsResult) []provider.TokenLogprob {
+	if lr == nil || len(lr.ChosenCandidates) == 0 {
+		return nil
+	}
+	out := make([]provider.TokenLogprob, 0, len(lr.ChosenCandidates))
+	for i, c := range lr.ChosenCandidates {
+		tl := provider.TokenLogprob{Token: c.Token, Logprob: c.LogProbability}
+		if i < len(lr.TopCandidates) {
+			for _, a := range lr.TopCandidates[i].Candidates {
+				tl.TopLogprobs = append(tl.TopLogprobs, provider.TopLogprob{Token: a.Token, Logprob: a.LogProbability})
+			}
+		}
+		out = append(out, tl)
+	}
+	return out
 }
 
 // wireGroundingMeta is Google's Grounding with Google Search metadata:
@@ -172,7 +213,7 @@ type embeddingValues struct {
 
 // ---- Request building ----
 
-func buildGenerateContentRequest(modelID string, call provider.Call) (generateContentRequest, error) {
+func buildGenerateContentRequest(_ string, call provider.Call) (generateContentRequest, error) {
 	system, contents, err := convertMessages(call.Messages)
 	if err != nil {
 		return generateContentRequest{}, err
@@ -194,10 +235,24 @@ func buildGenerateContentRequest(modelID string, call provider.Call) (generateCo
 	haveGC := false
 
 	if call.ResponseFormat != nil && call.ResponseFormat.Type == "json" {
+		if call.ResponseFormat.Strict != nil && !*call.ResponseFormat.Strict && len(call.ResponseFormat.Schema) > 0 {
+			return generateContentRequest{}, &provider.UnsupportedFeatureError{
+				Feature: "ResponseFormat.Strict=false",
+				Detail:  "responseSchema is always enforced",
+			}
+		}
 		gc.ResponseMimeType = "application/json"
 		if len(call.ResponseFormat.Schema) > 0 {
 			gc.ResponseSchema = stripAdditionalProperties(call.ResponseFormat.Schema)
 		}
+		haveGC = true
+	}
+	if call.TopLogprobs != nil && !call.Logprobs {
+		return generateContentRequest{}, fmt.Errorf("geminicompat: Call.TopLogprobs requires Call.Logprobs")
+	}
+	if call.Logprobs {
+		gc.ResponseLogprobs = true
+		gc.Logprobs = call.TopLogprobs
 		haveGC = true
 	}
 	if call.MaxTokens != nil {
@@ -560,6 +615,7 @@ func convertResponse(wr generateContentResponse, raw []byte) *provider.Response 
 	}
 
 	resp.FinishReason = mapFinishReason(cand.FinishReason, hasFunctionCall)
+	resp.Logprobs = convertLogprobsResult(cand.LogprobsResult)
 	return resp
 }
 

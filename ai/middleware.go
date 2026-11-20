@@ -223,6 +223,7 @@ func extractReasoningFromResponse(resp *provider.Response, opts ExtractReasoning
 		Usage:            resp.Usage,
 		Raw:              resp.Raw,
 		ProviderMetadata: resp.ProviderMetadata,
+		Logprobs:         resp.Logprobs,
 	}
 }
 
@@ -504,6 +505,9 @@ func (m *simulateStreamingModel) Stream(ctx context.Context, call provider.Call)
 		if tp, ok := part.(provider.TextPart); ok {
 			parts = append(parts, provider.TextDelta(tp))
 		}
+	}
+	if len(resp.Logprobs) > 0 {
+		parts = append(parts, provider.LogprobsDelta{Tokens: resp.Logprobs})
 	}
 	for _, part := range resp.Content {
 		if tc, ok := part.(provider.ToolCallPart); ok {

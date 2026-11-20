@@ -57,6 +57,11 @@ type Response struct {
 	HasUsage bool
 	Raw      json.RawMessage // raw provider response body
 
+	// Logprobs holds the per-token log probabilities of the generated
+	// text, in generation order, when Call.Logprobs asked for them and the
+	// provider returned them. nil otherwise.
+	Logprobs []TokenLogprob
+
 	// ProviderMetadata carries provider-specific response data that has no
 	// home in the fields above, namespaced by provider name — the same
 	// convention as Call.ProviderOptions (e.g.
@@ -113,4 +118,27 @@ func (r *Response) SourceParts() []SourcePart {
 		}
 	}
 	return sources
+}
+
+// TokenLogprob is the log probability of one generated token, with the
+// model's most likely alternatives at that position when Call.TopLogprobs
+// asked for them.
+type TokenLogprob struct {
+	Token   string
+	Logprob float64 // natural log of the token's probability
+	// Bytes is the token's UTF-8 bytes where the provider reports them
+	// (OpenAI-compatible "bytes"); nil otherwise.
+	Bytes []byte
+	// TopLogprobs lists the most likely tokens at this position, most
+	// likely first, as the provider returned them. It may include the
+	// chosen token. Empty unless Call.TopLogprobs was set.
+	TopLogprobs []TopLogprob
+}
+
+// TopLogprob is one alternative token at a position, with its log
+// probability.
+type TopLogprob struct {
+	Token   string
+	Logprob float64
+	Bytes   []byte
 }

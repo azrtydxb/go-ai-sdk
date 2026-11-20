@@ -104,6 +104,7 @@ func (m *extractJSONModel) Generate(ctx context.Context, call provider.Call) (*p
 		Usage:            resp.Usage,
 		Raw:              resp.Raw,
 		ProviderMetadata: resp.ProviderMetadata,
+		Logprobs:         resp.Logprobs,
 	}, nil
 }
 

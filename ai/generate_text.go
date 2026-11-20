@@ -58,6 +58,8 @@ type Step struct {
 	FinishReason  provider.FinishReason
 	Usage         provider.Usage
 	Response      *provider.Response
+	// Logprobs is this step's Response.Logprobs.
+	Logprobs []provider.TokenLogprob
 }
 
 // GenerateTextResult is the outcome of a GenerateText call.
@@ -71,6 +73,9 @@ type GenerateTextResult struct {
 	FinishReason  provider.FinishReason
 	Usage         provider.Usage     // summed over steps
 	Messages      []provider.Message // full final conversation incl. tool msgs
+	// Logprobs is the last step's per-token log probabilities; nil unless
+	// GenerateTextOpts.Logprobs was set and the provider returned them.
+	Logprobs []provider.TokenLogprob
 	// Output holds the decoded value when GenerateTextOpts.Output was set:
 	// a T for OutputObject[T], a []T for OutputArray[T], a string for
 	// OutputChoice, or an arbitrary JSON value (map[string]any / []any /
@@ -429,6 +434,7 @@ func GenerateText(ctx context.Context, opts GenerateTextOpts) (*GenerateTextResu
 		Text:             last.Text,
 		ReasoningText:    last.ReasoningText,
 		Sources:          last.Sources,
+		Logprobs:         last.Logprobs,
 		Steps:            steps,
 		ToolCalls:        last.ToolCalls,
 		ToolResults:      last.ToolResults,
@@ -898,6 +904,7 @@ func buildStep(resp *provider.Response) Step {
 		FinishReason:  resp.FinishReason,
 		Usage:         resp.Usage,
 		Response:      resp,
+		Logprobs:      resp.Logprobs,
 	}
 }
 

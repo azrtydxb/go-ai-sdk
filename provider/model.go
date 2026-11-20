@@ -7,6 +7,14 @@ import "context"
 // guessing from the model ID.
 type Capabilities struct {
 	NativeJSON bool // supports schema-constrained JSON output natively
+
+	// NoJSONObject reports that the model has no schemaless JSON mode: a
+	// ResponseFormat{Type:"json"} without a Schema returns
+	// *UnsupportedFeatureError (anthropic and bedrock only constrain output
+	// to a JSON Schema). The ai package then does not attach the schemaless
+	// format that ai.OutputJSON would otherwise request. The zero value
+	// keeps the previous behavior.
+	NoJSONObject bool
 }
 
 // LanguageModel is the interface every text-generating provider implements:
