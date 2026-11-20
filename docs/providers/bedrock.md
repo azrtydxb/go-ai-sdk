@@ -55,7 +55,14 @@ exact bytes sent on the wire. (`providers/bedrock/language_model.go:45-65`.)
   (`providers/bedrock/language_model.go:28-32`, doc comment: _"Bedrock's
   Converse API has no schema-constrained JSON response mode; the ai core
   falls back to tool-mode object generation"_) — same tool-mode fallback as
-  Anthropic, via `ai.GenerateObject`'s forced-tool-choice path.
+  Anthropic, via `ai.GenerateObject`'s forced-tool-choice path. A caller can
+  opt into Converse's structured output by setting `Call.ResponseFormat` with
+  a `Schema`: it is sent as `outputConfig.textFormat`
+  (`{"type":"json_schema","structure":{"jsonSchema":{"schema":"<JSON string>","name":...}}}`).
+  Whether the model supports it is the API's call. A schemaless format or
+  `Strict: false` returns `*provider.UnsupportedFeatureError`, as does
+  `Logprobs`; `Capabilities().NoJSONObject` is `true`. See
+  [Structured output](../core/structured-output.md#requesting-a-response-format-directly).
 - **Reasoning (`reasoningContent`)** — Converse's signed/redacted reasoning
   blocks map to `provider.ReasoningPart` the same way Anthropic's thinking
   blocks do; see [Reasoning](../core/reasoning.md#bedrock-reasoningcontent).

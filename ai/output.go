@@ -296,6 +296,8 @@ type jsonOutput struct{}
 // rules). ResponseFormat.Type is set to "json" with no Schema, regardless of
 // Model.Capabilities().NativeJSON — providers that can't honor a schemaless
 // JSON response format just return text, which is decoded the same way.
+// Models reporting Capabilities.NoJSONObject (anthropic, bedrock) are sent
+// no ResponseFormat at all, since they would return an unsupported error.
 func OutputJSON() Output {
 	return jsonOutput{}
 }
@@ -351,9 +353,13 @@ func buildOutputCall(opts GenerateTextOpts) (call provider.Call, outputToolName 
 	}
 
 	if sch == nil {
-		// Schemaless JSON mode (OutputJSON): always ResponseFormat{Type:
-		// "json"}, regardless of NativeJSON.
-		call.ResponseFormat = &provider.ResponseFormat{Type: "json"}
+		// Schemaless JSON mode (OutputJSON): ResponseFormat{Type: "json"},
+		// regardless of NativeJSON — except for models that report
+		// Capabilities.NoJSONObject (anthropic, bedrock), which would
+		// reject it; they just return text, decoded the same way.
+		if !opts.Model.Capabilities().NoJSONObject {
+			call.ResponseFormat = &provider.ResponseFormat{Type: "json"}
+		}
 		return call, "", nil
 	}
 

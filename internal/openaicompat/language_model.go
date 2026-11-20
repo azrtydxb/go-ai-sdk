@@ -219,6 +219,12 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 			if len(chunk.Choices) > 0 {
 				choice := chunk.Choices[0]
 
+				if lps := convertLogprobs(choice.Logprobs); len(lps) > 0 {
+					if !yield(provider.LogprobsDelta{Tokens: lps}) {
+						return
+					}
+				}
+
 				if text := reasoningText(choice.Delta.ReasoningContent, choice.Delta.Reasoning); text != "" {
 					if !yield(provider.ReasoningDelta{Text: text}) {
 						return

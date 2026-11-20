@@ -52,13 +52,44 @@ type ToolChoice struct {
 }
 
 // ResponseFormat requests a shape for the model's output. Type "json" with
-// a Schema asks for schema-constrained JSON; providers reporting
-// Capabilities.NativeJSON enforce it server-side, and the rest fall back to
-// prompting, so a caller should still validate what comes back.
+// a Schema asks for schema-constrained JSON (OpenAI's json_schema response
+// format); Type "json" without a Schema asks for any valid JSON object
+// (OpenAI's json_object). Providers reporting Capabilities.NativeJSON
+// enforce it server-side, and the rest fall back to prompting, so a caller
+// should still validate what comes back.
+//
+// Support matrix when a ResponseFormat of Type "json" reaches the wire:
+// openaicompat-based providers send response_format (json_schema with a
+// Schema, json_object without; DeepSeek, Moonshot and Mistral accept only
+// json_object and drop the Schema); cohere sends response_format
+// {"type":"json_object","schema":...}; geminicompat sets
+// generationConfig.responseMimeType/responseSchema; anthropic sends
+// output_config.format {"type":"json_schema"} and bedrock sends
+// outputConfig.textFormat {"type":"json_schema"} — both of which need a
+// Schema, so they return *UnsupportedFeatureError for a schemaless "json".
+// A provider that cannot honor the field returns *UnsupportedFeatureError
+// instead of silently dropping it.
 type ResponseFormat struct {
 	Type   string          // "text" | "json"
 	Schema json.RawMessage // optional, when Type == "json"
-	Name   string          // optional schema name
+	Name   string          // optional schema name; "response" when empty on providers that require one
+
+	// Strict requests provider-enforced exact schema conformance (OpenAI
+	// json_schema "strict"). nil means the SDK default, which is true on
+	// the OpenAI-compatible wire. Only the OpenAI-compatible wire has the
+	// knob; every other provider always constrains the output and returns
+	// *UnsupportedFeatureError when Strict is explicitly false. Ignored
+	// when there is no Schema.
+	Strict *bool
+}
+
+// StrictValue reports the effective strictness: Strict when set, otherwise
+// true (the SDK default).
+func (rf ResponseFormat) StrictValue() bool {
+	if rf.Strict == nil {
+		return true
+	}
+	return *rf.Strict
 }
 
 // Call is one request to a LanguageModel: the conversation, the tools it may
@@ -75,6 +106,20 @@ type Call struct {
 	Temperature    *float64
 	TopP           *float64
 	StopSequences  []string
+
+	// Logprobs requests per-token log probabilities for the generated
+	// tokens, returned as Response.Logprobs and, when streaming, as
+	// LogprobsDelta parts. Supported by openaicompat-based providers
+	// ("logprobs"; whether a given server honors it is the server's call —
+	// OpenAI, vLLM, DeepSeek and most self-hosted servers do) and
+	// geminicompat ("responseLogprobs"). Other providers (anthropic,
+	// bedrock, cohere) return *UnsupportedFeatureError.
+	Logprobs bool
+	// TopLogprobs asks for that many most-likely alternatives per token
+	// ("top_logprobs", 0-20 on OpenAI; Gemini "logprobs", 0-20). It
+	// requires Logprobs to be true; a call that sets TopLogprobs without
+	// Logprobs is rejected rather than sent. nil means do not send it.
+	TopLogprobs *int
 
 	// TopK restricts sampling to the K highest-probability tokens at each
 	// step. Supported by anthropic, geminicompat (Google/Vertex), and

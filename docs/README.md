@@ -19,6 +19,8 @@ exists — the SDK's public API is implemented and documented end-to-end (see
 - [Structured output](core/structured-output.md) — `GenerateObject` / `StreamObject`, native-JSON vs tool-mode
 - [Agents](core/agents.md) — `agent.Agent`, `RunOpts`, `AsTool` sub-agent delegation
 - [Code Mode](core/code-mode.md) — `codemode.Tool`, the `Sandbox` contract, `APIDoc`
+- [Logprobs](core/logprobs.md) — `Logprobs` / `TopLogprobs`, per-token log probabilities, streaming
+- [Classification](core/classification.md) — `ai.Classify`, sequence-classification models (vLLM `/classify`, TEI `/predict`)
 - [Embeddings](core/embeddings.md) — `Embed` / `EmbedMany`, batching, similarity
 - [Media](core/media.md) — image, video, speech, transcription (including
   live streaming), and translation generation

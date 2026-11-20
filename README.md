@@ -171,6 +171,19 @@ gained a leading `ctx context.Context` parameter and `ai.SpanInfo` gained
   `provider.RerankingModel` (Cohere, Voyage, Mixedbread, and self-hosted
   vLLM/TEI endpoints via the OpenAI-compatible provider). See
   [Embeddings § Reranking](docs/core/embeddings.md#reranking).
+- **Structured output control and logprobs** — `ResponseFormat`
+  (`json_object` / `json_schema` with `strict`) on `GenerateTextOpts` and
+  `provider.Call`, vLLM guided decoding via
+  `openaicompatible.Provider.GuidedOptions`, and per-token `Logprobs` /
+  `TopLogprobs` on responses and streams. Providers with no equivalent
+  return `*provider.UnsupportedFeatureError`. See
+  [Structured output](docs/core/structured-output.md#requesting-a-response-format-directly)
+  and [Logprobs](docs/core/logprobs.md).
+- **Classification** — `ai.Classify` scores text with a
+  `provider.ClassificationModel` (self-hosted vLLM `/classify` and
+  Hugging Face TEI `/predict` via the OpenAI-compatible provider), for
+  classifiers such as Prompt Guard. See
+  [Classification](docs/core/classification.md).
 - **Media** — image generation, video generation, speech synthesis,
   transcription (including live streaming transcription), and audio
   translation, all behind the same provider-agnostic pattern where one
@@ -246,6 +259,12 @@ vllm := p.Rerank("BAAI/bge-reranker-v2-m3")
 tei := openaicompatible.New("http://tei:8080").
 	Rerank("bge-reranker", openaicompatible.WithRerankShape(openaicompatible.RerankTEI))
 res, _ := ai.Rerank(ctx, ai.RerankOpts{Model: tei, Query: q, Documents: docs, TopN: 5})
+
+// Classify: vLLM /classify (default) or Hugging Face TEI /predict.
+guard := openaicompatible.New("http://vllm.internal:8000").
+	Classify("meta-llama/Llama-Prompt-Guard-2-86M",
+		openaicompatible.WithClassifyLabels([]string{"BENIGN", "MALICIOUS"}))
+cls, _ := ai.Classify(ctx, ai.ClassifyOpts{Model: guard, Inputs: []string{userText}})
 
 // Speech and transcription, e.g. MediaTek Breeze models served behind
 // /v1/audio/speech and /v1/audio/transcriptions.

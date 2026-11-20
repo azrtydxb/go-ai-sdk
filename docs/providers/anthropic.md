@@ -108,6 +108,13 @@ func oauthProvider(loadToken tokenSource) *anthropic.Provider {
   falls back to its tool-mode path — it injects a single `ToolDef` built from
   the target schema and sets `ToolChoice{Mode: provider.ToolChoiceTool}` to
   force that call, then decodes the tool-call arguments as the object.
+  A caller can opt into Anthropic's native structured outputs by setting
+  `Call.ResponseFormat` (or `GenerateTextOpts.ResponseFormat`) with a
+  `Schema`: it is sent as `output_config.format`
+  (`{"type":"json_schema","schema":...}`). A schemaless format or
+  `Strict: false` returns `*provider.UnsupportedFeatureError`, as does
+  `Logprobs` (the Messages API has none); `Capabilities().NoJSONObject` is
+  `true`. See [Structured output](../core/structured-output.md#requesting-a-response-format-directly).
 - **Extended thinking** — see below.
 - **No embeddings, no images, no speech, no transcription** — not exposed by
   this package.

@@ -140,6 +140,8 @@ type converseRequest struct {
 	Messages        []wireMessage        `json:"messages"`
 	ToolConfig      *wireToolConfig      `json:"toolConfig,omitempty"`
 	InferenceConfig *wireInferenceConfig `json:"inferenceConfig,omitempty"`
+	// OutputConfig carries outputConfig.textFormat for structured outputs.
+	OutputConfig *wireOutputConfig `json:"outputConfig,omitempty"`
 	// AdditionalModelRequestFields carries model-specific fields not part
 	// of Converse's base contract — e.g. Reasoning's thinking block (see
 	// buildConverseRequest). ProviderOptions["bedrock"] can also target
@@ -148,6 +150,58 @@ type converseRequest struct {
 	// coexists with other additionalModelRequestFields entries set via
 	// ProviderOptions (which still wins on an exact key collision).
 	AdditionalModelRequestFields map[string]any `json:"additionalModelRequestFields,omitempty"`
+}
+
+// wireOutputConfig is Converse's outputConfig: textFormat is the
+// structured-output (JSON Schema) request.
+type wireOutputConfig struct {
+	TextFormat wireTextFormat `json:"textFormat"`
+}
+
+type wireTextFormat struct {
+	Type      string              `json:"type"` // "json_schema"
+	Structure wireOutputStructure `json:"structure"`
+}
+
+type wireOutputStructure struct {
+	JSONSchema wireJSONSchemaDefinition `json:"jsonSchema"`
+}
+
+// wireJSONSchemaDefinition is Converse's JsonSchemaDefinition. Schema is the
+// JSON Schema serialized as a string, as the API requires.
+type wireJSONSchemaDefinition struct {
+	Schema string `json:"schema"`
+	Name   string `json:"name,omitempty"`
+}
+
+// convertResponseFormat maps provider.ResponseFormat onto Converse's
+// outputConfig.textFormat. Bedrock only constrains output to a JSON Schema,
+// so a schemaless "json" format and an explicit Strict=false are reported as
+// unsupported instead of dropped. nil, nil means "text" / unset.
+func convertResponseFormat(rf *provider.ResponseFormat) (*wireOutputConfig, error) {
+	if rf == nil {
+		return nil, nil
+	}
+	switch rf.Type {
+	case "text", "":
+		return nil, nil
+	case "json":
+		if len(rf.Schema) == 0 {
+			return nil, &provider.UnsupportedFeatureError{Provider: providerName, Feature: "ResponseFormat json_object", Detail: "structured outputs need a JSON Schema"}
+		}
+		if !rf.StrictValue() {
+			return nil, &provider.UnsupportedFeatureError{Provider: providerName, Feature: "ResponseFormat.Strict=false", Detail: "structured outputs always constrain decoding"}
+		}
+		return &wireOutputConfig{TextFormat: wireTextFormat{
+			Type: "json_schema",
+			Structure: wireOutputStructure{JSONSchema: wireJSONSchemaDefinition{
+				Schema: string(rf.Schema),
+				Name:   rf.Name,
+			}},
+		}}, nil
+	default:
+		return nil, fmt.Errorf("bedrock: unsupported ResponseFormat.Type %q", rf.Type)
+	}
 }
 
 // ---- Response wire types (non-streaming) ----
@@ -341,9 +395,18 @@ func buildConverseRequest(call provider.Call) (converseRequest, error) {
 		}
 	}
 
-	// ResponseFormat is intentionally ignored: Bedrock's Converse API has no
-	// response-format field, and Capabilities().NativeJSON is false so the
-	// ai core enforces JSON output via tool-mode instead.
+	if call.Logprobs || call.TopLogprobs != nil {
+		return converseRequest{}, &provider.UnsupportedFeatureError{Provider: providerName, Feature: "Logprobs", Detail: "the Converse API returns no log probabilities"}
+	}
+
+	// ResponseFormat maps to outputConfig.textFormat. Capabilities().NativeJSON
+	// stays false, so the ai core still uses tool-mode for GenerateObject;
+	// the field is sent only when a caller sets Call.ResponseFormat.
+	oc, err := convertResponseFormat(call.ResponseFormat)
+	if err != nil {
+		return converseRequest{}, err
+	}
+	req.OutputConfig = oc
 
 	return req, nil
 }

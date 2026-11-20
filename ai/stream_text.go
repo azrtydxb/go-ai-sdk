@@ -46,6 +46,7 @@ type TextStream struct {
 	lastText      string
 	lastReasoning string
 	lastSources   []provider.SourcePart
+	lastLogprobs  []provider.TokenLogprob
 	lastFinish    provider.FinishReason
 
 	// outputToolName is the name of the injected output-schema tool when
@@ -331,6 +332,7 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 			// dropped from the assembled step.
 			var reasoningTail string
 			var reasoningParts []provider.ReasoningPart
+			var logprobs []provider.TokenLogprob
 			var sources []provider.SourcePart
 			var toolCalls []provider.ToolCallPart
 			type pendingCall struct {
@@ -372,6 +374,8 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 				case provider.ReasoningEnd:
 					reasoningParts = append(reasoningParts, part.Part)
 					reasoningTail = ""
+				case provider.LogprobsDelta:
+					logprobs = append(logprobs, part.Tokens...)
 				case provider.SourceEvent:
 					sources = append(sources, part.Source)
 				case provider.ToolCallDelta:
@@ -544,6 +548,7 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 				FinishReason:     finish.Reason,
 				Usage:            finish.Usage,
 				ProviderMetadata: finish.ProviderMetadata,
+				Logprobs:         logprobs,
 			}
 
 			step := Step{
@@ -553,6 +558,7 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 				FinishReason:  finish.Reason,
 				Usage:         finish.Usage,
 				Response:      stepResp,
+				Logprobs:      logprobs,
 			}
 			for _, tc := range toolCalls {
 				step.ToolCalls = append(step.ToolCalls, ToolCallRecord{ID: tc.ID, Name: tc.Name, Args: tc.Args})
@@ -566,6 +572,7 @@ func (s *TextStream) Parts() iter.Seq[provider.StreamPart] {
 			s.lastText = text
 			s.lastReasoning = step.ReasoningText
 			s.lastSources = step.Sources
+			s.lastLogprobs = logprobs
 			if gotFinish {
 				s.lastFinish = finish.Reason
 			}
@@ -903,6 +910,7 @@ func (s *TextStream) buildResult() *GenerateTextResult {
 		result.Text = last.Text
 		result.ReasoningText = last.ReasoningText
 		result.Sources = last.Sources
+		result.Logprobs = last.Logprobs
 		result.ToolCalls = last.ToolCalls
 		result.ToolResults = last.ToolResults
 		result.FinishReason = last.FinishReason
@@ -1031,6 +1039,10 @@ func (s *TextStream) ReasoningText() string { return s.lastReasoning }
 // Sources returns the SourceParts accumulated (via SourceEvent stream
 // parts) during the final step.
 func (s *TextStream) Sources() []provider.SourcePart { return s.lastSources }
+
+// Logprobs returns the per-token log probabilities accumulated (via
+// provider.LogprobsDelta stream parts) during the final step.
+func (s *TextStream) Logprobs() []provider.TokenLogprob { return s.lastLogprobs }
 
 // Steps returns the steps executed so far. If iteration stopped because of a
 // *NoSuchToolError (ToolNotFoundFail only), the step in which that

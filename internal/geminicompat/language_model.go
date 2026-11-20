@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"iter"
@@ -48,6 +49,16 @@ func (m *languageModel) doRequest(ctx context.Context, url string, body []byte, 
 	return m.cfg.client().Do(httpReq)
 }
 
+// named fills in the provider name on an *provider.UnsupportedFeatureError
+// the (name-agnostic) request builder returned.
+func (m *languageModel) named(err error) error {
+	var ufe *provider.UnsupportedFeatureError
+	if errors.As(err, &ufe) && ufe.Provider == "" {
+		ufe.Provider = m.cfg.Name
+	}
+	return err
+}
+
 func apiError(resp *http.Response, body []byte) error {
 	return ai.NewAPICallErrorFromResponse(resp, string(body), providerutil.ErrorMessage(body))
 }
@@ -55,7 +66,7 @@ func apiError(resp *http.Response, body []byte) error {
 func (m *languageModel) Generate(ctx context.Context, call provider.Call) (*provider.Response, error) {
 	req, err := buildGenerateContentRequest(m.modelID, call)
 	if err != nil {
-		return nil, err
+		return nil, m.named(err)
 	}
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -93,7 +104,7 @@ func (m *languageModel) Generate(ctx context.Context, call provider.Call) (*prov
 func (m *languageModel) Stream(ctx context.Context, call provider.Call) (provider.StreamResponse, error) {
 	req, err := buildGenerateContentRequest(m.modelID, call)
 	if err != nil {
-		return nil, err
+		return nil, m.named(err)
 	}
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -184,6 +195,12 @@ func (s *streamResponse) Parts() iter.Seq[provider.StreamPart] {
 				continue
 			}
 			cand := chunk.Candidates[0]
+
+			if lps := convertLogprobsResult(cand.LogprobsResult); len(lps) > 0 {
+				if !yield(provider.LogprobsDelta{Tokens: lps}) {
+					return
+				}
+			}
 
 			for _, part := range cand.Content.Parts {
 				switch {

@@ -26,7 +26,9 @@ type languageModel struct {
 func (m *languageModel) ModelID() string      { return m.modelID }
 func (m *languageModel) ProviderName() string { return "anthropic" }
 func (m *languageModel) Capabilities() provider.Capabilities {
-	return provider.Capabilities{NativeJSON: false}
+	// NoJSONObject: only schema-constrained structured output exists; a
+	// schemaless ResponseFormat returns *provider.UnsupportedFeatureError.
+	return provider.Capabilities{NativeJSON: false, NoJSONObject: true}
 }
 
 // anthropicAuthHeader is the HTTP header carrying the API key; extra

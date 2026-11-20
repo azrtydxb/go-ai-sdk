@@ -71,6 +71,15 @@ Other options: `WithHTTPClient`, `WithHeaders`, `WithEmbeddingBatchSize`
   text.
 - **Rerank** — two selectable wire shapes, both through `ai.Rerank`, results
   sorted by score descending and `TopN` enforced client-side.
+- **Classification** — `p.Classify(model, opts...)` through `ai.Classify`,
+  for sequence-classification models (Prompt Guard and similar): vLLM's
+  `/classify` and TEI's `/predict`. See [Classification](../core/classification.md).
+- **Structured output and logprobs** — `ResponseFormat` maps to
+  `response_format` (`json_object` / `json_schema` with `strict`), and
+  `Logprobs` / `TopLogprobs` to `logprobs` / `top_logprobs`, including per
+  streamed chunk. `p.GuidedOptions` builds vLLM's guided-decoding body fields.
+  See [Structured output § Requesting a response format directly](../core/structured-output.md#requesting-a-response-format-directly)
+  and [Logprobs](../core/logprobs.md).
 - **Model listing** — `p.ModelLister()` over `GET /models`, through
   `ai.ListModels`. It reads the OpenAI shape plus OpenRouter's name,
   description, `context_length`, `architecture` modalities and
@@ -99,6 +108,24 @@ tei := openaicompatible.New("http://tei:8080").
 
 TEI serves `/rerank` at its root, so its base URL has no `/v1`; the model is
 fixed by the server and the id is informational.
+
+## Classification
+
+```go
+// vLLM: POST {base}/classify {model, input} -> {data:[{index, label, probs}]}
+vllm := openaicompatible.New("http://vllm:8000").Classify("meta-llama/Llama-Prompt-Guard-2-86M",
+	openaicompatible.WithClassifyLabels([]string{"BENIGN", "MALICIOUS"}))
+
+// Hugging Face TEI: POST {base}/predict {inputs:[[text]]} -> [[{label, score}]]
+tei := openaicompatible.New("http://tei:8080").
+	Classify("prompt-guard", openaicompatible.WithClassifyShape(openaicompatible.ClassifyTEI))
+
+res, _ := ai.Classify(ctx, ai.ClassifyOpts{Model: vllm, Inputs: []string{text}})
+```
+
+vLLM serves `/classify` at its root (not under `/v1`), so use a root base URL or
+`WithClassifyBaseURL`. See [Classification](../core/classification.md) for the
+result shape, labels, raw scores and errors.
 
 ## Breeze (MediaTek) and other self-hosted voice
 

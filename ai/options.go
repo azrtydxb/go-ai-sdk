@@ -97,6 +97,18 @@ type GenerateTextOpts struct {
 	PresencePenalty  *float64
 	FrequencyPenalty *float64
 	Seed             *int64
+	// ResponseFormat requests a structured output shape (JSON mode or a
+	// JSON Schema) directly, threaded through to provider.Call.ResponseFormat
+	// — see that type for the per-provider support matrix. When Output is
+	// also set, Output's own format wins. Unlike Output, no decoding or
+	// validation of the model's text happens: the caller reads Text.
+	ResponseFormat *provider.ResponseFormat
+	// Logprobs and TopLogprobs request per-token log probabilities,
+	// threaded through to provider.Call.Logprobs/TopLogprobs; the result
+	// is GenerateTextResult.Logprobs / Step.Response.Logprobs, and, when
+	// streaming, provider.LogprobsDelta parts.
+	Logprobs    bool
+	TopLogprobs *int
 	// Reasoning is the unified reasoning/thinking request option. It is
 	// threaded through to the identically-named provider.Call field
 	// unchanged — see that field's doc for per-provider wire mapping.
@@ -515,6 +527,9 @@ func buildCall(opts GenerateTextOpts) (provider.Call, error) {
 		PresencePenalty:  opts.PresencePenalty,
 		FrequencyPenalty: opts.FrequencyPenalty,
 		Seed:             opts.Seed,
+		ResponseFormat:   opts.ResponseFormat,
+		Logprobs:         opts.Logprobs,
+		TopLogprobs:      opts.TopLogprobs,
 		Reasoning:        opts.Reasoning,
 		Headers:          opts.Headers,
 		ProviderOptions:  opts.ProviderOptions,

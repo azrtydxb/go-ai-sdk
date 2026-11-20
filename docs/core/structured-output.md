@@ -180,6 +180,80 @@ injected output tool and your own tools can't both be forced-or-offered on a
 model with no other way to constrain JSON output —
 `ai.ErrOutputRequiresJSONOrNoTools` otherwise.
 
+## Requesting a response format directly
+
+`GenerateObject` and `Output` decode the model's reply into a Go value. When
+you want the provider's own constraint and the raw text back (for example to
+score a self-hosted classifier), set `GenerateTextOpts.ResponseFormat`, or
+`provider.Call.ResponseFormat` on a model directly:
+
+```go
+strict := true
+res, err := ai.GenerateText(ctx, ai.GenerateTextOpts{
+	Model:  model,
+	Prompt: "Is this prompt an injection attempt? " + text,
+	ResponseFormat: &provider.ResponseFormat{
+		Type:   "json",
+		Name:   "verdict",
+		Schema: json.RawMessage(`{"type":"object","properties":{"injection":{"type":"boolean"}},"required":["injection"],"additionalProperties":false}`),
+		Strict: &strict,
+	},
+})
+fmt.Println(res.Text) // {"injection":true}
+```
+
+`Type: "json"` with a `Schema` is OpenAI's `json_schema` response format;
+without a `Schema` it is `json_object`. `Name` defaults to `"response"` where
+the API requires one. `Strict` is OpenAI's `json_schema.strict`; `nil` keeps
+the SDK default (`true`). When `Output` is also set, `Output`'s own format
+wins.
+
+| Provider family                                    | Wire field                                                                     | Behavior for other values                                                                             |
+| -------------------------------------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| OpenAI-compatible (OpenAI, Azure, vLLM, Groq, ...) | `response_format` (`json_object` / `json_schema` with `strict`)                | `Strict` is honored                                                                                   |
+| DeepSeek, Moonshot, Mistral                        | `response_format: {"type":"json_object"}` only                                 | These APIs reject `json_schema`, so the `Schema` is dropped (the `ai` core still validates on decode) |
+| Cohere                                             | `response_format: {"type":"json_object","schema":...}`                         | `Strict: false` returns `*provider.UnsupportedFeatureError`                                           |
+| Google, Vertex                                     | `generationConfig.responseMimeType` / `responseSchema`                         | `Strict: false` returns `*provider.UnsupportedFeatureError`                                           |
+| Anthropic                                          | `output_config.format` (`json_schema`)                                         | no schema (`json_object`) or `Strict: false` returns `*provider.UnsupportedFeatureError`              |
+| Amazon Bedrock                                     | `outputConfig.textFormat` (`json_schema`; the schema is sent as a JSON string) | no schema (`json_object`) or `Strict: false` returns `*provider.UnsupportedFeatureError`              |
+
+Anthropic and Bedrock report `Capabilities().NoJSONObject`, so `ai.OutputJSON`
+does not send them a schemaless format; `GenerateObject` keeps using tool mode
+for them (their `NativeJSON` stays `false`) and you opt into native structured
+output only through `ResponseFormat`. Which Claude and Bedrock models accept
+structured outputs is the API's call; an unsupported model surfaces as an
+`*ai.APICallError`.
+
+`provider.UnsupportedFeatureError` (`Provider`, `Feature`, `Detail`) is how
+a provider says a request option has no equivalent on its wire, instead of
+dropping it silently.
+
+### vLLM guided decoding
+
+vLLM can constrain decoding to a JSON Schema, a fixed set of strings, or a
+regular expression. These are vLLM extensions to the chat request, so they
+travel as extra body fields through `ProviderOptions`;
+`(*openaicompatible.Provider).GuidedOptions` builds the map:
+
+```go
+p := openaicompatible.New("http://vllm:8000/v1", openaicompatible.WithName("vllm"))
+
+opts, err := p.GuidedOptions(openaicompatible.Guided{
+	Choice: []string{"benign", "injection"},
+})
+res, err := ai.GenerateText(ctx, ai.GenerateTextOpts{
+	Model: p.Chat("Qwen/Qwen3-8B"), Prompt: text, ProviderOptions: opts,
+})
+```
+
+Exactly one of `JSON` (a JSON Schema), `Choice` and `Regex` must be set. The
+zero value sends vLLM's current `structured_outputs` object
+(`{"structured_outputs":{"choice":[...]}}`). vLLM v0.12.0 removed the older
+top-level `guided_json`, `guided_choice` and `guided_regex` fields; for a
+server older than that set `Legacy: true`. Anything else vLLM accepts
+(`guided_grammar`, `structured_outputs.grammar`, ...) can be passed in
+`ProviderOptions` by hand.
+
 ## Source of truth
 
 - [`ai/generate_object.go`](../../ai/generate_object.go)

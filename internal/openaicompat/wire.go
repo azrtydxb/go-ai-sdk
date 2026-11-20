@@ -3,6 +3,7 @@ package openaicompat
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/azrtydxb/go-ai-sdk/ai"
@@ -113,6 +114,8 @@ type chatRequest struct {
 	Seed            *int64 `json:"-"`
 	seedParam       string
 	ReasoningEffort string         `json:"reasoning_effort,omitempty"`
+	Logprobs        bool           `json:"logprobs,omitempty"`
+	TopLogprobs     *int           `json:"top_logprobs,omitempty"`
 	Stop            []string       `json:"stop,omitempty"`
 	Stream          bool           `json:"stream,omitempty"`
 	StreamOptions   *streamOptions `json:"stream_options,omitempty"`
@@ -178,6 +181,59 @@ type chatResponse struct {
 type chatResponseChoice struct {
 	Message      chatResponseMessage `json:"message"`
 	FinishReason string              `json:"finish_reason"`
+	Logprobs     *wireLogprobs       `json:"logprobs,omitempty"`
+}
+
+// wireLogprobs is the choice-level "logprobs" object, shared by the
+// non-streaming response and streaming chunks: content holds one entry per
+// generated token (refusal tokens are not surfaced).
+type wireLogprobs struct {
+	Content []wireTokenLogprob `json:"content"`
+}
+
+type wireTokenLogprob struct {
+	Token       string                `json:"token"`
+	Logprob     float64               `json:"logprob"`
+	Bytes       []int                 `json:"bytes"`
+	TopLogprobs []wireTopTokenLogprob `json:"top_logprobs"`
+}
+
+type wireTopTokenLogprob struct {
+	Token   string  `json:"token"`
+	Logprob float64 `json:"logprob"`
+	Bytes   []int   `json:"bytes"`
+}
+
+// wireBytes converts the wire's integer byte array into a byte slice; nil
+// stays nil. Out-of-range values (not valid per the API) become 0.
+func wireBytes(in []int) []byte {
+	if in == nil {
+		return nil
+	}
+	out := make([]byte, len(in))
+	for i, v := range in {
+		if v >= 0 && v <= 255 {
+			out[i] = byte(v)
+		}
+	}
+	return out
+}
+
+// convertLogprobs maps the wire's logprobs content onto provider types;
+// nil when there is nothing to report.
+func convertLogprobs(lp *wireLogprobs) []provider.TokenLogprob {
+	if lp == nil || len(lp.Content) == 0 {
+		return nil
+	}
+	out := make([]provider.TokenLogprob, 0, len(lp.Content))
+	for _, t := range lp.Content {
+		tl := provider.TokenLogprob{Token: t.Token, Logprob: t.Logprob, Bytes: wireBytes(t.Bytes)}
+		for _, a := range t.TopLogprobs {
+			tl.TopLogprobs = append(tl.TopLogprobs, provider.TopLogprob{Token: a.Token, Logprob: a.Logprob, Bytes: wireBytes(a.Bytes)})
+		}
+		out = append(out, tl)
+	}
+	return out
 }
 
 type chatResponseMessage struct {
@@ -219,6 +275,7 @@ type chatStreamChunk struct {
 type chatStreamChoice struct {
 	Delta        chatStreamDelta `json:"delta"`
 	FinishReason *string         `json:"finish_reason"`
+	Logprobs     *wireLogprobs   `json:"logprobs,omitempty"`
 }
 
 type chatStreamDelta struct {
@@ -271,6 +328,12 @@ func buildChatRequest(cfg Config, modelID string, call provider.Call, stream boo
 	// call.TopK is intentionally ignored: OpenAI's chat-completions API (and
 	// every OpenAI-compatible server this package targets) has no top_k
 	// parameter.
+
+	if call.TopLogprobs != nil && !call.Logprobs {
+		return chatRequest{}, errors.New("openaicompat: Call.TopLogprobs requires Call.Logprobs")
+	}
+	req.Logprobs = call.Logprobs
+	req.TopLogprobs = call.TopLogprobs
 
 	if call.Reasoning != nil && call.Reasoning.Effort != "" && !cfg.NoReasoningEffort {
 		req.ReasoningEffort = call.Reasoning.Effort
@@ -550,12 +613,18 @@ func convertResponseFormat(rf provider.ResponseFormat, jsonObjectOnly bool) (any
 	switch rf.Type {
 	case "json":
 		if len(rf.Schema) > 0 && !jsonObjectOnly {
+			// OpenAI requires json_schema.name; default it rather than
+			// send an empty one.
+			schemaName := rf.Name
+			if schemaName == "" {
+				schemaName = "response"
+			}
 			return wireJSONSchemaFormat{
 				Type: "json_schema",
 				JSONSchema: &wireJSONSchema{
-					Name:   rf.Name,
+					Name:   schemaName,
 					Schema: rf.Schema,
-					Strict: true,
+					Strict: rf.StrictValue(),
 				},
 			}, nil
 		}
@@ -622,6 +691,7 @@ func convertResponse(wr chatResponse, raw []byte, providerName string) *provider
 	}
 	choice := wr.Choices[0]
 	resp.FinishReason = mapFinishReason(choice.FinishReason)
+	resp.Logprobs = convertLogprobs(choice.Logprobs)
 
 	if text := reasoningText(choice.Message.ReasoningContent, choice.Message.Reasoning); text != "" {
 		resp.Content = append(resp.Content, provider.ReasoningPart{Text: text})

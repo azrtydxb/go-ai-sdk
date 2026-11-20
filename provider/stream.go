@@ -63,6 +63,15 @@ type SourceEvent struct{ Source SourcePart }
 
 func (SourceEvent) isStreamPart() {}
 
+// LogprobsDelta carries the log probabilities of the tokens in one stream
+// chunk, in generation order. It is emitted alongside the TextDelta (or
+// other delta) of the same chunk, only when Call.Logprobs was set and the
+// provider returned them; concatenating every LogprobsDelta's Tokens yields
+// the same list a non-streaming Response.Logprobs would hold.
+type LogprobsDelta struct{ Tokens []TokenLogprob }
+
+func (LogprobsDelta) isStreamPart() {}
+
 // FinishPart is the last part of a well-formed stream: why generation
 // stopped and what it cost. A stream that ends without one ended
 // abnormally; check StreamResponse.Err.

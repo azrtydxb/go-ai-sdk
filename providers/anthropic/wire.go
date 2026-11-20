@@ -86,7 +86,45 @@ type messagesRequest struct {
 	TopP          *float64      `json:"top_p,omitempty"`
 	TopK          *int          `json:"top_k,omitempty"`
 	Thinking      *wireThinking `json:"thinking,omitempty"`
-	Stream        bool          `json:"stream,omitempty"`
+	// OutputConfig carries output_config.format for structured outputs.
+	OutputConfig *wireOutputConfig `json:"output_config,omitempty"`
+	Stream       bool              `json:"stream,omitempty"`
+}
+
+// wireOutputConfig is the Messages API's output_config object; only its
+// JSON-outputs "format" member is used here.
+type wireOutputConfig struct {
+	Format wireOutputFormat `json:"format"`
+}
+
+type wireOutputFormat struct {
+	Type   string          `json:"type"` // "json_schema"
+	Schema json.RawMessage `json:"schema"`
+}
+
+// convertResponseFormat maps provider.ResponseFormat onto Anthropic's
+// structured outputs (output_config.format). Anthropic only constrains
+// output to a JSON Schema, so a schemaless "json" format and an explicit
+// Strict=false are reported as unsupported instead of dropped. nil, nil
+// means "text" / unset: nothing to send.
+func convertResponseFormat(rf *provider.ResponseFormat) (*wireOutputConfig, error) {
+	if rf == nil {
+		return nil, nil
+	}
+	switch rf.Type {
+	case "text", "":
+		return nil, nil
+	case "json":
+		if len(rf.Schema) == 0 {
+			return nil, &provider.UnsupportedFeatureError{Provider: "anthropic", Feature: "ResponseFormat json_object", Detail: "structured outputs need a JSON Schema"}
+		}
+		if !rf.StrictValue() {
+			return nil, &provider.UnsupportedFeatureError{Provider: "anthropic", Feature: "ResponseFormat.Strict=false", Detail: "structured outputs always constrain decoding"}
+		}
+		return &wireOutputConfig{Format: wireOutputFormat{Type: "json_schema", Schema: rf.Schema}}, nil
+	default:
+		return nil, fmt.Errorf("anthropic: unsupported ResponseFormat.Type %q", rf.Type)
+	}
 }
 
 // wireThinking is the Messages API's extended-thinking request block.
@@ -209,6 +247,15 @@ func buildMessagesRequest(modelID string, call provider.Call, stream bool) (mess
 	}
 	// call.PresencePenalty, call.FrequencyPenalty, and call.Seed are
 	// intentionally ignored: the Messages API has no equivalent parameters.
+
+	if call.Logprobs || call.TopLogprobs != nil {
+		return messagesRequest{}, &provider.UnsupportedFeatureError{Provider: "anthropic", Feature: "Logprobs", Detail: "the Messages API returns no log probabilities"}
+	}
+	oc, err := convertResponseFormat(call.ResponseFormat)
+	if err != nil {
+		return messagesRequest{}, err
+	}
+	req.OutputConfig = oc
 
 	if call.Reasoning != nil {
 		if budget, ok := provider.ResolveBudgetTokens(call.Reasoning); ok {

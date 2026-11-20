@@ -6,6 +6,59 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 once it reaches 1.0.
 
+## Unreleased
+
+### Added
+
+- Classification: `provider.ClassificationModel`, `provider.ClassifyCall`,
+  `provider.ClassifyResponse`, `provider.Classification` (with
+  `Score(label)`) and `provider.LabelScore`, plus `ai.Classify` with
+  `ai.ClassifyOpts`, `ai.ClassifyResult`, `ai.ErrInputsRequired`, the same
+  retry wrapper and start/end callbacks as `ai.Rerank`. Implemented as
+  `(*openaicompatible.Provider).Classify` with two wire shapes
+  (`ClassifyOpenAI`: vLLM `/classify`; `ClassifyTEI`: Hugging Face TEI
+  `/predict`) and the options `WithClassifyShape`, `WithClassifyLabels`,
+  `WithClassifyBaseURL` and `WithClassifyRawScores`.
+- Structured output control: `provider.ResponseFormat.Strict` (OpenAI
+  `json_schema.strict`; `nil` keeps the previous default of `true`) and
+  `ResponseFormat.StrictValue`. `ai.GenerateTextOpts.ResponseFormat` sends a
+  response format directly, without `Output` decoding. The OpenAI-compatible
+  `json_schema.name` now defaults to `"response"` when empty (an empty name is
+  rejected by OpenAI). Anthropic now maps a schema `ResponseFormat` to
+  `output_config.format` and Bedrock to `outputConfig.textFormat`; both stay
+  `NativeJSON: false`, so `GenerateObject` still uses tool mode.
+- `provider.UnsupportedFeatureError`, returned instead of silently dropping a
+  request option the provider has no wire equivalent for: a schemaless
+  `ResponseFormat` or `Strict: false` on Anthropic and Bedrock, `Strict: false`
+  on Cohere and Google/Vertex, and `Logprobs` on Anthropic, Bedrock and Cohere.
+- `provider.Capabilities.NoJSONObject` (set by Anthropic and Bedrock). With it,
+  `ai.OutputJSON` no longer sends those models a schemaless `ResponseFormat`
+  they would reject, so existing `OutputJSON` calls keep working.
+- vLLM guided decoding: `openaicompatible.Guided` and
+  `(*openaicompatible.Provider).GuidedOptions`, building `ProviderOptions` for
+  a JSON Schema, a set of choices or a regex. The default sends vLLM's
+  `structured_outputs` object; `Legacy: true` sends `guided_json`,
+  `guided_choice` and `guided_regex` for vLLM before v0.12.0.
+- Logprobs: `provider.Call.Logprobs` and `TopLogprobs`,
+  `provider.Response.Logprobs`, `provider.TokenLogprob`, `provider.TopLogprob`
+  and the stream part `provider.LogprobsDelta`. Implemented by the
+  OpenAI-compatible providers (`logprobs` / `top_logprobs`, non-streaming and
+  streaming) and Google/Vertex (`responseLogprobs` / `logprobs`). `ai`
+  surfaces them as `GenerateTextOpts.Logprobs` / `TopLogprobs`,
+  `GenerateTextResult.Logprobs`, `Step.Logprobs` and `TextStream.Logprobs()`;
+  `SimulateStreamingMiddleware` and the response-rewriting middlewares carry
+  them through. `TopLogprobs` without `Logprobs` is an error.
+
+### Notes
+
+- Everything is additive. Behavior changes only for requests that could not
+  have worked: an empty OpenAI `json_schema.name` is now `"response"`, and a
+  `ResponseFormat` sent straight to Anthropic or Bedrock used to be dropped
+  silently and is now sent or rejected with `*provider.UnsupportedFeatureError`.
+- DeepSeek, Moonshot and Mistral still send `json_object` only and drop a
+  `ResponseFormat.Schema`, as before; see
+  [Structured output](docs/core/structured-output.md).
+
 ## 0.10.0 (2026-11-18)
 
 ### Added
